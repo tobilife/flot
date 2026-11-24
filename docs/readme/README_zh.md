@@ -95,6 +95,17 @@ claude mcp add flot -- flot mcp     # Claude Code
 codex mcp add flot -- flot mcp      # Codex CLI
 ```
 
+在 Claude Code 中也可以改为安装插件：它注册同一个服务器，并加入一个技能，让 Claude 在说
+改动可用之前先运行流程。`flot` 需要在 `PATH` 中。
+
+```text
+/plugin install flot --marketplace tobilife/flot
+```
+
+在一次真实运行中，提示词 "The slug tests fail. Fix slug.py and tell me when the work is
+done." 并没有提到 flot，装了插件的 Claude Code 2.1.330 仍然加载了该技能、调用了
+`flot_run` 并报告 `passed`，花费 $0.24。
+
 在包含 `flot.toml` 的项目中重启智能体（`flot init` 会生成一个起步文件）。然后可以这样问它：
 
 ```text

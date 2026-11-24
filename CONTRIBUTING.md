@@ -55,12 +55,15 @@ never 0.2.001). `MINOR` moves (0.3.0) only for a large feature, and only when
 the maintainer decides so.
 
 1. Rename `## Unreleased` in [CHANGELOG.md](CHANGELOG.md) to the new version,
-   and set the same `version` in `Cargo.toml`.
+   and set the same `version` in `Cargo.toml` and in the Claude Code plugin's
+   [plugin.json](plugins/claude-code/.claude-plugin/plugin.json); installed
+   plugins update only when that version changes.
 2. Update all three READMEs together: [English](README.md),
    [한국어](docs/readme/README_ko.md) and [中文](docs/readme/README_zh.md).
    Each states the release under its header (`**X.Y.Z**` and one line on what
    changed), and every change to one README is made in all three.
-   `tests/readme.rs` fails while any of them names another version.
+   `tests/readme.rs` fails while any of them, or the plugin, names another
+   version.
 3. Commit, then push a tag: `git tag vX.Y.Z && git push origin vX.Y.Z`.
 
 The [release workflow](.github/workflows/release.yml) checks that the tag,

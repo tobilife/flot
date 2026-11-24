@@ -103,6 +103,18 @@ claude mcp add flot -- flot mcp     # Claude Code
 codex mcp add flot -- flot mcp      # Codex CLI
 ```
 
+Claude Code에서는 대신 플러그인을 설치할 수 있습니다. 같은 서버를 등록하고, Claude가
+변경이 동작한다고 말하기 전에 플로우를 실행하게 하는 스킬을 더합니다. `flot`은 `PATH`에
+있어야 합니다.
+
+```text
+/plugin install flot --marketplace tobilife/flot
+```
+
+실제 실행에서 flot을 언급하지 않은 프롬프트 "The slug tests fail. Fix slug.py and tell me
+when the work is done."만으로, 플러그인을 설치한 Claude Code 2.1.330이 스킬을 불러와
+`flot_run`을 호출하고 `passed`를 보고했으며, 비용은 $0.24였습니다.
+
 `flot.toml`이 있는 프로젝트에서 에이전트를 다시 시작하세요(`flot init`이 시작용
 파일을 만들어 줍니다). 그리고 이렇게 요청해 보세요.
 

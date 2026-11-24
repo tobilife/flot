@@ -1,6 +1,6 @@
 //! The README ships in English, Korean and Chinese, and every release updates
-//! all three. A version bump that leaves one behind fails here, before a tag
-//! is pushed.
+//! all three, and the Claude Code plugin with them. A version bump that leaves
+//! one behind fails here, before a tag is pushed.
 
 const READMES: [&str; 3] = [
     "README.md",
@@ -49,4 +49,22 @@ fn every_readme_links_the_other_two() {
             );
         }
     }
+}
+
+#[test]
+fn the_claude_code_plugin_names_the_release_being_built() {
+    let manifest: serde_json::Value =
+        serde_json::from_str(&read("plugins/claude-code/.claude-plugin/plugin.json"))
+            .expect("plugin.json is JSON");
+    assert_eq!(
+        manifest["version"],
+        env!("CARGO_PKG_VERSION"),
+        "plugins/claude-code/.claude-plugin/plugin.json names another version"
+    );
+    let marketplace: serde_json::Value =
+        serde_json::from_str(&read(".claude-plugin/marketplace.json"))
+            .expect("marketplace.json is JSON");
+    let entry = &marketplace["plugins"][0];
+    assert_eq!(entry["name"], manifest["name"]);
+    assert_eq!(entry["source"], "./plugins/claude-code");
 }

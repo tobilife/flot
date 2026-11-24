@@ -1,0 +1,13 @@
+{
+  "name": "flot",
+  "version": "0.2.2",
+  "description": "Run the project's flot flow from Claude Code and report only what its receipts prove.",
+  "author": {
+    "name": "tobilife",
+    "url": "https://github.com/tobilife"
+  },
+  "homepage": "https://github.com/tobilife/flot",
+  "repository": "https://github.com/tobilife/flot",
+  "license": "MIT",
+  "keywords": ["verification", "receipts", "evidence", "mcp"]
+}

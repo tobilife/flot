@@ -111,6 +111,18 @@ claude mcp add flot -- flot mcp     # Claude Code
 codex mcp add flot -- flot mcp      # Codex CLI
 ```
 
+In Claude Code you can install the plugin instead: it registers the same
+server and adds a skill that runs the flow before Claude says a change works.
+flot must be on your `PATH`.
+
+```text
+/plugin install flot --marketplace tobilife/flot
+```
+
+In a real run, the prompt "The slug tests fail. Fix slug.py and tell me when
+the work is done.", which does not mention flot, led Claude Code 2.1.330 with
+the plugin to load the skill, call `flot_run` and report `passed`, for $0.24.
+
 Restart the agent in a project that has a `flot.toml` (`flot init` writes a
 starter one). Then try asking it:
 

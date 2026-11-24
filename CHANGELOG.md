@@ -30,6 +30,9 @@
   `refs/flot/runs`; flot runs `git` and has no network code of its own. A
   pulled run is imported like `flot import`, so only a trusted signer's
   receipts stand in for local work.
+- A Claude Code plugin (`plugins/claude-code`, with this repository as its
+  marketplace): it registers `flot mcp` and adds a skill that runs the flow
+  before Claude says a change works.
 - A metrics report without `cost_usd` is an unknown cost, not $0: `flot run`
   counts such steps as "without cost", and the cost ceiling names them.
 - `examples/slugify/compare.toml`: Claude Code and Codex implement the spec as

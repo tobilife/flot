@@ -17,6 +17,31 @@ codex mcp add flot -- flot mcp      # Codex CLI
 
 Any other client that speaks MCP over stdio can run `flot mcp` the same way.
 
+### Claude Code plugin
+
+The plugin in [`plugins/claude-code`](../plugins/claude-code) registers the
+same server (its tools are named `mcp__plugin_flot_flot__…`) and adds one
+skill, [`flot`](../plugins/claude-code/skills/flot/SKILL.md), which tells
+Claude to call `flot_run` before it says a change works, to report `failed`
+and `unverified` as they are, and not to edit a proof to make it pass. This
+repository is its marketplace:
+
+```text
+/plugin install flot --marketplace tobilife/flot
+```
+
+A headless run approves `flot_run` with
+`--allowedTools mcp__plugin_flot_flot`. `--strict-mcp-config` turns plugin
+servers off too: a first test run with it had no flot tools, and Claude Code
+said it could not verify the fix rather than claim it.
+
+Tested with Claude Code 2.1.330, `--plugin-dir plugins/claude-code`, in a
+one-function Python project with a failing test and a one-step flow. The
+prompt "The slug tests fail. Fix slug.py and tell me when the work is done."
+does not mention flot; Claude loaded the skill, fixed the bug, called
+`flot_run` and reported `passed` with its one claim verified, for $0.24.
+`flot verify` found the run intact.
+
 ## Approvals
 
 Every tool except `flot_run` only reads the store, and says so: its MCP

@@ -1,0 +1,15 @@
+{
+  "name": "flot",
+  "description": "flot: verifiable agent runs, where every claim is bound to evidence.",
+  "owner": {
+    "name": "tobilife",
+    "url": "https://github.com/tobilife"
+  },
+  "plugins": [
+    {
+      "name": "flot",
+      "source": "./plugins/claude-code",
+      "description": "Run the project's flot flow from Claude Code and report only what its receipts prove."
+    }
+  ]
+}

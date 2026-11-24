@@ -94,21 +94,26 @@ This repository gates itself with flot ([`flot.toml`](flot.toml)):
 
 ```
 $ flot run --force
-ran      format               ok        172ms  claims 1v/0u/0r  receipt d072287e3975
-ran      build                ok        775ms  claims 1v/0u/0r  receipt 009c7a066fc5
-ran      lint                 ok        746ms  claims 1v/0u/0r  receipt 4c48096a2112
-ran      test                 ok        5464ms  claims 2v/0u/0r  receipt 41311fb492f4
+ran      format               ok        202ms  claims 1v/0u/0r  receipt 615ce7404393
+ran      build                ok        932ms  claims 1v/0u/0r  receipt e3c7508755b7
+ran      lint                 ok        862ms  claims 1v/0u/0r  receipt db240db9fd11
+ran      test                 ok        5595ms  claims 2v/0u/0r  receipt afb9fde398e0
 
-PASSED 1795501497928-ee2a0bae7a0c  root ee2a0bae7a0c  15352ms
+PASSED 1795517538528-696bfb25ef73  root 696bfb25ef73  15977ms
 
 $ flot run     # nothing changed: receipts are reused and the root is identical
-cached   format               ok        172ms  claims 1v/0u/0r  receipt d072287e3975
-cached   build                ok        775ms  claims 1v/0u/0r  receipt 009c7a066fc5
-cached   lint                 ok        746ms  claims 1v/0u/0r  receipt 4c48096a2112
-cached   test                 ok        5464ms  claims 2v/0u/0r  receipt 41311fb492f4
+cached   format               ok        202ms  claims 1v/0u/0r  receipt 615ce7404393
+cached   build                ok        932ms  claims 1v/0u/0r  receipt e3c7508755b7
+cached   lint                 ok        862ms  claims 1v/0u/0r  receipt db240db9fd11
+cached   test                 ok        5595ms  claims 2v/0u/0r  receipt afb9fde398e0
 
-PASSED 1795501513323-ee2a0bae7a0c  root ee2a0bae7a0c  397ms
+PASSED 1795517556256-696bfb25ef73  root 696bfb25ef73  363ms
 ```
+
+Recorded with flot 0.2.1. The second run took 0.36 s instead of 16 s because
+all four receipts were reused; a reused step reports the duration it was
+recorded with. The tail of each step's output, printed under its line, and the
+run's one limitation (inline output trimmed) are left out here.
 
 `1v/0u/0r` counts verified, unverified and refuted claims. See the
 [CLI reference](docs/cli.md) for every command, run selectors, `--json` and
@@ -183,9 +188,9 @@ list and the `.flot` store.
 
 | Flow | What it shows |
 |---|---|
-| [`examples/slugify`](examples/slugify/flot.toml) | One agent implements a spec, a check no agent wrote proves it, a second agent reviews. Run end to end against Claude Code; [the full story](docs/agents.md#a-real-run-end-to-end) includes the bug it caught in flot itself. |
+| [`examples/slugify`](examples/slugify/flot.toml) | One agent implements a spec, a check no agent wrote proves it, a second agent reviews. Run end to end against Claude Code; [the full story](docs/agents.md#a-real-run-end-to-end) includes the bug it caught in flot itself. With isolated agent steps a fresh run costs $0.48. |
 | [`examples/agent-review.toml`](examples/agent-review.toml) | A spec, an implementation and a review as three agent steps; the project's tests prove the implementation. |
-| [`examples/parallel-review.toml`](examples/parallel-review.toml) | Three independent agent reviewers (security, performance, contracts) of the current diff, run concurrently, then a test gate. [One real run](docs/agents.md#three-reviewers-in-parallel) found an undocumented default. |
+| [`examples/parallel-review.toml`](examples/parallel-review.toml) | Three independent agent reviewers (security, performance, contracts) of the current diff, run concurrently, then a test gate. [One real run](docs/agents.md#three-reviewers-in-parallel) found an undocumented default; isolating the agent steps cut a run from $3.25 to $0.42. |
 | [`flot.toml`](flot.toml) | This repository's own gate: format, build, lint and test, each with a proof. |
 
 Copy an example to your project root before running it: paths and the `.flot`

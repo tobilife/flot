@@ -88,21 +88,25 @@ flot show        # 最近一次运行的步骤、声明和局限
 
 ```
 $ flot run --force
-ran      format               ok        172ms  claims 1v/0u/0r  receipt d072287e3975
-ran      build                ok        775ms  claims 1v/0u/0r  receipt 009c7a066fc5
-ran      lint                 ok        746ms  claims 1v/0u/0r  receipt 4c48096a2112
-ran      test                 ok        5464ms  claims 2v/0u/0r  receipt 41311fb492f4
+ran      format               ok        202ms  claims 1v/0u/0r  receipt 615ce7404393
+ran      build                ok        932ms  claims 1v/0u/0r  receipt e3c7508755b7
+ran      lint                 ok        862ms  claims 1v/0u/0r  receipt db240db9fd11
+ran      test                 ok        5595ms  claims 2v/0u/0r  receipt afb9fde398e0
 
-PASSED 1795501497928-ee2a0bae7a0c  root ee2a0bae7a0c  15352ms
+PASSED 1795517538528-696bfb25ef73  root 696bfb25ef73  15977ms
 
 $ flot run     # 没有任何变化：收据被复用，根摘要完全相同
-cached   format               ok        172ms  claims 1v/0u/0r  receipt d072287e3975
-cached   build                ok        775ms  claims 1v/0u/0r  receipt 009c7a066fc5
-cached   lint                 ok        746ms  claims 1v/0u/0r  receipt 4c48096a2112
-cached   test                 ok        5464ms  claims 2v/0u/0r  receipt 41311fb492f4
+cached   format               ok        202ms  claims 1v/0u/0r  receipt 615ce7404393
+cached   build                ok        932ms  claims 1v/0u/0r  receipt e3c7508755b7
+cached   lint                 ok        862ms  claims 1v/0u/0r  receipt db240db9fd11
+cached   test                 ok        5595ms  claims 2v/0u/0r  receipt afb9fde398e0
 
-PASSED 1795501513323-ee2a0bae7a0c  root ee2a0bae7a0c  397ms
+PASSED 1795517556256-696bfb25ef73  root 696bfb25ef73  363ms
 ```
+
+以上输出由 flot 0.2.1 记录。第二次运行复用了全部四份收据，用时 0.36 秒而不是 16 秒；
+被复用的步骤显示的是记录时的耗时。每个步骤那一行下面打印的输出末尾部分，
+以及本次运行的一条局限（内联输出被截断），这里都省略了。
 
 `1v/0u/0r` 分别统计已验证、未验证和被驳回的声明。所有命令、运行选择方式、`--json` 和
 退出码见 [CLI 参考](../cli.md)。
@@ -166,9 +170,9 @@ flot 根据命令、每个输入的内容、证明命令以及上游步骤的收
 
 | 流程 | 展示内容 |
 |---|---|
-| [`examples/slugify`](../../examples/slugify/flot.toml) | 一个智能体按规格实现，一个不是智能体写的检查来证明，第二个智能体审阅。已用 Claude Code 端到端运行；[完整经过](../agents.md#a-real-run-end-to-end)包括它在 flot 自身中发现的一个缺陷。 |
+| [`examples/slugify`](../../examples/slugify/flot.toml) | 一个智能体按规格实现，一个不是智能体写的检查来证明，第二个智能体审阅。已用 Claude Code 端到端运行；[完整经过](../agents.md#a-real-run-end-to-end)包括它在 flot 自身中发现的一个缺陷。智能体步骤隔离后，一次全新运行花费 $0.48。 |
 | [`examples/agent-review.toml`](../../examples/agent-review.toml) | 规格、实现和审阅三个智能体步骤；由项目自身的测试证明实现。 |
-| [`examples/parallel-review.toml`](../../examples/parallel-review.toml) | 三个独立的智能体审阅者（安全、性能、约定）并发审阅当前 diff，然后经过测试把关。[一次真实运行](../agents.md#three-reviewers-in-parallel)发现了一个未写入文档的默认值。 |
+| [`examples/parallel-review.toml`](../../examples/parallel-review.toml) | 三个独立的智能体审阅者（安全、性能、约定）并发审阅当前 diff，然后经过测试把关。[一次真实运行](../agents.md#three-reviewers-in-parallel)发现了一个未写入文档的默认值；隔离智能体步骤后，一次运行的花费从 $3.25 降到 $0.42。 |
 | [`flot.toml`](../../flot.toml) | 本仓库自身的把关：格式、构建、lint 和测试，每一项都有证明。 |
 
 运行示例前请把它复制到项目根目录：路径和 `.flot` 存储都相对于流程文件。

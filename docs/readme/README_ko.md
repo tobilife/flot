@@ -92,21 +92,25 @@ flot show        # 최근 실행의 단계, 주장, 한계(limitation)
 
 ```
 $ flot run --force
-ran      format               ok        172ms  claims 1v/0u/0r  receipt d072287e3975
-ran      build                ok        775ms  claims 1v/0u/0r  receipt 009c7a066fc5
-ran      lint                 ok        746ms  claims 1v/0u/0r  receipt 4c48096a2112
-ran      test                 ok        5464ms  claims 2v/0u/0r  receipt 41311fb492f4
+ran      format               ok        202ms  claims 1v/0u/0r  receipt 615ce7404393
+ran      build                ok        932ms  claims 1v/0u/0r  receipt e3c7508755b7
+ran      lint                 ok        862ms  claims 1v/0u/0r  receipt db240db9fd11
+ran      test                 ok        5595ms  claims 2v/0u/0r  receipt afb9fde398e0
 
-PASSED 1795501497928-ee2a0bae7a0c  root ee2a0bae7a0c  15352ms
+PASSED 1795517538528-696bfb25ef73  root 696bfb25ef73  15977ms
 
 $ flot run     # 바뀐 것이 없음: 영수증이 재사용되고 루트 다이제스트도 같음
-cached   format               ok        172ms  claims 1v/0u/0r  receipt d072287e3975
-cached   build                ok        775ms  claims 1v/0u/0r  receipt 009c7a066fc5
-cached   lint                 ok        746ms  claims 1v/0u/0r  receipt 4c48096a2112
-cached   test                 ok        5464ms  claims 2v/0u/0r  receipt 41311fb492f4
+cached   format               ok        202ms  claims 1v/0u/0r  receipt 615ce7404393
+cached   build                ok        932ms  claims 1v/0u/0r  receipt e3c7508755b7
+cached   lint                 ok        862ms  claims 1v/0u/0r  receipt db240db9fd11
+cached   test                 ok        5595ms  claims 2v/0u/0r  receipt afb9fde398e0
 
-PASSED 1795501513323-ee2a0bae7a0c  root ee2a0bae7a0c  397ms
+PASSED 1795517556256-696bfb25ef73  root 696bfb25ef73  363ms
 ```
+
+flot 0.2.1로 기록한 출력입니다. 두 번째 실행은 영수증 네 개를 모두 재사용해 16초가 아니라
+0.36초 걸렸고, 재사용된 단계는 기록될 때의 소요 시간을 보여 줍니다. 단계마다 그 줄 아래에
+찍히는 출력 끝부분과 실행의 한계 항목 하나(인라인 출력 잘림)는 여기서 생략했습니다.
 
 `1v/0u/0r`은 검증됨(verified), 미검증(unverified), 반박됨(refuted) 주장의 개수입니다.
 모든 명령, 실행 지정 방법, `--json`, 종료 코드는 [CLI 레퍼런스](../cli.md)에 있습니다.
@@ -174,9 +178,9 @@ key)**를 만듭니다. 키가 같으면 이전 영수증을 재사용하고 그
 
 | 플로우 | 보여주는 것 |
 |---|---|
-| [`examples/slugify`](../../examples/slugify/flot.toml) | 에이전트 하나가 명세를 구현하고, 어떤 에이전트도 작성하지 않은 검사가 그것을 증명하며, 두 번째 에이전트가 리뷰합니다. Claude Code로 처음부터 끝까지 실행했고, [전체 이야기](../agents.md#a-real-run-end-to-end)에는 이 과정에서 flot 자체에서 찾은 버그도 있습니다. |
+| [`examples/slugify`](../../examples/slugify/flot.toml) | 에이전트 하나가 명세를 구현하고, 어떤 에이전트도 작성하지 않은 검사가 그것을 증명하며, 두 번째 에이전트가 리뷰합니다. Claude Code로 처음부터 끝까지 실행했고, [전체 이야기](../agents.md#a-real-run-end-to-end)에는 이 과정에서 flot 자체에서 찾은 버그도 있습니다. 에이전트 단계를 격리한 뒤 새로 실행하면 $0.48이 듭니다. |
 | [`examples/agent-review.toml`](../../examples/agent-review.toml) | 명세, 구현, 리뷰를 세 개의 에이전트 단계로 나누고, 프로젝트의 테스트가 구현을 증명합니다. |
-| [`examples/parallel-review.toml`](../../examples/parallel-review.toml) | 현재 diff를 독립된 에이전트 리뷰어 세 명(보안, 성능, 계약)이 동시에 검토한 뒤 테스트 게이트를 통과합니다. [실제 실행 한 번](../agents.md#three-reviewers-in-parallel)에서 문서화되지 않은 기본값을 찾아냈습니다. |
+| [`examples/parallel-review.toml`](../../examples/parallel-review.toml) | 현재 diff를 독립된 에이전트 리뷰어 세 명(보안, 성능, 계약)이 동시에 검토한 뒤 테스트 게이트를 통과합니다. [실제 실행 한 번](../agents.md#three-reviewers-in-parallel)에서 문서화되지 않은 기본값을 찾아냈습니다. 에이전트 단계를 격리하자 한 번 실행 비용이 $3.25에서 $0.42로 줄었습니다. |
 | [`flot.toml`](../../flot.toml) | 이 저장소 자체의 게이트: 포맷, 빌드, 린트, 테스트를 각각 증명과 함께 실행합니다. |
 
 예제는 실행하기 전에 프로젝트 루트로 복사하세요. 경로와 `.flot` 저장소는 플로우

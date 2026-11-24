@@ -1,0 +1,512 @@
+//! The contract. Both adapters expose exactly these operations, so a person at
+//! a terminal and an agent over MCP reach the same receipts, verdicts and
+//! digests for the same request. Adapters only parse and render.
+
+pub mod audit;
+pub mod bundle;
+pub mod keys;
+
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
+
+use anyhow::{bail, Context, Result};
+use serde::Serialize;
+
+use crate::core::compare::{self, RunDiff};
+use crate::core::flow::Flow;
+use crate::core::receipt::{ClaimCounts, ClaimRecord, Receipt, RunManifest, Verdict};
+use crate::engine::exec;
+use crate::engine::runner::Runner;
+// The request and report types are part of this contract; adapters take them
+// from here and never reach into the engine.
+use crate::core::attest;
+pub use crate::core::fault::FaultKind;
+pub use crate::engine::exec::{install_interrupt_handlers, interrupted, StopSignal};
+
+/// What kind of failure `error` is. An error that names its kind is taken at
+/// its word; otherwise an IO failure underneath is the environment's (a
+/// missing file is a request for something that is not there, and unreadable
+/// bytes are corrupt evidence), and anything else is an invalid request.
+pub fn fault_kind(error: &anyhow::Error) -> FaultKind {
+    for cause in error.chain() {
+        if let Some(fault) = cause.downcast_ref::<crate::core::fault::Fault>() {
+            return fault.kind;
+        }
+    }
+    for cause in error.chain() {
+        if let Some(io) = cause.downcast_ref::<std::io::Error>() {
+            return match io.kind() {
+                std::io::ErrorKind::NotFound => FaultKind::Invalid,
+                std::io::ErrorKind::InvalidData => FaultKind::Integrity,
+                _ => FaultKind::Environment,
+            };
+        }
+    }
+    FaultKind::Invalid
+}
+pub use crate::engine::runner::{PlanEntry, RunOptions, RunReport, StepReport};
+use crate::service::audit::Audit;
+use crate::service::bundle::{ExportReport, ImportPolicy, ImportReport};
+use crate::store::{GcReport, Store};
+
+pub const DEFAULT_FLOW_FILE: &str = "flot.toml";
+
+pub const STARTER_FLOW: &str = r#"# flot flow. Every step records a receipt; every claim needs a proof command.
+[flow]
+name = "starter"
+description = "Replace these steps with your own work."
+budget = { timeout_secs = 900, max_inline_bytes = 4096 }
+
+[[step]]
+id = "inspect"
+run = "ls -a"
+# Declared inputs make a cache hit trustworthy: change them and the step re-runs.
+inputs = ["flot.toml"]
+claims = ["the flow file is present"]
+verify = "test -f flot.toml"
+
+[[step]]
+id = "report"
+run = "echo 'replace me with real work'"
+needs = ["inspect"]
+# No claims: this step's success proves nothing, and flot will say so.
+"#;
+
+#[derive(Debug, Clone, Serialize)]
+pub struct Plan {
+    pub flow: String,
+    pub flow_digest: String,
+    pub steps: Vec<PlanEntry>,
+}
+
+/// A recorded run with the claims each step made, read from its receipts.
+#[derive(Debug, Clone, Serialize)]
+pub struct RunDetail {
+    #[serde(flatten)]
+    pub manifest: RunManifest,
+    /// The run arrived in a bundle rather than ran here.
+    pub imported: bool,
+    /// Claims by step id. A step whose receipt is unreadable or does not
+    /// authenticate is absent here; `verify` reports why.
+    pub step_claims: BTreeMap<String, Vec<ClaimRecord>>,
+}
+
+/// Recorded runs, newest first, and the ones that could not be read.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct RunList {
+    pub runs: Vec<RunSummary>,
+    pub unreadable: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct RunSummary {
+    pub run_id: String,
+    pub verdict: Verdict,
+    pub root_digest: String,
+    pub claims: ClaimCounts,
+    pub steps: usize,
+    /// The run arrived in a bundle rather than ran here.
+    pub imported: bool,
+}
+
+/// A stored object under a delivery budget. The complete object stays
+/// retrievable; `recovery` says how when the view is cut.
+#[derive(Debug, Clone, Serialize)]
+pub struct ObjectView {
+    pub digest: String,
+    pub bytes: usize,
+    pub truncated: bool,
+    pub text: String,
+    pub recovery: Option<String>,
+}
+
+/// A signing identity, without its secret.
+#[derive(Debug, Clone, Serialize)]
+pub struct KeyInfo {
+    pub path: PathBuf,
+    pub public_key: String,
+    /// False when the key already existed and was only read.
+    pub created: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct TrustEntry {
+    pub name: String,
+    pub key: String,
+}
+
+/// One flow file and the `.flot` store beside it.
+#[derive(Debug, Clone)]
+pub struct Workspace {
+    root: PathBuf,
+    flow_path: PathBuf,
+}
+
+impl Workspace {
+    pub fn at(root: &Path, flow_path: &Path) -> Self {
+        Workspace {
+            root: root.to_path_buf(),
+            flow_path: flow_path.to_path_buf(),
+        }
+    }
+
+    /// The flow a command means. With no file named, the nearest `flot.toml`
+    /// at or above `cwd`, so flot works from any subdirectory of a project;
+    /// when there is none, `cwd` itself. A named file is exactly that file,
+    /// relative to `cwd`, and it must exist. Either way the store sits beside
+    /// the flow file, so one flow always has one store.
+    pub fn locate(cwd: &Path, file: Option<&Path>) -> Result<Self> {
+        match file {
+            Some(file) => {
+                let path = cwd.join(file);
+                if !path.is_file() {
+                    bail!("flow file {} does not exist", path.display());
+                }
+                Ok(Self::beside(&path))
+            }
+            None => {
+                let root = find_flow_root(cwd, Path::new(DEFAULT_FLOW_FILE));
+                Ok(Workspace::at(&root, &root.join(DEFAULT_FLOW_FILE)))
+            }
+        }
+    }
+
+    /// Where `flot init` writes: exactly the named file, or `flot.toml` in
+    /// `cwd`. Never a flow file further up, which belongs to another project.
+    pub fn for_init(cwd: &Path, file: Option<&Path>) -> Self {
+        Self::beside(&cwd.join(file.unwrap_or(Path::new(DEFAULT_FLOW_FILE))))
+    }
+
+    fn beside(flow_path: &Path) -> Self {
+        let root = flow_path
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| PathBuf::from("/"));
+        Workspace::at(&root, flow_path)
+    }
+
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
+
+    pub fn flow_path(&self) -> &Path {
+        &self.flow_path
+    }
+
+    pub fn flow(&self) -> Result<Flow> {
+        let text = std::fs::read_to_string(&self.flow_path)
+            .with_context(|| format!("cannot read flow file {}", self.flow_path.display()))?;
+        Flow::parse(&text)
+    }
+
+    fn store(&self) -> Result<Store> {
+        Store::open(&self.root, keys::host_secret()?)
+    }
+
+    /// Write the starter flow. Refuses to replace an existing file unless
+    /// `force` is set.
+    pub fn init(&self, force: bool) -> Result<PathBuf> {
+        if self.flow_path.exists() && !force {
+            bail!(
+                "{} already exists; pass --force to overwrite",
+                self.flow_path.display()
+            );
+        }
+        std::fs::write(&self.flow_path, STARTER_FLOW)
+            .with_context(|| format!("cannot write {}", self.flow_path.display()))?;
+        Ok(self.flow_path.clone())
+    }
+
+    pub fn plan(&self, options: &RunOptions) -> Result<Plan> {
+        let flow = self.flow()?;
+        let store = self.store()?;
+        let steps = Runner::new(&flow, &self.root, &store).plan(options)?;
+        Ok(Plan {
+            flow_digest: flow.digest(),
+            flow: flow.meta.name,
+            steps,
+        })
+    }
+
+    pub fn run(&self, options: &RunOptions) -> Result<RunReport> {
+        let flow = self.flow()?;
+        let store = self.store()?;
+        Runner::new(&flow, &self.root, &store).run(options)
+    }
+
+    /// A recorded run: `latest`, an exact id, or an unambiguous substring.
+    pub fn show(&self, run: &str) -> Result<RunDetail> {
+        let store = self.store()?;
+        let manifest = store.resolve_run(run)?;
+        let step_claims = manifest
+            .steps
+            .iter()
+            .filter_map(|step| {
+                store
+                    .load_receipt(&step.receipt_id)
+                    .ok()
+                    .filter(Receipt::is_authentic)
+                    .map(|receipt| (step.step_id.clone(), receipt.identity.claims))
+            })
+            .collect();
+        Ok(RunDetail {
+            imported: store.is_imported(&manifest.run_id),
+            manifest,
+            step_claims,
+        })
+    }
+
+    pub fn verify(&self, run: &str) -> Result<Audit> {
+        let store = self.store()?;
+        let manifest = store.resolve_run(run)?;
+        audit::audit(&store, &manifest)
+    }
+
+    pub fn diff(&self, left: &str, right: &str) -> Result<RunDiff> {
+        let store = self.store()?;
+        Ok(compare::diff(
+            &store.resolve_run(left)?,
+            &store.resolve_run(right)?,
+        ))
+    }
+
+    /// A receipt by full id or unambiguous hex prefix. One whose body no
+    /// longer hashes to its id is refused: nothing it says can be believed.
+    pub fn receipt(&self, spec: &str) -> Result<Receipt> {
+        let receipt = self.store()?.find_receipt(spec)?;
+        if !receipt.is_authentic() {
+            return Err(crate::core::fault::integrity(format!(
+                "receipt {} does not match its body; it was altered after it was recorded",
+                receipt.receipt_id
+            )));
+        }
+        Ok(receipt)
+    }
+
+    /// The complete bytes of a stored object, authenticated against its digest.
+    pub fn object(&self, digest: &str) -> Result<Vec<u8>> {
+        self.store()?.read_bytes(digest)
+    }
+
+    pub fn read_object(&self, digest: &str, max_bytes: usize) -> Result<ObjectView> {
+        let bytes = self.object(digest)?;
+        let (text, truncated) = exec::inline_preview(&bytes, max_bytes);
+        Ok(ObjectView {
+            digest: digest.to_string(),
+            bytes: bytes.len(),
+            truncated,
+            text,
+            recovery: truncated
+                .then(|| format!("raise max_bytes above {} to read more", bytes.len())),
+        })
+    }
+
+    /// Recorded runs, newest first.
+    pub fn runs(&self, limit: usize) -> Result<RunList> {
+        let store = self.store()?;
+        let mut list = RunList::default();
+        for run_id in store.list_runs()?.into_iter().take(limit) {
+            // One unreadable run does not hide the others; it is named.
+            match store.resolve_run(&run_id) {
+                Ok(manifest) => list.runs.push(RunSummary {
+                    imported: store.is_imported(&run_id),
+                    run_id: manifest.run_id,
+                    verdict: manifest.verdict,
+                    root_digest: manifest.root_digest,
+                    claims: manifest.claims,
+                    steps: manifest.steps.len(),
+                }),
+                Err(error) => list.unreadable.push(format!("{run_id}: {error:#}")),
+            }
+        }
+        Ok(list)
+    }
+
+    pub fn gc(&self, dry_run: bool) -> Result<GcReport> {
+        self.store()?.gc(dry_run)
+    }
+
+    /// Write one run as a portable bundle. Defaults to
+    /// `<root>/<run-id>.flotbundle.json`. `sign` adds an attestation with the
+    /// host signing key.
+    pub fn bundle(&self, run: &str, out: Option<&Path>, sign: bool) -> Result<ExportReport> {
+        let store = self.store()?;
+        let manifest = store.resolve_run(run)?;
+        let path = out.map(Path::to_path_buf).unwrap_or_else(|| {
+            self.root
+                .join(format!("{}.flotbundle.json", manifest.run_id))
+        });
+        // A signature says "this host ran this". It cannot say that of a run
+        // that arrived in a bundle; re-export it unsigned, with the original
+        // attestations it came with.
+        if sign && store.is_imported(&manifest.run_id) {
+            bail!(
+                "run {} was imported, not run here; it can be bundled again but not signed by this host",
+                manifest.run_id
+            );
+        }
+        let attestation = if sign {
+            Some(keys::load(&keys::default_path()?)?.sign(&manifest))
+        } else {
+            None
+        };
+        let bundle = bundle::export(&store, &manifest, attestation)?;
+        bundle::write(&bundle, &path)
+    }
+
+    pub fn import(&self, path: &Path, policy: ImportPolicy) -> Result<ImportReport> {
+        let store = self.store()?;
+        bundle::import(&store, &bundle::read(path)?, policy)
+    }
+
+    /// Create the host signing key, or report the existing one.
+    pub fn key_init() -> Result<KeyInfo> {
+        let path = keys::default_path()?;
+        let (key, created) = if path.exists() {
+            (keys::load(&path)?, false)
+        } else {
+            (keys::generate(&path)?, true)
+        };
+        Ok(KeyInfo {
+            public_key: key.public_key(),
+            path,
+            created,
+        })
+    }
+
+    pub fn key_show() -> Result<KeyInfo> {
+        let key = keys::load(&keys::default_path()?)?;
+        Ok(KeyInfo {
+            public_key: key.public_key(),
+            path: key.path().to_path_buf(),
+            created: false,
+        })
+    }
+
+    /// Believe a signer in this store. Names are unique, so re-adding a name
+    /// replaces the key it stood for.
+    pub fn trust_add(&self, name: &str, key: &str) -> Result<TrustEntry> {
+        let name = name.trim();
+        if name.is_empty() {
+            bail!("a trusted signer needs a name");
+        }
+        let key = attest::canonical_key(key).context("cannot trust that key")?;
+        let store = self.store()?;
+        let mut trusted = store.trusted_keys()?;
+        trusted.retain(|_, existing| existing != name);
+        trusted.insert(key.clone(), name.to_string());
+        store.save_trusted_keys(&trusted)?;
+        Ok(TrustEntry {
+            name: name.to_string(),
+            key,
+        })
+    }
+
+    /// Stop believing a signer, by name or key.
+    pub fn trust_remove(&self, name_or_key: &str) -> Result<TrustEntry> {
+        let store = self.store()?;
+        let mut trusted = store.trusted_keys()?;
+        let wanted = attest::canonical_key(name_or_key).ok();
+        let found = trusted
+            .iter()
+            .find(|(key, name)| *name == name_or_key || Some(*key) == wanted.as_ref())
+            .map(|(key, name)| TrustEntry {
+                name: name.clone(),
+                key: key.clone(),
+            })
+            .with_context(|| format!("no trusted signer matches `{name_or_key}`"))?;
+        trusted.remove(&found.key);
+        store.save_trusted_keys(&trusted)?;
+        Ok(found)
+    }
+
+    pub fn trust_list(&self) -> Result<Vec<TrustEntry>> {
+        let mut entries: Vec<TrustEntry> = self
+            .store()?
+            .trusted_keys()?
+            .into_iter()
+            .map(|(key, name)| TrustEntry { name, key })
+            .collect();
+        entries.sort_by(|a, b| a.name.cmp(&b.name));
+        Ok(entries)
+    }
+}
+
+/// Walk up from `start` looking for a flow file; fall back to `start`.
+fn find_flow_root(start: &Path, flow_file: &Path) -> PathBuf {
+    let mut current = Some(start);
+    while let Some(dir) = current {
+        if dir.join(flow_file).is_file() {
+            return dir.to_path_buf();
+        }
+        current = dir.parent();
+    }
+    start.to_path_buf()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    #[test]
+    fn find_flow_root_walks_upward() {
+        let dir = tempfile::tempdir().unwrap();
+        let nested = dir.path().join("a/b/c");
+        fs::create_dir_all(&nested).unwrap();
+        fs::write(dir.path().join("flot.toml"), "").unwrap();
+        assert_eq!(
+            find_flow_root(&nested, Path::new("flot.toml")),
+            dir.path().to_path_buf()
+        );
+    }
+
+    #[test]
+    fn find_flow_root_falls_back_to_the_start_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        assert_eq!(
+            find_flow_root(dir.path(), Path::new("flot.toml")),
+            dir.path().to_path_buf()
+        );
+    }
+
+    #[test]
+    fn a_named_flow_file_has_its_store_beside_it_however_it_is_named() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("sub")).unwrap();
+        let flow = dir.path().join("sub/custom.toml");
+        fs::write(&flow, "").unwrap();
+        for named in [flow.clone(), PathBuf::from("sub/custom.toml")] {
+            let workspace = Workspace::locate(dir.path(), Some(&named)).unwrap();
+            assert_eq!(workspace.root(), dir.path().join("sub"));
+            assert_eq!(workspace.flow_path(), flow.as_path());
+        }
+        let missing = Workspace::locate(dir.path(), Some(Path::new("absent.toml")));
+        assert!(missing.unwrap_err().to_string().contains("does not exist"));
+    }
+
+    #[test]
+    fn init_never_writes_above_the_directory_it_runs_in() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("flot.toml"), "# parent").unwrap();
+        let below = dir.path().join("sub");
+        fs::create_dir_all(&below).unwrap();
+        let workspace = Workspace::for_init(&below, None);
+        assert_eq!(workspace.flow_path(), below.join("flot.toml"));
+        workspace.init(true).unwrap();
+        assert_eq!(
+            fs::read_to_string(dir.path().join("flot.toml")).unwrap(),
+            "# parent"
+        );
+    }
+
+    #[test]
+    fn init_refuses_to_overwrite_without_force() {
+        let dir = tempfile::tempdir().unwrap();
+        let workspace = Workspace::at(dir.path(), &dir.path().join("flot.toml"));
+        workspace.init(false).unwrap();
+        assert!(workspace.init(false).is_err());
+        workspace.init(true).unwrap();
+        assert!(workspace.flow().is_ok(), "the starter flow must parse");
+    }
+}

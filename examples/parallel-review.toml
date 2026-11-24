@@ -1,0 +1,103 @@
+# Fan out three independent reviewers, then gate on all of them.
+#
+# Paths and the store are relative to the flow file's directory, so put this
+# flow at the root of the Rust project it reviews:
+#
+#   cp examples/parallel-review.toml review.toml && flot -f review.toml run --jobs 3
+#
+# The reviewers overlap only because they are independent in the DAG. Agent
+# output varies between calls, so their receipts vary too; what concurrency
+# never changes is how receipts are assembled into the run root.
+# Flags are Claude Code's (tested with 2.1.330); see examples/slugify for a
+# flow that has actually been run end to end.
+#
+# Every agent step has the same shape: remove the artifact first, so a file
+# left from an earlier run can never pass for this run's; report spend through
+# $FLOT_METRICS even when the agent fails, so the cost ceiling sees it; then
+# exit with the agent's status.
+
+[flow]
+name = "parallel-review"
+description = "Three agent reviewers in parallel, each bound to a checkable artifact."
+max_parallel = 3
+max_cost_usd = 4.0
+budget = { timeout_secs = 1200, max_inline_bytes = 4096 }
+
+[[step]]
+id = "stage"
+run = "mkdir -p .flot-work && git diff > .flot-work/change.diff"
+# The diff is a function of the tree, so the tree keys it: change the code and
+# the diff is taken again, and the reviewers see the new one.
+inputs = ["src/**/*.rs", "tests/**/*.rs", "Cargo.toml", "Cargo.lock"]
+outputs = [".flot-work/change.diff"]
+claims = ["there is a change to review"]
+verify = "test -s .flot-work/change.diff"
+
+[[step]]
+id = "security"
+run = """
+mkdir -p .flot-work
+rm -f .flot-work/security.md
+status=0
+claude -p "Review .flot-work/change.diff for injection, path traversal, unchecked input and secret handling. Write .flot-work/security.md with one finding per line, or write the single line NONE to that file. Write no other file." \
+  --permission-mode acceptEdits --output-format json > .flot-work/security.json || status=$?
+jq '{input_tokens: (.usage.input_tokens + .usage.cache_read_input_tokens + .usage.cache_creation_input_tokens),
+     output_tokens: .usage.output_tokens, cost_usd: .total_cost_usd}' .flot-work/security.json > "$FLOT_METRICS" || true
+exit "$status"
+"""
+needs = ["stage"]
+inputs = [".flot-work/change.diff"]
+claims = ["a security review artifact exists"]
+verify = "test -s .flot-work/security.md"
+outputs = [".flot-work/security.md"]
+
+[[step]]
+id = "performance"
+run = """
+mkdir -p .flot-work
+rm -f .flot-work/performance.md
+status=0
+claude -p "Review .flot-work/change.diff for added allocations, copies, unbounded growth and blocking calls. Write .flot-work/performance.md with one finding per line, or write the single line NONE to that file. Write no other file." \
+  --permission-mode acceptEdits --output-format json > .flot-work/performance.json || status=$?
+jq '{input_tokens: (.usage.input_tokens + .usage.cache_read_input_tokens + .usage.cache_creation_input_tokens),
+     output_tokens: .usage.output_tokens, cost_usd: .total_cost_usd}' .flot-work/performance.json > "$FLOT_METRICS" || true
+exit "$status"
+"""
+needs = ["stage"]
+inputs = [".flot-work/change.diff"]
+claims = ["a performance review artifact exists"]
+verify = "test -s .flot-work/performance.md"
+outputs = [".flot-work/performance.md"]
+
+[[step]]
+id = "contracts"
+run = """
+mkdir -p .flot-work
+rm -f .flot-work/contracts.md
+status=0
+claude -p "Review .flot-work/change.diff for changed shared contracts: keys, serialized formats, defaults and exit codes, and name the consumers that must change. Write .flot-work/contracts.md, or write the single line NONE to that file. Write no other file." \
+  --permission-mode acceptEdits --output-format json > .flot-work/contracts.json || status=$?
+jq '{input_tokens: (.usage.input_tokens + .usage.cache_read_input_tokens + .usage.cache_creation_input_tokens),
+     output_tokens: .usage.output_tokens, cost_usd: .total_cost_usd}' .flot-work/contracts.json > "$FLOT_METRICS" || true
+exit "$status"
+"""
+needs = ["stage"]
+inputs = [".flot-work/change.diff"]
+claims = ["a contract-impact review artifact exists"]
+verify = "test -s .flot-work/contracts.md"
+outputs = [".flot-work/contracts.md"]
+
+[[step]]
+id = "gate"
+run = "cargo test --quiet"
+needs = ["security", "performance", "contracts"]
+inputs = ["src/**/*.rs", "tests/**/*.rs", "Cargo.toml", "Cargo.lock"]
+claims = [
+  "every reviewer produced a verdict",
+  "the suite passes on the reviewed tree",
+]
+# Reviewers reporting NONE is a verdict; a missing file is not.
+verify = """
+test -s .flot-work/security.md && test -s .flot-work/performance.md \
+&& test -s .flot-work/contracts.md && cargo test --quiet
+"""

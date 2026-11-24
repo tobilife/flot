@@ -1,0 +1,42 @@
+# flot's own gate, expressed in flot. Each claim names a command that proves it.
+[flow]
+name = "flot-self-check"
+description = "Build, lint and test flot with every claim bound to a proof command."
+budget = { timeout_secs = 1200, max_inline_bytes = 2048 }
+# Deliberately sequential: lint and test both drive cargo, which takes a build
+# lock, so overlapping them would queue inside cargo instead of saving time.
+max_parallel = 1
+
+[[step]]
+id = "format"
+run = "cargo fmt"
+inputs = ["src/**/*.rs", "tests/**/*.rs"]
+claims = ["every source file is rustfmt-clean"]
+verify = "cargo fmt --check"
+
+[[step]]
+id = "build"
+run = "cargo build --all-targets"
+needs = ["format"]
+inputs = ["src/**/*.rs", "tests/**/*.rs", "Cargo.toml", "Cargo.lock"]
+claims = ["the library, binary and test targets compile"]
+verify = "cargo build --all-targets --quiet"
+
+[[step]]
+id = "lint"
+run = "cargo clippy --all-targets -- -D warnings"
+needs = ["build"]
+inputs = ["src/**/*.rs", "tests/**/*.rs"]
+claims = ["clippy reports no warnings on any target"]
+verify = "cargo clippy --all-targets -- -D warnings"
+
+[[step]]
+id = "test"
+run = "cargo test"
+needs = ["build"]
+inputs = ["src/**/*.rs", "tests/**/*.rs", "Cargo.toml"]
+claims = [
+  "the unit suite passes",
+  "the end-to-end CLI suite passes",
+]
+verify = "cargo test --quiet"

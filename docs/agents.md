@@ -55,6 +55,36 @@ and check did the same there. That bundle was unsigned; a later review made
 imports reusable only from trusted signers (see [Evidence is not cache](evidence.md#evidence-is-not-cache)), so
 today the same hand-off needs `bundle --sign` and `trust add`.
 
+## Three reviewers in parallel
+
+`examples/parallel-review.toml` was run once, copied to the root of a clone of
+this repository, against a one-line change of the default step timeout
+(900 s to 300 s), with Claude Code 2.1.330 and `--jobs 3`:
+
+```
+ran      stage                ok        11ms  claims 1v/0u/0r
+ran      contracts            ok        56491ms  claims 1v/0u/0r
+ran      performance          ok        11247ms  claims 1v/0u/0r
+ran      security             ok        11358ms  claims 1v/0u/0r
+ran      gate                 ok        11638ms  claims 2v/0u/0r
+
+PASSED  72526ms
+spent $3.252855 (in 1107882 / out 5933 tokens, 3 reporting step(s), 2 silent)  ceiling $4.000000
+```
+
+The security and performance reviewers both wrote `NONE`, which is right for
+that change. The contract reviewer named the real consequence (a step that ran
+for 5 to 15 minutes would now time out and fail the run) and a real gap: the
+budget defaults were not documented anywhere. They are now, in
+[Budgets](flows.md#budgets).
+
+The claims here only prove that each reviewer wrote a verdict, not that the
+verdict is right; the review itself is evidence for a person to read. Spend is
+dominated by context, not by the answer: each `NONE` cost about $0.90, almost
+all of it in the agent's own prompt and tool context, which depends on the
+local Claude Code setup. The two `silent` steps are the shell steps, which
+report no metrics because they spend nothing.
+
 ## Spend and the cost ceiling
 
 flot does not parse any agent's output format. Each executed step gets a path in

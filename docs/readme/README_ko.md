@@ -169,7 +169,7 @@ key)**를 만듭니다. 키가 같으면 이전 영수증을 재사용하고 그
 |---|---|
 | [`examples/slugify`](../../examples/slugify/flot.toml) | 에이전트 하나가 명세를 구현하고, 어떤 에이전트도 작성하지 않은 검사가 그것을 증명하며, 두 번째 에이전트가 리뷰합니다. Claude Code로 처음부터 끝까지 실행했고, [전체 이야기](../agents.md#a-real-run-end-to-end)에는 이 과정에서 flot 자체에서 찾은 버그도 있습니다. |
 | [`examples/agent-review.toml`](../../examples/agent-review.toml) | 명세, 구현, 리뷰를 세 개의 에이전트 단계로 나누고, 프로젝트의 테스트가 구현을 증명합니다. |
-| [`examples/parallel-review.toml`](../../examples/parallel-review.toml) | 현재 diff를 독립된 에이전트 리뷰어 세 명(보안, 성능, 계약)이 동시에 검토한 뒤 테스트 게이트를 통과합니다. |
+| [`examples/parallel-review.toml`](../../examples/parallel-review.toml) | 현재 diff를 독립된 에이전트 리뷰어 세 명(보안, 성능, 계약)이 동시에 검토한 뒤 테스트 게이트를 통과합니다. [실제 실행 한 번](../agents.md#three-reviewers-in-parallel)에서 문서화되지 않은 기본값을 찾아냈습니다. |
 | [`flot.toml`](../../flot.toml) | 이 저장소 자체의 게이트: 포맷, 빌드, 린트, 테스트를 각각 증명과 함께 실행합니다. |
 
 예제는 실행하기 전에 프로젝트 루트로 복사하세요. 경로와 `.flot` 저장소는 플로우

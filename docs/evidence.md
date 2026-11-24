@@ -22,7 +22,7 @@ the agent or the host that produced it.
 
 ## Evidence is not cache
 
- Anyone can seal an authentic receipt claiming any
+Anyone can seal an authentic receipt claiming any
 outcome: integrity proves a receipt was not altered, not that its work
 happened. Reusing a receipt skips the work and writes the receipt's output
 files into the workspace, where the next step may execute them. So an import

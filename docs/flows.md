@@ -22,7 +22,7 @@ verify = "cargo build --all-targets --quiet"
 
 ## Step keys
 
- Digest over the command, the declared environment, the content of
+Digest over the command, the declared environment, the content of
 every declared input file and proof input, the verify command, the declared
 output patterns, and the receipt ids of upstream steps. Equal key ⇒ the same work over the same facts ⇒ the receipt is reused.
 Declaring inputs is what makes a cache hit trustworthy; a step with none carries
@@ -30,7 +30,7 @@ a limitation saying so, in `flot plan` and in its receipt.
 
 ## Receipts
 
- Split in two. `identity` is deterministic — command, step key,
+Split in two. `identity` is deterministic — command, step key,
 status, exit code, output digests, inputs, produced files, dependency receipts, claim verdicts,
 limitations, deriving tool. The receipt id *is* the digest of that body, so an
 edited receipt stops authenticating. `observed` carries timing, host and bounded
@@ -39,7 +39,7 @@ not on facts.
 
 ## Claims
 
- Three states: `verified` (a proof command ran after the step
+Three states: `verified` (a proof command ran after the step
 succeeded and exited zero), `refuted` (it ran and rejected), `unverified`
 (anything else — no proof command, step failed, proof timed out or was killed
 by a signal, or a file the proof judges changed while it ran). Each one
@@ -49,20 +49,32 @@ nothing: that step's claims stay unverified.
 
 ## Verdict
 
- `failed` if any step did not reach `ok` or any claim was refuted;
+`failed` if any step did not reach `ok` or any claim was refuted;
 `unverified` if any claim lacks proof; `passed` only when every step succeeded
 and every claim is proven.
 
 ## Budgets
 
- `timeout_secs` and `max_output_bytes` (256 MiB per stream by
-default) are admission limits: they stop work and report it, never as a
-success. `max_inline_bytes` is a delivery budget: it trims what travels
-inline, and the complete stream stays retrievable with `flot cat <digest>`.
+A budget is set in `[flow]` for every step, or per step, and a step's own
+value wins.
+
+| Field | Default | Kind |
+|---|---|---|
+| `timeout_secs` | 900 | admission limit, for the step and for its proof separately |
+| `max_output_bytes` | 268435456 (256 MiB) per stream | admission limit |
+| `max_inline_bytes` | 4096 | delivery budget |
+
+Admission limits stop work and report it, never as a success: a step that hits
+one is `timeout` or `failed`, and a proof that hits one leaves its claims
+unverified. A delivery budget only trims what travels inline in receipts and
+replies; the complete stream stays retrievable with `flot cat <digest>`.
+
+A budget is not part of the step key: a receipt that succeeded under a larger
+budget is still reused after the budget shrinks.
 
 ## Concurrency
 
- `flot run --jobs N`, or `max_parallel = N` in `[flow]`, runs up
+`flot run --jobs N`, or `max_parallel = N` in `[flow]`, runs up
 to N independent steps at once; a step still waits for its dependencies. Because
 completion order never enters a receipt or the run root, `--jobs 8` and
 `--jobs 1` produce byte-identical digests for the same work — verified by test.
@@ -83,7 +95,7 @@ wall-clock never enters a receipt.
 
 ## Execution
 
- `run` and `verify` go through `sh -e -c` from the flow root, so
+`run` and `verify` go through `sh -e -c` from the flow root, so
 the first failing line of a multi-line command fails the step; without `-e` an
 agent call that failed, followed by a line that succeeded, would be recorded as
 success. Write `|| true` where a failure is expected. A step is one unit of
@@ -107,7 +119,7 @@ stops a run without one.
 
 ## Cancellation
 
- A step whose dependency failed, or succeeded with claims a
+A step whose dependency failed, or succeeded with claims a
 proof refuted, is never started; it gets a `cancelled` receipt naming the
 dependency and why. Refuted work already fails the run, so building on it could
 only spend time and money. An *unproven* dependency does not block: its claims
@@ -115,7 +127,7 @@ are unknown, not false.
 
 ## Guarded proofs
 
- `verify_inputs` names the files a proof reads, such as an
+`verify_inputs` names the files a proof reads, such as an
 acceptance test. Their content is part of the step key, so tightening the test
 re-proves the claim instead of reusing a verdict the new test never gave. They
 are also re-read after the step runs: a step that edited its own proof gets
@@ -125,7 +137,7 @@ exist.
 
 ## Outputs
 
- `outputs` names the files a step produces. When the step finishes
+`outputs` names the files a step produces. When the step finishes
 their content goes into the store and the receipt, and a success that produced
 no file for a declared pattern is `failed`: it did not do what the flow says.
 Reusing a receipt puts missing outputs back, so the files on disk are the ones

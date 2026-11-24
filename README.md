@@ -176,7 +176,7 @@ list and the `.flot` store.
 |---|---|
 | [`examples/slugify`](examples/slugify/flot.toml) | One agent implements a spec, a check no agent wrote proves it, a second agent reviews. Run end to end against Claude Code; [the full story](docs/agents.md#a-real-run-end-to-end) includes the bug it caught in flot itself. |
 | [`examples/agent-review.toml`](examples/agent-review.toml) | A spec, an implementation and a review as three agent steps; the project's tests prove the implementation. |
-| [`examples/parallel-review.toml`](examples/parallel-review.toml) | Three independent agent reviewers (security, performance, contracts) of the current diff, run concurrently, then a test gate. |
+| [`examples/parallel-review.toml`](examples/parallel-review.toml) | Three independent agent reviewers (security, performance, contracts) of the current diff, run concurrently, then a test gate. [One real run](docs/agents.md#three-reviewers-in-parallel) found an undocumented default. |
 | [`flot.toml`](flot.toml) | This repository's own gate: format, build, lint and test, each with a proof. |
 
 Copy an example to your project root before running it: paths and the `.flot`

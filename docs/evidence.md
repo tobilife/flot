@@ -97,10 +97,46 @@ host B $ flot import --require-trusted demo.json
 - Weak (small-order) keys are refused; verification uses `verify_strict`.
 - The key lives at `$FLOT_SIGNING_KEY`, else `$XDG_CONFIG_HOME/flot/signing.key`,
   else `~/.config/flot/signing.key`, created owner-only. flot refuses a key file
-  other users can read and never replaces an existing one.
+  other users can read and replaces one only through `flot key rotate`.
 - The trust list is per host as well as per store: it is sealed with this
   host's secret (see [the store](#the-flot-store)), so a `trust.json` that arrives with a copied or
   committed store is refused, not believed.
+
+### Rotating a key
+
+`flot key rotate` replaces the host key and writes a handover: a statement that
+the new key succeeds the old one, signed by both. The old key vouches for its
+successor, and the new key shows its holder took the name on, so nobody can
+hand an identity to a key they do not hold. The old secret is kept owner-only
+beside the new key; delete it once you no longer need it. If the handover
+cannot be written, the key is not replaced.
+
+```
+host A $ flot key rotate
+         rotated signing key /tmp/ka/signing.key
+         new  ed25519:3857e486633665ed6e97519f141949d43677945f3f01159e795004f422f9e5a2
+         old  ed25519:2d9ffad50f3fd367c7837a45405c11140c2919b41139b20870ab37f39d78a6ba
+              kept as /tmp/ka/signing.key.retired-2d9ffad50f3fd367
+         handover /tmp/ra/flot-handover-3857e486633665ed.json
+host B $ flot import new.json         authorship: untrusted
+host B $ flot trust rotate flot-handover-3857e486633665ed.json
+         trusting ed25519:3857e486633665ed... as alice
+         still trusting ed25519:2d9ffad50f3fd367... as alice; `flot trust remove ...` once its runs no longer matter
+host B $ flot trust list
+         alice            ed25519:2d9ffad50f3fd367c7837a45405c11140c2919b41139b20870ab37f39d78a6ba
+         alice            ed25519:3857e486633665ed6e97519f141949d43677945f3f01159e795004f422f9e5a2
+```
+
+- A reader follows a handover only from a key they already trust; the new key
+  takes the old key's name. A handover from anyone else is refused (exit 3),
+  and one whose signatures do not verify is refused as altered (exit 1).
+- The old key stays trusted, so runs it signed keep their authorship. For a key
+  that was exposed, `flot trust rotate --revoke` stops trusting it in the same
+  step.
+- While a name stands for two keys, `flot trust remove NAME` asks for the key.
+- A lost key cannot sign a handover. Readers then remove it and trust the new
+  key by hand (`flot trust remove`, `flot trust add`), after confirming it some
+  other way.
 
 ## The `.flot` store
 

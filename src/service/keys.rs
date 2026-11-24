@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
 
-use crate::core::attest::{self, Attestation};
+use crate::core::attest::{self, Attestation, Handover};
 use crate::core::receipt::RunManifest;
 use crate::store::HostSecret;
 
@@ -124,6 +124,78 @@ pub fn generate(path: &Path) -> Result<SigningKeyFile> {
     })
 }
 
+/// A successor key, made and vouched for, but not yet in place. Nothing on
+/// disk changes until [`Rotation::commit`], so the caller can first store the
+/// handover that tells readers about the new key.
+pub struct Rotation {
+    current: SigningKeyFile,
+    next: [u8; 32],
+    handover: Handover,
+}
+
+impl Rotation {
+    pub fn handover(&self) -> &Handover {
+        &self.handover
+    }
+
+    /// Where the old secret is kept once the new key is in place.
+    pub fn retired_path(&self) -> PathBuf {
+        let public = self.current.public_key();
+        let short = &public[attest::KEY_PREFIX.len()..][..16];
+        let name = self
+            .current
+            .path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("signing.key");
+        self.current
+            .path
+            .with_file_name(format!("{name}.retired-{short}"))
+    }
+
+    /// Put the new key in place of the old one. The old secret is kept
+    /// beside it (owner-only, [`Rotation::retired_path`]) rather than
+    /// destroyed: its signatures stay valid, and only its owner can decide
+    /// it is no longer needed.
+    pub fn commit(self) -> Result<SigningKeyFile> {
+        let retired = self.retired_path();
+        let path = self.current.path;
+        std::fs::hard_link(&path, &retired).with_context(|| {
+            format!(
+                "cannot keep the old key as {}; nothing was changed",
+                retired.display()
+            )
+        })?;
+        if let Err(error) = replace_owner_only(&path, hex::encode(self.next).as_bytes()) {
+            let _ = std::fs::remove_file(&retired);
+            return Err(error).with_context(|| {
+                format!(
+                    "cannot write the new key to {}; nothing was changed",
+                    path.display()
+                )
+            });
+        }
+        Ok(SigningKeyFile {
+            path,
+            secret: self.next,
+        })
+    }
+}
+
+/// Make a successor for the key at `path` and the handover both keys sign.
+pub fn begin_rotation(path: &Path) -> Result<Rotation> {
+    let current = load(path)?;
+    let mut next = [0u8; 32];
+    getrandom::fill(&mut next)
+        .map_err(|error| anyhow::anyhow!("the OS random source failed: {error}"))?;
+    let handover = attest::hand_over(&current.secret, &next);
+    Ok(Rotation {
+        current,
+        next,
+        handover,
+    })
+}
+
 pub fn load(path: &Path) -> Result<SigningKeyFile> {
     if !path.exists() {
         bail!(
@@ -149,6 +221,25 @@ pub fn load(path: &Path) -> Result<SigningKeyFile> {
 /// (written aside, then hard-linked into place), so a flot starting at the
 /// same moment either finds no file or the whole of it, never a torn one.
 fn write_owner_only(path: &Path, data: &[u8]) -> std::io::Result<()> {
+    let aside = write_aside(path, data)?;
+    let placed = std::fs::hard_link(&aside, path);
+    let _ = std::fs::remove_file(&aside);
+    placed
+}
+
+/// Replace whatever is at `path` with `data`, readable only by its owner, in
+/// one step: a reader sees the old content or the new, never a mix.
+fn replace_owner_only(path: &Path, data: &[u8]) -> std::io::Result<()> {
+    let aside = write_aside(path, data)?;
+    let placed = std::fs::rename(&aside, path);
+    if placed.is_err() {
+        let _ = std::fs::remove_file(&aside);
+    }
+    placed
+}
+
+/// `data` in a fresh owner-only file beside `path`, synced to disk.
+fn write_aside(path: &Path, data: &[u8]) -> std::io::Result<PathBuf> {
     use std::io::Write;
     static ATTEMPT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let aside = path.with_file_name(format!(
@@ -167,9 +258,13 @@ fn write_owner_only(path: &Path, data: &[u8]) -> std::io::Result<()> {
         file.write_all(data)?;
         file.sync_all()
     });
-    let placed = written.and_then(|()| std::fs::hard_link(&aside, path));
-    let _ = std::fs::remove_file(&aside);
-    placed
+    match written {
+        Ok(()) => Ok(aside),
+        Err(error) => {
+            let _ = std::fs::remove_file(&aside);
+            Err(error)
+        }
+    }
 }
 
 #[cfg(unix)]
@@ -258,6 +353,49 @@ mod tests {
             .unwrap()
             .to_string()
             .contains("not a flot signing key"));
+    }
+
+    #[test]
+    fn a_rotation_changes_nothing_until_committed_then_keeps_the_old_secret() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("signing.key");
+        let old = generate(&path).unwrap().public_key();
+        let rotation = begin_rotation(&path).unwrap();
+        let handover = rotation.handover().clone();
+        let retired = rotation.retired_path();
+        assert_eq!(load(&path).unwrap().public_key(), old);
+        assert!(!retired.exists());
+
+        let new = rotation.commit().unwrap();
+        assert_eq!(
+            attest::check_handover(&handover),
+            Ok((old.clone(), new.public_key()))
+        );
+        assert_eq!(load(&path).unwrap().public_key(), new.public_key());
+        assert_eq!(load(&retired).unwrap().public_key(), old);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&path).unwrap().permissions().mode();
+            assert_eq!(mode & 0o777, 0o600);
+        }
+        let files = std::fs::read_dir(dir.path()).unwrap().count();
+        assert_eq!(files, 2, "the new key and the retired one, nothing aside");
+    }
+
+    #[test]
+    fn a_rotation_that_cannot_keep_the_old_secret_changes_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("signing.key");
+        let old = generate(&path).unwrap().public_key();
+        let rotation = begin_rotation(&path).unwrap();
+        std::fs::write(rotation.retired_path(), b"in the way").unwrap();
+        let error = rotation.commit().err().expect("commit must fail");
+        assert!(
+            format!("{error:#}").contains("nothing was changed"),
+            "{error:#}"
+        );
+        assert_eq!(load(&path).unwrap().public_key(), old);
     }
 
     #[test]

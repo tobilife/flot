@@ -1,6 +1,6 @@
 <div align="center">
 
-**English** · [한국어](docs/readme/README_ko.md)
+**English** · [한국어](docs/readme/README_ko.md) · [中文](docs/readme/README_zh.md)
 
 # flot
 
@@ -19,6 +19,8 @@
 [Quick start](#quick-start) · [How flot works](#how-flot-works) · [What flot guarantees](#what-flot-guarantees) · [Example flows](#example-flows) · [FAQ](#faq) · [Documentation](#documentation)
 
 <code>cargo install flot-cli</code>
+
+Latest release **0.2.1**: signing keys rotate with a handover readers can follow, and the README is in Chinese too · [changelog](CHANGELOG.md)
 
 </div>
 
@@ -167,6 +169,8 @@ budgets, concurrency, outputs and guarded proofs.
   recorded, and `flot bundle` produces one file a reviewer can import and
   verify. Imported receipts stand in for local work only when a
   signer the reviewer trusts signed them, and only while that trust lasts.
+  A new key comes with a handover both keys sign (`flot key rotate`), which
+  readers follow with `flot trust rotate`.
 - **Bounded runs.** Timeouts and output limits stop work and say so; a cost
   ceiling stops starting steps once agents have reported that much spend.
 - **One contract.** The CLI and the MCP server call the same functions, so a
@@ -259,7 +263,7 @@ with `flot --version`, the flow file, the command you ran and its output.
 - [CLI reference](docs/cli.md): commands, selecting runs and flows, `--json` and exit codes.
 - [MCP server](docs/mcp.md): registration, tools, replies, errors and cancellation.
 - [Running coding agents](docs/agents.md): an end-to-end agent run, spend and the cost ceiling.
-- [Evidence, bundles and trust](docs/evidence.md): bundles, signing, the trust list and the `.flot` store.
+- [Evidence, bundles and trust](docs/evidence.md): bundles, signing, key rotation, the trust list and the `.flot` store.
 - [Architecture](docs/architecture.md): layers, enforced dependency rules and current scope.
 
 Report vulnerabilities through [SECURITY.md](SECURITY.md).

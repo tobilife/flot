@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.2.1
+
+- `flot key rotate` replaces the signing key and writes a handover that the
+  old and the new key both sign; the old secret is kept owner-only beside the
+  new key. If the handover cannot be written, the key is not replaced.
+- `flot trust rotate HANDOVER [--revoke]` follows a trusted signer to their
+  new key under the same name. A handover from a key this store does not trust
+  is refused, and one whose signatures do not verify is refused as altered.
+  The old key stays trusted unless `--revoke`.
+- `flot trust remove NAME` asks for the key when the name stands for two.
+- The README is also available in Chinese; every release updates the
+  English, Korean and Chinese READMEs together, and a test checks that each
+  names the release.
+
 ## 0.2.0
 
 - `flot sign [RUN]` and `flot run --sign` sign a run executed here without

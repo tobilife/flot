@@ -16,7 +16,9 @@
 | `flot bundle [RUN] [-o FILE] [--sign]` | one portable file: run, receipts, every object they name (streams, produced files, proofs), signatures |
 | `flot import FILE [--require-trusted]` | authenticate a bundle and absorb it into this store |
 | `flot key init` / `flot key show` | create or print the host signing key |
+| `flot key rotate [-o FILE]` | replace the host key, keep the old secret beside it, write a handover both keys sign |
 | `flot trust add NAME KEY` / `remove` / `list` | decide which signers this host believes for this store |
+| `flot trust rotate HANDOVER [--revoke]` | follow a trusted signer to the key their handover names |
 | `flot mcp` | serve the same contract over MCP on stdio |
 
 ## Selecting a run

@@ -157,6 +157,13 @@ pub enum KeyAction {
     Init,
     /// Print the public key to share with people who import your bundles.
     Show,
+    /// Replace the signing key, keeping the old secret beside it, and write a
+    /// handover both keys sign for everyone who trusts the old one.
+    Rotate {
+        /// Where to write the handover [default: flot-handover-<key>.json].
+        #[arg(short, long)]
+        out: Option<PathBuf>,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -165,6 +172,14 @@ pub enum TrustAction {
     Add { name: String, key: String },
     /// Stop believing a signer, by name or key.
     Remove { name_or_key: String },
+    /// Follow a trusted signer to their new key, given the handover their
+    /// `flot key rotate` wrote.
+    Rotate {
+        handover: PathBuf,
+        /// Stop trusting the old key as well, for a key that was exposed.
+        #[arg(long)]
+        revoke: bool,
+    },
     /// List trusted signers.
     List,
 }
@@ -409,10 +424,28 @@ fn dispatch(
             }
             Ok(ExitCode::SUCCESS)
         }
-        Command::Key { action } => {
+        Command::Key {
+            action: KeyAction::Rotate { out },
+        } => {
+            let rotation = Workspace::key_rotate(out.as_deref())?;
+            if cli.json {
+                print_json(&rotation)?;
+            } else {
+                say!("rotated signing key {}", rotation.path.display());
+                say!("new  {}", rotation.new_key);
+                say!("old  {}", rotation.old_key);
+                say!("     kept as {}", rotation.retired.display());
+                say!("handover {}", rotation.handover.display());
+                say!("next: send it to everyone who trusts the old key; they run `flot trust rotate <file>`");
+            }
+            Ok(ExitCode::SUCCESS)
+        }
+        Command::Key {
+            action: action @ (KeyAction::Init | KeyAction::Show),
+        } => {
             let info = match action {
                 KeyAction::Init => Workspace::key_init()?,
-                KeyAction::Show => Workspace::key_show()?,
+                _ => Workspace::key_show()?,
             };
             if cli.json {
                 print_json(&info)?;
@@ -439,6 +472,29 @@ fn dispatch(
                         print_json(&entry)?;
                     } else {
                         say!("no longer trusting {} ({})", entry.name, entry.key);
+                    }
+                }
+                TrustAction::Rotate { handover, revoke } => {
+                    let rotation = workspace.trust_rotate(handover, *revoke)?;
+                    if cli.json {
+                        print_json(&rotation)?;
+                    } else {
+                        let state = if rotation.added {
+                            "trusting"
+                        } else {
+                            "already trusting"
+                        };
+                        say!("{state} {} as {}", rotation.to, rotation.name);
+                        if rotation.revoked {
+                            say!("no longer trusting {}", rotation.from);
+                        } else {
+                            say!(
+                                "still trusting {} as {}; `flot trust remove {}` once its runs no longer matter",
+                                rotation.from,
+                                rotation.name,
+                                rotation.from
+                            );
+                        }
                     }
                 }
                 TrustAction::List => {

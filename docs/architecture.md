@@ -31,13 +31,12 @@ delivery budgets, bounded-concurrency scheduling, cancellation and interruption,
 the content store with host-sealed cache and trust, the CLI with typed exit
 codes, an MCP stdio server over the same functions, authenticated receipt
 bundles, spend accounting with a run cost ceiling, signed attestations with a
-local trust list, guarded proofs, produced files kept and restored, an enforced
-layer architecture, and 272 tests including end-to-end runs through the real
+local trust list and key handovers, guarded proofs, produced files kept and restored, an enforced
+layer architecture, and 282 tests including end-to-end runs through the real
 binary, a real MCP handshake and a cross-store bundle import.
 
-Not there yet: key rotation (today a lost key means re-trusting a new one by
-hand) and sandboxing steps
-(they run with your permissions; see [Execution](flows.md#execution)).
+Not there yet: sandboxing steps (they run with your permissions; see
+[Execution](flows.md#execution)).
 
 Process-group cancellation uses POSIX signals, so timeouts behave correctly on
 Linux and macOS; Windows support is untested.

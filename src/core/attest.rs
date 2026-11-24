@@ -25,6 +25,10 @@ pub const KEY_PREFIX: &str = "ed25519:";
 /// Separates flot run attestations from every other use of the same key.
 const DOMAIN: &str = "flot-run-attestation-v1";
 
+/// Separates key handovers from run attestations made with the same keys,
+/// and names what a handover file is.
+pub const HANDOVER_KIND: &str = "flot-key-handover-v1";
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Attestation {
     /// `ed25519:<hex>` public key of the signer.
@@ -49,6 +53,10 @@ pub enum AttestError {
         actual: String,
     },
     BadSignature,
+    /// The file is something other than a flot key handover.
+    NotAHandover,
+    /// A key cannot succeed itself.
+    SelfHandover,
 }
 
 impl fmt::Display for AttestError {
@@ -64,6 +72,8 @@ impl fmt::Display for AttestError {
                 digest::short(actual)
             ),
             AttestError::BadSignature => write!(f, "signature does not verify"),
+            AttestError::NotAHandover => write!(f, "not a {HANDOVER_KIND} statement"),
+            AttestError::SelfHandover => write!(f, "the handover names the same key twice"),
         }
     }
 }
@@ -135,6 +145,66 @@ pub fn check(attestation: &Attestation, manifest: &RunManifest) -> Result<(), At
         .map_err(|_| AttestError::MalformedSignature)?;
     key.verify_strict(&statement(&actual), &Signature::from_bytes(&bytes))
         .map_err(|_| AttestError::BadSignature)
+}
+
+/// A signer's statement that key `to` succeeds key `from`. Both keys sign
+/// it: the old one vouches for its successor, and the new one shows that its
+/// holder took the identity on, so nobody can hand a name to a key they do
+/// not hold. It says nothing about runs; each reader decides whether to
+/// follow it (`flot trust rotate`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Handover {
+    /// Always [`HANDOVER_KIND`].
+    pub kind: String,
+    pub from: String,
+    pub to: String,
+    pub from_signature: String,
+    pub to_signature: String,
+}
+
+fn handover_statement(from: &str, to: &str) -> Vec<u8> {
+    format!("{HANDOVER_KIND}\n{from}\n{to}").into_bytes()
+}
+
+pub fn hand_over(old: &[u8; 32], new: &[u8; 32]) -> Handover {
+    let (old, new) = (SigningKey::from_bytes(old), SigningKey::from_bytes(new));
+    let from = format_key(&old.verifying_key());
+    let to = format_key(&new.verifying_key());
+    let statement = handover_statement(&from, &to);
+    Handover {
+        kind: HANDOVER_KIND.to_string(),
+        from_signature: hex::encode(old.sign(&statement).to_bytes()),
+        to_signature: hex::encode(new.sign(&statement).to_bytes()),
+        from,
+        to,
+    }
+}
+
+/// Check both signatures of a handover. Returns the canonical `(from, to)`.
+pub fn check_handover(handover: &Handover) -> Result<(String, String), AttestError> {
+    if handover.kind != HANDOVER_KIND {
+        return Err(AttestError::NotAHandover);
+    }
+    let from = parse_key(handover.from.trim())?;
+    let to = parse_key(handover.to.trim())?;
+    if from == to {
+        return Err(AttestError::SelfHandover);
+    }
+    let (from_text, to_text) = (format_key(&from), format_key(&to));
+    let statement = handover_statement(&from_text, &to_text);
+    for (key, signature) in [
+        (&from, &handover.from_signature),
+        (&to, &handover.to_signature),
+    ] {
+        let bytes: [u8; 64] = hex::decode(signature)
+            .map_err(|_| AttestError::MalformedSignature)?
+            .try_into()
+            .map_err(|_| AttestError::MalformedSignature)?;
+        key.verify_strict(&statement, &Signature::from_bytes(&bytes))
+            .map_err(|_| AttestError::BadSignature)?;
+    }
+    Ok((from_text, to_text))
 }
 
 /// How far a run's authorship is established for this reader.
@@ -358,6 +428,48 @@ mod tests {
             key[KEY_PREFIX.len()..].to_uppercase()
         );
         assert_eq!(canonical_key(&shouted).unwrap(), key);
+    }
+
+    #[test]
+    fn a_handover_names_both_keys_and_checks_out() {
+        let handover = hand_over(&SECRET, &OTHER);
+        assert_eq!(
+            check_handover(&handover),
+            Ok((public_key_of(&SECRET), public_key_of(&OTHER)))
+        );
+    }
+
+    #[test]
+    fn a_handover_needs_both_signatures_over_these_two_keys() {
+        let third: [u8; 32] = [11; 32];
+        // Redirected to a key the old one never named.
+        let mut redirected = hand_over(&SECRET, &OTHER);
+        redirected.to = public_key_of(&third);
+        assert_eq!(check_handover(&redirected), Err(AttestError::BadSignature));
+        // Claimed for a key whose holder never signed: the new signature is
+        // borrowed from another handover.
+        let mut unaccepted = hand_over(&SECRET, &OTHER);
+        unaccepted.to_signature = hand_over(&SECRET, &third).to_signature;
+        assert_eq!(check_handover(&unaccepted), Err(AttestError::BadSignature));
+        // Not vouched for by the old key.
+        let mut unvouched = hand_over(&SECRET, &OTHER);
+        unvouched.from_signature = hand_over(&third, &OTHER).from_signature;
+        assert_eq!(check_handover(&unvouched), Err(AttestError::BadSignature));
+        // A run attestation's signature is not a handover signature.
+        let mut confused = hand_over(&SECRET, &OTHER);
+        confused.from_signature = sign(&SECRET, &manifest("sha256:root")).signature;
+        assert_eq!(check_handover(&confused), Err(AttestError::BadSignature));
+    }
+
+    #[test]
+    fn a_handover_to_itself_or_of_another_kind_is_refused() {
+        assert_eq!(
+            check_handover(&hand_over(&SECRET, &SECRET)),
+            Err(AttestError::SelfHandover)
+        );
+        let mut other_kind = hand_over(&SECRET, &OTHER);
+        other_kind.kind = "flot-key-handover-v0".into();
+        assert_eq!(check_handover(&other_kind), Err(AttestError::NotAHandover));
     }
 
     #[test]

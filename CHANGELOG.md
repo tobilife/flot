@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- `flot bundle` and `flot push` refuse a run that carries a credential-shaped
+  token (GitHub, GitLab, npm, Slack, Anthropic, OpenAI, AWS, Google, PEM
+  private keys) in its output, receipts or produced files, naming the step and
+  showing only the prefix. Nothing is written or signed first.
+  `--allow-secrets` shares it anyway.
 - The action no longer takes `signers`: it was never run in CI, and whom CI
   trusts is better written out in the workflow; `docs/ci.md` shows how.
 

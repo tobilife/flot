@@ -19,7 +19,7 @@ use crate::core::receipt::{ClaimStatus, RunManifest, StepStatus, Verdict};
 use crate::service::audit::Audit;
 use crate::service::bundle::ImportPolicy;
 use crate::service::{
-    fault_kind, FaultKind, Plan, RunDetail, RunOptions, RunReport, SignReport, Workspace,
+    fault_kind, FaultKind, Plan, RunDetail, RunOptions, RunReport, Sharing, SignReport, Workspace,
 };
 
 const INVALID_REQUEST: u8 = 3;
@@ -165,6 +165,10 @@ pub enum Command {
         /// Sign the run with the host key (see `flot key init`).
         #[arg(long)]
         sign: bool,
+        /// Share the run even if it carries credential-shaped tokens, which
+        /// are otherwise refused.
+        #[arg(long)]
+        allow_secrets: bool,
     },
     /// Authenticate a bundle and absorb it into this store.
     Import {
@@ -184,6 +188,10 @@ pub enum Command {
         /// Sign the run with the host key first.
         #[arg(long)]
         sign: bool,
+        /// Share the run even if it carries credential-shaped tokens, which
+        /// are otherwise refused.
+        #[arg(long)]
+        allow_secrets: bool,
     },
     /// Import this flow's runs from a git remote's refs/flot/runs that this
     /// store does not hold yet.
@@ -556,8 +564,17 @@ fn dispatch(
             std::io::stdout().write_all(&workspace.object(&digest)?)?;
             Ok(ExitCode::SUCCESS)
         }
-        Command::Bundle { run, out, sign } => {
-            let report = workspace.bundle(run, out.as_deref(), *sign)?;
+        Command::Bundle {
+            run,
+            out,
+            sign,
+            allow_secrets,
+        } => {
+            let share = Sharing {
+                sign: *sign,
+                allow_secrets: *allow_secrets,
+            };
+            let report = workspace.bundle(run, out.as_deref(), share)?;
             if cli.json {
                 print_json(&report)?;
             } else {
@@ -578,8 +595,17 @@ fn dispatch(
             }
             Ok(ExitCode::SUCCESS)
         }
-        Command::Push { run, remote, sign } => {
-            let report = workspace.push(run, remote, *sign)?;
+        Command::Push {
+            run,
+            remote,
+            sign,
+            allow_secrets,
+        } => {
+            let share = Sharing {
+                sign: *sign,
+                allow_secrets: *allow_secrets,
+            };
+            let report = workspace.push(run, remote, share)?;
             if cli.json {
                 print_json(&report)?;
             } else if report.unchanged {

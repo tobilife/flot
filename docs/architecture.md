@@ -2,7 +2,7 @@
 
 ```
 core      digest · receipt · flow · metrics · compare
-          attest · fault                                 pure model, no IO
+          attest · fault · secrets                       pure model, no IO
 store     content-addressed objects, receipts, runs
 engine    keying · claims · scheduler · exec · runner   flow -> receipts
           git · baseline · sandbox

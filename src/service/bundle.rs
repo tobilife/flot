@@ -23,6 +23,7 @@ use crate::core::attest::{self, Attestation, Authorship, SignerCheck};
 use crate::core::digest;
 use crate::core::fault::{self, FaultKind};
 use crate::core::receipt::{Observed, Receipt, RunManifest};
+use crate::core::secrets;
 use crate::store::Store;
 
 /// 4: the manifest binds each receipt's observation (previews, spend).
@@ -167,6 +168,74 @@ pub fn write(bundle: &Bundle, path: &Path) -> Result<ExportReport> {
             .map(|attestation| attestation.key.clone())
             .collect(),
     })
+}
+
+/// A credential-shaped token in what a bundle carries.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Exposure {
+    /// Where it is, such as "step `test` stdout".
+    pub place: String,
+    pub kind: &'static str,
+    /// The prefix that identified it, never the token.
+    pub shown: String,
+}
+
+/// Every credential-shaped token anywhere in `bundle`: the run, each
+/// receipt, and the bytes of every object, named by what the object is.
+pub fn exposures(bundle: &Bundle) -> Result<Vec<Exposure>> {
+    let mut places: BTreeMap<&str, String> = BTreeMap::new();
+    for (step_id, _, observed_digest) in bundle.run.evidence() {
+        places.insert(observed_digest, format!("step `{step_id}` observation"));
+    }
+    for receipt in &bundle.receipts {
+        let step = &receipt.identity.step_id;
+        places.insert(
+            &receipt.identity.stdout_digest,
+            format!("step `{step}` stdout"),
+        );
+        places.insert(
+            &receipt.identity.stderr_digest,
+            format!("step `{step}` stderr"),
+        );
+        for output in &receipt.identity.outputs {
+            places.insert(
+                &output.digest,
+                format!("step `{step}` output {}", output.path),
+            );
+        }
+        for claim in &receipt.identity.claims {
+            if let Some(digest) = &claim.verify_output_digest {
+                places.insert(digest, format!("step `{step}` proof of \"{}\"", claim.text));
+            }
+        }
+    }
+
+    let mut found = Vec::new();
+    let mut note = |place: String, text: &[u8]| {
+        for finding in secrets::scan(text) {
+            let exposure = Exposure {
+                place: place.clone(),
+                kind: finding.kind,
+                shown: finding.shown,
+            };
+            if !found.contains(&exposure) {
+                found.push(exposure);
+            }
+        }
+    };
+    note("the run".to_string(), &serde_json::to_vec(&bundle.run)?);
+    for receipt in &bundle.receipts {
+        let place = format!("step `{}` receipt", receipt.identity.step_id);
+        note(place, &serde_json::to_vec(receipt)?);
+    }
+    for (object, encoded) in &bundle.objects {
+        let place = places
+            .get(object.as_str())
+            .cloned()
+            .unwrap_or_else(|| format!("object {}", digest::short(object)));
+        note(place, &decode(encoded)?);
+    }
+    Ok(found)
 }
 
 /// A bundle whose every piece checked out against every other.

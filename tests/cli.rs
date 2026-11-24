@@ -2941,6 +2941,77 @@ fn git_in(dir: &std::path::Path, args: &[&str]) -> String {
     String::from_utf8_lossy(&output.stdout).trim().to_string()
 }
 
+const LEAKY: &str = r#"
+[flow]
+name = "leaky"
+
+[[step]]
+id = "login"
+run = "echo token=ghp_$(printf %036d 0)"
+claims = ["it ran"]
+verify = "true"
+"#;
+
+#[test]
+fn a_run_that_carries_a_credential_does_not_leave_the_host() {
+    let project = Project::new(LEAKY);
+    git_in(project.path(), &["init", "-q"]);
+    let remote = tempfile::tempdir().unwrap();
+    git_in(remote.path(), &["init", "-q", "--bare"]);
+    let url = remote.path().to_str().unwrap().to_string();
+    project.flot(&["key", "init"]).ok();
+    project.flot(&["run"]).ok();
+    let token = format!("ghp_{}", "0".repeat(36));
+
+    for share in [
+        vec!["bundle", "--sign"],
+        vec!["push", "--remote", &url, "--sign"],
+    ] {
+        let refused = project.flot(&share);
+        assert_eq!(refused.code, 3, "{share:?}: {}", refused.stderr);
+        refused
+            .has("refusing to share run ")
+            .has("nothing left this host")
+            .has("  - step `login` stdout: GitHub token (ghp_…)")
+            .has("--allow-secrets")
+            .lacks(&token);
+    }
+    let bundles: Vec<_> = std::fs::read_dir(project.path())
+        .unwrap()
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .ends_with(".flotbundle.json")
+        })
+        .collect();
+    assert!(bundles.is_empty(), "a refused bundle was written");
+    assert_eq!(git_in(remote.path(), &["for-each-ref"]), "");
+
+    // The refusal came before signing: the run is still unsigned.
+    project
+        .flot(&["bundle", "--allow-secrets"])
+        .ok()
+        .has("unsigned");
+    project
+        .flot(&["push", "--remote", &url, "--allow-secrets"])
+        .ok()
+        .has("pushed run ");
+
+    // A token the flow itself writes into a receipt, not only into output.
+    let key_id = format!("AKIA{}", "Z".repeat(16));
+    let quoted = Project::new(&format!(
+        "[flow]\nname = \"quoted\"\n\n[[step]]\nid = \"cfg\"\nrun = \"true\"\nclaims = [\"deploys as {key_id}\"]\nverify = \"true\"\n"
+    ));
+    quoted.flot(&["run"]).ok();
+    let refused = quoted.flot(&["bundle"]);
+    assert_eq!(refused.code, 3, "{}", refused.stderr);
+    refused
+        .has("  - step `cfg` receipt: AWS access key (AKIA…)")
+        .lacks(&key_id);
+}
+
 #[test]
 fn runs_travel_through_a_git_remote_and_a_signed_one_stands_in() {
     let remote = tempfile::tempdir().unwrap();

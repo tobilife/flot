@@ -325,7 +325,10 @@ run anything.
 
 No. flot runs locally and has no network code. `flot push` and `flot pull`
 run `git` to share runs with a remote you name, and only when you run them.
-Agents you run as steps talk to their own providers under their own data
+A shared run carries its steps' complete output, so `flot bundle` and
+`flot push` refuse a run in which something looks like a credential (a
+GitHub, cloud or model provider token, a private key) and name the step it is
+in. Agents you run as steps talk to their own providers under their own data
 policies.
 
 </details>

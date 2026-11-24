@@ -49,6 +49,31 @@ trust list signed it. A run already here is not imported again, so a
 signature added to a remote run after it was pulled is not picked up.
 Refused bundles are named, and the command then exits non-zero.
 
+## Credentials stay home
+
+A bundle carries every byte of its run: complete output, produced files,
+proof output. Before `flot bundle` or `flot push` writes or signs anything,
+it looks for credential-shaped tokens in all of it, and refuses the run if
+it finds one (exit 3). Only fixed shapes count: GitHub, GitLab, npm and
+Slack tokens, Anthropic, OpenAI, AWS and Google keys, and PEM private keys.
+Nothing is guessed from entropy, so a clean scan is not a promise that a
+run holds no secret. The token is never printed, only its prefix (real
+output; the token was `ghp_` and 36 characters):
+
+```text
+$ flot bundle
+flot: refusing to share run 1795536384599-0beca5965629: it carries what looks like credentials, and nothing left this host:
+  - step `login` receipt: GitHub token (ghp_…)
+  - step `login` observation: GitHub token (ghp_…)
+  - step `login` stdout: GitHub token (ghp_…)
+keep them out of the step's output and run it again, or pass --allow-secrets if they are not credentials
+```
+
+A receipt is addressed by its content, so a token cannot be masked out of
+the evidence; keep it out of the step's output and run the step again.
+`--allow-secrets` shares the run as it is, for a token that is a fixture or
+already revoked.
+
 ## Evidence is not cache
 
 Anyone can seal an authentic receipt claiming any

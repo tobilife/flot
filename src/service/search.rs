@@ -200,6 +200,12 @@ impl Search<'_> {
                 .filter_map(|claim| claim.verify_output_digest.as_deref())
                 .map(|digest| ("proof", digest)),
         );
+        outputs.extend(identity.claims.iter().filter_map(|claim| {
+            claim
+                .before
+                .as_ref()
+                .map(|before| ("proof before the change", before.output_digest.as_str()))
+        }));
         for (source, object) in outputs {
             let bytes = match self.store.read_bytes(object) {
                 Ok(bytes) => bytes,

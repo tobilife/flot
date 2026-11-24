@@ -7,7 +7,7 @@
 //! ran, and it exited zero.
 
 use crate::core::flow::Step;
-use crate::core::receipt::{ClaimRecord, ClaimStatus, StepStatus};
+use crate::core::receipt::{Before, ClaimRecord, ClaimStatus, StepStatus};
 
 /// What running a proof command produced.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -88,6 +88,7 @@ pub fn settle(
                 verify_exit: None,
                 verify_output_digest: None,
                 reason: Some(reason.clone()),
+                before: None,
             })
             .collect();
     }
@@ -173,6 +174,116 @@ pub fn settle(
             verify_exit: proof.exit_code,
             verify_output_digest: Some(proof.output_digest.clone()),
             reason: reason.clone(),
+            before: None,
+        })
+        .collect()
+}
+
+/// What the proof did on the work with its changes undone, for a step that
+/// declares `fails_before`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Red {
+    /// There is no revision to undo the changes to.
+    NoRevision,
+    /// The check could not be made: the copy could not be made or its
+    /// changes undone, or the proof could not start.
+    Unchecked(String),
+    /// The proof does not pass on a copy of the work as it is, so a failure
+    /// there with the changes undone would show nothing.
+    CopyFails {
+        exit_code: Option<i32>,
+        timed_out: bool,
+    },
+    /// The proof ran with the changes undone to `commit`, which the run
+    /// names as `baseline`.
+    Ran {
+        baseline: String,
+        commit: String,
+        proof: Proof,
+    },
+}
+
+/// Hold the claims `settle` verified to `fails_before`: one whose proof
+/// does not fail with the changes undone stays unverified, since passing
+/// shows nothing the change did. Other claims are left as they are.
+pub fn hold_before(
+    claims: Vec<ClaimRecord>,
+    red: Red,
+    limitations: &mut Vec<String>,
+) -> Vec<ClaimRecord> {
+    let (before, reason) = match red {
+        Red::NoRevision => (
+            None,
+            Some("fails_before needs a revision to fail at: set proofs_from".to_string()),
+        ),
+        Red::Unchecked(error) => (
+            None,
+            Some(format!(
+                "could not check that the proof fails before the change ({error})"
+            )),
+        ),
+        Red::CopyFails {
+            exit_code,
+            timed_out,
+        } => {
+            let how = match (timed_out, exit_code) {
+                (true, _) => "timed out".to_string(),
+                (false, Some(code)) => format!("exited {code}"),
+                (false, None) => "was killed by a signal".to_string(),
+            };
+            (
+                None,
+                Some(format!(
+                    "the proof {how} on a copy of the work, so failing there before the change would show nothing"
+                )),
+            )
+        }
+        Red::Ran {
+            baseline,
+            commit,
+            proof,
+        } => {
+            let reason = match proof.exit_code {
+                _ if proof.timed_out => Some(format!(
+                    "the proof timed out with the changes undone to {baseline}, which is not a failure"
+                )),
+                None => Some(format!(
+                    "the proof was killed with the changes undone to {baseline}, which is not a failure"
+                )),
+                Some(0) => Some(format!(
+                    "the proof passes with the changes undone to {baseline} too, so it shows nothing this change did"
+                )),
+                Some(_) => None,
+            };
+            let before = Before {
+                commit,
+                exit_code: proof.exit_code,
+                output_digest: proof.output_digest,
+            };
+            (Some(before), reason)
+        }
+    };
+    if let Some(reason) = &reason {
+        limitations.push(format!("{reason}; claims stay unverified"));
+    }
+    claims
+        .into_iter()
+        .map(|claim| {
+            if claim.status != ClaimStatus::Verified {
+                return claim;
+            }
+            match &reason {
+                None => ClaimRecord {
+                    before: before.clone(),
+                    ..claim
+                },
+                Some(reason) => ClaimRecord {
+                    status: ClaimStatus::Unverified,
+                    reason: Some(reason.clone()),
+                    before: before.clone(),
+                    ..claim
+                },
+            }
         })
         .collect()
 }
@@ -192,6 +303,7 @@ fn unverified(step: &Step, reason: &str) -> Vec<ClaimRecord> {
             verify_exit: None,
             verify_output_digest: None,
             reason: Some(reason.to_string()),
+            before: None,
         })
         .collect()
 }
@@ -331,6 +443,90 @@ mod tests {
             Some("the step modified files its proof reads")
         );
         assert!(limitations[0].contains("check.py"), "{}", limitations[0]);
+    }
+
+    #[test]
+    fn only_a_proof_that_fails_before_the_change_holds() {
+        let step = step("claims = [\"x\"]\nverify = \"true\"\nfails_before = true");
+        let verified = || {
+            settle(
+                &step,
+                StepStatus::Ok,
+                false,
+                ProofOutcome::Ran(proof(Some(0), false)),
+                &mut Vec::new(),
+            )
+        };
+        let at = |exit_code: Option<i32>, timed_out: bool| Red::Ran {
+            baseline: "main (abc)".into(),
+            commit: "abc123".into(),
+            proof: Proof {
+                exit_code,
+                timed_out,
+                output_digest: "sha256:before".into(),
+            },
+        };
+
+        let mut limitations = Vec::new();
+        let held = hold_before(verified(), at(Some(1), false), &mut limitations);
+        assert_eq!(statuses(&held), vec![ClaimStatus::Verified]);
+        assert!(limitations.is_empty(), "{limitations:?}");
+        let before = held[0].before.as_ref().unwrap();
+        assert_eq!(
+            (
+                before.commit.as_str(),
+                before.exit_code,
+                before.output_digest.as_str()
+            ),
+            ("abc123", Some(1), "sha256:before")
+        );
+        assert_eq!(
+            held[0].verify_output_digest.as_deref(),
+            Some("sha256:proof")
+        );
+
+        for (red, reason) in [
+            (
+                at(Some(0), false),
+                "passes with the changes undone to main (abc) too",
+            ),
+            (at(Some(1), true), "timed out with the changes undone"),
+            (at(None, false), "was killed with the changes undone"),
+            (Red::NoRevision, "set proofs_from"),
+            (Red::Unchecked("no copy".into()), "(no copy)"),
+            (
+                Red::CopyFails {
+                    exit_code: Some(2),
+                    timed_out: false,
+                },
+                "exited 2 on a copy of the work",
+            ),
+            (
+                Red::CopyFails {
+                    exit_code: None,
+                    timed_out: true,
+                },
+                "timed out on a copy of the work",
+            ),
+        ] {
+            let mut limitations = Vec::new();
+            let held = hold_before(verified(), red, &mut limitations);
+            assert_eq!(statuses(&held), vec![ClaimStatus::Unverified], "{reason}");
+            let said = held[0].reason.as_deref().unwrap();
+            assert!(said.contains(reason), "{said}");
+            assert!(limitations[0].ends_with("; claims stay unverified"));
+        }
+
+        // What did not verify is left as it was.
+        let refuted = settle(
+            &step,
+            StepStatus::Ok,
+            false,
+            ProofOutcome::Ran(proof(Some(1), false)),
+            &mut Vec::new(),
+        );
+        let held = hold_before(refuted.clone(), at(Some(1), false), &mut Vec::new());
+        assert_eq!(held, refuted);
     }
 
     fn ran(exit_code: Option<i32>) -> ProofOutcome {

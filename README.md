@@ -245,7 +245,10 @@ budgets, concurrency, outputs, guarded proofs, scope and sandbox.
   refuses edits to those files before they happen, and to what decides
   whether they are checked: CI workflows, git hooks, Claude Code's settings.
   `flot verify` also names the files that changed since that revision but
-  that no step read, the changes no claim speaks for.
+  that no step read, the changes no claim speaks for. A step with
+  `fails_before = true` verifies only if its proof also fails with every
+  change since the revision undone, so a proof that passed anyway does not
+  count for the change.
 - **Changes kept in scope.** A step with `may_change = ["src/**"]` fails if
   it creates, edits or deletes any other file that git does not ignore. On
   Linux, `sandbox` makes the kernel refuse those writes and the network.

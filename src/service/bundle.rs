@@ -207,6 +207,15 @@ pub fn exposures(bundle: &Bundle) -> Result<Vec<Exposure>> {
             if let Some(digest) = &claim.verify_output_digest {
                 places.insert(digest, format!("step `{step}` proof of \"{}\"", claim.text));
             }
+            if let Some(before) = &claim.before {
+                places.insert(
+                    &before.output_digest,
+                    format!(
+                        "step `{step}` proof of \"{}\" before the change",
+                        claim.text
+                    ),
+                );
+            }
         }
     }
 

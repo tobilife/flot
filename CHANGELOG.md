@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- `fails_before = true` on a step: once its proof passes, it runs again on a
+  copy of the work (what git sees, plus the step's declared files), where it
+  must pass, and then there with every change since `proofs_from` undone
+  (edited and deleted files back as at the revision, new files removed, what
+  git ignores left alone). The claims verify only if it fails there; a proof
+  that passes either way, or that cannot pass on the copy, leaves them
+  unverified. The result is kept as the claim's `before` record (commit,
+  exit code, output), `flot show` prints it, a cached receipt is reused only
+  if it was checked at the current revision, and `flot verify` treats a
+  dropped `fails_before`, or a verified claim not checked at the revision, as
+  a proof that differs. Not available with `candidates`.
 - `flot flaky [--runs N]` names steps that were `ok` and `failed` on one key,
   and proofs that were `verified` and `refuted` over one step key and one set
   of proof files, in the newest runs executed here; exits 2 when there is one.

@@ -1297,6 +1297,14 @@ fn render_detail(detail: &RunDetail) {
                 if let Some(reason) = &claim.reason {
                     say!("        reason: {reason}");
                 }
+                if let Some(before) = &claim.before {
+                    let commit = &before.commit[..before.commit.len().min(12)];
+                    match before.exit_code {
+                        Some(0) => say!("        before the change ({commit}): passed"),
+                        Some(code) => say!("        before the change ({commit}): exited {code}"),
+                        None => say!("        before the change ({commit}): stopped"),
+                    }
+                }
             }
         }
         if matches!(step.status, StepStatus::Failed | StepStatus::Timeout) {

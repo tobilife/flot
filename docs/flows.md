@@ -366,6 +366,81 @@ environment error. The MCP tools take no revision: an agent cannot pick what
 its own proofs are checked against. Files are compared byte for byte, so a
 checkout that rewrites line endings differs from the revision.
 
+### Proofs that fail before the change
+
+A proof that passes before the change as well shows nothing the change did:
+a test that was already green, or one too weak to fail. With
+`fails_before = true`, once a step's proof passes it runs again on a copy of
+the work, where it must pass too, and then there with every change since the
+revision undone: edited and deleted files get their content and mode at the
+revision back, new files are removed, and what git ignores is left as it is.
+The claims verify only if the proof fails there. The copy holds what git
+sees plus the step's declared inputs, proof inputs and outputs, and has no
+`.git`, so the proof must run from such a checkout; one that does not pass on
+the copy leaves the claims unverified rather than read a failure there as
+evidence. It needs a revision (`proofs_from` or `--proofs-from`), claims and
+a `verify` command, and is not available with `candidates`.
+
+```toml
+[flow]
+name = "slug"
+proofs_from = "main"
+
+[[step]]
+id = "fix"
+run = "sh slug.sh 'Hello World'"
+inputs = ["slug.sh"]
+claims = ["slug.sh lowercases what it is given"]
+verify = "sh tests/slug.sh"
+verify_inputs = ["tests/**"]
+fails_before = true
+
+[[step]]
+id = "docs"
+run = "true"
+inputs = ["README.md"]
+claims = ["the README names slug.sh"]
+verify = "grep -q slug.sh README.md"
+verify_inputs = ["README.md"]
+fails_before = true
+```
+
+Real output, after `slug.sh` was changed to lowercase; the README already
+named it at `main`:
+
+```text
+$ flot run
+ran      docs                 ok        11ms  claims 0v/1u/0r  receipt 74d47914d421
+ran      fix                  ok        11ms  claims 1v/0u/0r  receipt c7d08429cb05
+    | hello-world
+
+UNVERIFIED 1795562469413-60af8505578c  root 60af8505578c  131ms
+limitations:
+  - docs: the proof passes with the changes undone to main (e023c8566969) too, so it shows nothing this change did; claims stay unverified
+  - proofs checked against main (e023c8566969)
+
+$ flot show latest
+run 1795562469413-60af8505578c  flow slug  root 60af8505578c
+  docs                 ok        ran     receipt 74d47914d421
+      ? [unverified] the README names slug.sh
+        reason: the proof passes with the changes undone to main (e023c8566969) too, so it shows nothing this change did
+        before the change (e023c8566969): passed
+  fix                  ok        ran     receipt c7d08429cb05
+      + [verified] slug.sh lowercases what it is given
+        before the change (e023c8566969): exited 1
+verdict unverified  claims 1v/1u/0r  concurrency 1
+limitations:
+  - docs: the proof passes with the changes undone to main (e023c8566969) too, so it shows nothing this change did; claims stay unverified
+  - proofs checked against main (e023c8566969)
+```
+
+The receipt keeps the run before the change as the claim's `before` record:
+the commit, the exit code and the output. Both runs on the copy count toward
+the step's spend. Whether a proof fails depends on the revision, so a cached
+receipt is reused only if it was checked at the one the run is held to, and
+`flot verify` treats a step that drops `fails_before`, or a verified claim
+not checked at the revision, as a proof that differs.
+
 ### Refusing the edit
 
 `flot guard PATH...` names the paths whose change would touch the proofs: the

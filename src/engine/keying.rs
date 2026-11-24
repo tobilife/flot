@@ -408,6 +408,9 @@ pub fn step_key(flow_name: &str, step: &Step, facts: &Facts, deps: &[DepRef]) ->
     if let Some(sandbox) = &step.sandbox {
         key["sandbox"] = serde_json::json!(sandbox);
     }
+    if step.fails_before {
+        key["fails_before"] = serde_json::json!(true);
+    }
     digest::canonical(&key)
 }
 

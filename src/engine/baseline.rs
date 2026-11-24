@@ -16,12 +16,25 @@ use anyhow::{Context, Result};
 
 use crate::core::digest;
 use crate::core::flow::{Flow, Step};
-use crate::core::receipt::{FileDigest, ReceiptIdentity};
+use crate::core::receipt::{ClaimStatus, FileDigest, ReceiptIdentity};
 use crate::engine::git::Git;
 use crate::engine::keying;
 
 /// Largest proof input read from the baseline revision.
 const MAX_FILE_BYTES: u64 = 64 << 20;
+
+/// Lists the files under the working directory git sees and does not track.
+const UNTRACKED: [&str; 4] = ["ls-files", "-z", "--others", "--exclude-standard"];
+
+/// The paths a git command lists, NUL-separated.
+fn listed(git: &Git, args: &[&str]) -> Result<Vec<String>> {
+    let bytes = git.output(args, None, false)?;
+    Ok(bytes
+        .split(|&byte| byte == 0)
+        .filter(|path| !path.is_empty())
+        .map(|path| String::from_utf8_lossy(path).into_owned())
+        .collect())
+}
 
 #[derive(Debug)]
 pub struct Baseline {
@@ -34,11 +47,19 @@ pub struct Baseline {
     /// The flow at the revision; `None` when the flow file is not there or
     /// does not parse.
     flow: Option<Flow>,
-    /// Every file at the revision under the flow root, relative to it, with
-    /// its git object id.
-    tree: BTreeMap<String, String>,
+    /// Every file at the revision under the flow root, relative to it.
+    tree: BTreeMap<String, Blob>,
     /// Digests of the files read so far.
     digests: Mutex<BTreeMap<String, String>>,
+}
+
+/// A file at the revision.
+#[derive(Debug)]
+struct Blob {
+    /// Its git mode, such as `100644`.
+    mode: String,
+    /// Its git object id.
+    id: String,
 }
 
 /// Why a step's proof does not match the baseline.
@@ -59,6 +80,12 @@ struct Proof<'a> {
     /// `None` when the source does not record them, as a receipt does not.
     patterns: Option<&'a [String]>,
     files: &'a [FileDigest],
+    /// For a step, whether it declares `fails_before`.
+    fails_before: Option<bool>,
+    /// For a receipt, the commit its proof was run before the change at, if any.
+    checked_at: Option<&'a str>,
+    /// Whether a claim was verified: only then does how it was matter.
+    verified: bool,
 }
 
 impl Baseline {
@@ -79,7 +106,7 @@ impl Baseline {
             None,
             false,
         )?;
-        let mut tree: BTreeMap<String, String> = BTreeMap::new();
+        let mut tree: BTreeMap<String, Blob> = BTreeMap::new();
         for entry in listed
             .split(|&byte| byte == 0)
             .filter(|entry| !entry.is_empty())
@@ -89,14 +116,20 @@ impl Baseline {
                 continue;
             };
             let mut meta = meta.split(' ');
-            if let (Some(_), Some("blob"), Some(id)) = (meta.next(), meta.next(), meta.next()) {
+            if let (Some(mode), Some("blob"), Some(id)) = (meta.next(), meta.next(), meta.next()) {
                 if let Some(relative) = path.strip_prefix(prefix.as_str()) {
-                    tree.insert(relative.to_string(), id.to_string());
+                    tree.insert(
+                        relative.to_string(),
+                        Blob {
+                            mode: mode.to_string(),
+                            id: id.to_string(),
+                        },
+                    );
                 }
             }
         }
         let flow = match tree.get(flow_file) {
-            Some(id) => String::from_utf8(git.blob(id, MAX_FILE_BYTES)?)
+            Some(blob) => String::from_utf8(git.blob(&blob.id, MAX_FILE_BYTES)?)
                 .ok()
                 .and_then(|text| Flow::parse(&text).ok()),
             None => None,
@@ -119,28 +152,10 @@ impl Baseline {
     /// read is named once, as `dir/`.
     pub fn unread(&self, read: &BTreeSet<String>) -> Result<Vec<String>> {
         let git = Git::open(&self.root)?;
-        let listed = |args: &[&str]| -> Result<Vec<String>> {
-            let bytes = git.output(args, None, false)?;
-            Ok(bytes
-                .split(|&byte| byte == 0)
-                .filter(|path| !path.is_empty())
-                .map(|path| String::from_utf8_lossy(path).into_owned())
-                .collect())
-        };
-        let mut changed: BTreeSet<String> = listed(&[
-            "diff",
-            "--name-only",
-            "-z",
-            "--no-renames",
-            "--relative",
-            &self.commit,
-        ])?
-        .into_iter()
-        .collect();
-        let untracked = ["ls-files", "-z", "--others", "--exclude-standard"];
-        for path in listed(&[&untracked[..], &["--directory"]].concat())? {
+        let mut changed = self.edited(&git)?;
+        for path in listed(&git, &[&UNTRACKED[..], &["--directory"]].concat())? {
             if path.ends_with('/') && read.iter().any(|file| file.starts_with(&path)) {
-                changed.extend(listed(&[&untracked[..], &["--", &path]].concat())?);
+                changed.extend(listed(&git, &[&UNTRACKED[..], &["--", &path]].concat())?);
             } else {
                 changed.insert(path);
             }
@@ -150,6 +165,71 @@ impl Baseline {
             .into_iter()
             .filter(|path| !read.contains(path))
             .collect())
+    }
+
+    /// Undo, in `copy`, a copy of the flow root, every change under the flow
+    /// root here since the revision: an edited or deleted file gets its
+    /// content and mode at the revision back, a file the revision does not
+    /// have is removed. What git ignores is left as it is.
+    pub fn undo(&self, copy: &Path) -> Result<()> {
+        let git = Git::open(&self.root)?;
+        let mut changed = self.edited(&git)?;
+        changed.extend(listed(&git, &UNTRACKED)?);
+        for path in &changed {
+            let target = copy.join(path);
+            let present = std::fs::symlink_metadata(&target).ok();
+            let Some(blob) = self.tree.get(path) else {
+                // A directory here is a nested repository, not a file.
+                if present.is_some_and(|meta| !meta.is_dir()) {
+                    std::fs::remove_file(&target)
+                        .with_context(|| format!("cannot remove {path}"))?;
+                }
+                continue;
+            };
+            // A link would let a later write land outside the copy.
+            if blob.mode == "120000" {
+                anyhow::bail!("{path} is a symbolic link at {}", self.label());
+            }
+            let bytes = git
+                .blob(&blob.id, MAX_FILE_BYTES)
+                .with_context(|| format!("cannot read {path} at {}", self.label()))?;
+            match present {
+                Some(meta) if meta.is_dir() => std::fs::remove_dir_all(&target),
+                _ => Ok(()),
+            }
+            .with_context(|| format!("cannot replace {path}"))?;
+            if let Some(parent) = target.parent() {
+                std::fs::create_dir_all(parent)
+                    .with_context(|| format!("cannot create {}", parent.display()))?;
+            }
+            std::fs::write(&target, bytes).with_context(|| format!("cannot write {path}"))?;
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let mode = if blob.mode == "100755" { 0o755 } else { 0o644 };
+                std::fs::set_permissions(&target, std::fs::Permissions::from_mode(mode))
+                    .with_context(|| format!("cannot set the mode of {path}"))?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Tracked files under the flow root that differ here from the revision,
+    /// relative to it, edited, added or deleted.
+    fn edited(&self, git: &Git) -> Result<BTreeSet<String>> {
+        Ok(listed(
+            git,
+            &[
+                "diff",
+                "--name-only",
+                "-z",
+                "--no-renames",
+                "--relative",
+                &self.commit,
+            ],
+        )?
+        .into_iter()
+        .collect())
     }
 
     /// How the run names the baseline in its limitations.
@@ -183,6 +263,9 @@ impl Baseline {
             verify: step.verify.as_deref(),
             patterns: Some(&step.verify_inputs),
             files: verify_inputs,
+            fails_before: Some(step.fails_before),
+            checked_at: None,
+            verified: false,
         })
     }
 
@@ -203,6 +286,16 @@ impl Baseline {
                 .find_map(|claim| claim.verify_command.as_deref()),
             patterns: None,
             files: &identity.verify_inputs,
+            fails_before: None,
+            checked_at: identity
+                .claims
+                .iter()
+                .find_map(|claim| claim.before.as_ref())
+                .map(|before| before.commit.as_str()),
+            verified: identity
+                .claims
+                .iter()
+                .any(|claim| claim.status == ClaimStatus::Verified),
         })
     }
 
@@ -232,6 +325,27 @@ impl Baseline {
                     .is_some_and(|patterns| patterns != old.verify_inputs.as_slice())
                 {
                     reasons.push("its verify_inputs differ".into());
+                }
+                match proof.fails_before {
+                    Some(declared) if declared != old.fails_before => {
+                        reasons.push("its fails_before differs".into());
+                    }
+                    Some(_) => {}
+                    // A receipt held to the revision's fails_before: what
+                    // it verified, it must have seen fail at the revision.
+                    None if old.fails_before
+                        && proof.verified
+                        && proof.checked_at != Some(self.commit.as_str()) =>
+                    {
+                        reasons.push(match proof.checked_at {
+                            None => "its proof was not run before the change".to_string(),
+                            Some(commit) => format!(
+                                "its proof was run before the change at {}, not at this revision",
+                                &commit[..commit.len().min(12)]
+                            ),
+                        });
+                    }
+                    None => {}
                 }
             }
         }
@@ -274,7 +388,7 @@ impl Baseline {
 
     /// The digest of `path` at the revision; `None` when it is not there.
     fn digest(&self, path: &str) -> Result<Option<String>> {
-        let Some(id) = self.tree.get(path) else {
+        let Some(Blob { id, .. }) = self.tree.get(path) else {
             return Ok(None);
         };
         if let Some(known) = self.digests.lock().expect("digest cache").get(path) {

@@ -126,6 +126,12 @@ pub struct Step {
     /// beneath some paths. Where it cannot be enforced the step is not run.
     #[serde(default)]
     pub sandbox: Option<Sandbox>,
+    /// The proof must fail before the change: once it passes, it runs again
+    /// on a copy of the work with every change since the revision proofs
+    /// are checked against undone, and the claims verify only if it fails
+    /// there. A proof that passes either way shows nothing this change did.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub fails_before: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -278,6 +284,20 @@ impl Flow {
             }
             if step.attempts == Some(0) {
                 bail!("step `{}` attempts must be at least 1", step.id);
+            }
+            if step.fails_before {
+                if step.claims.is_empty() || step.verify.is_none() {
+                    bail!(
+                        "step `{}` sets fails_before, which needs claims and a verify command to prove them",
+                        step.id
+                    );
+                }
+                if !step.candidates.is_empty() {
+                    bail!(
+                        "step `{}` sets fails_before, which candidates do not support: a candidate's copy of the work has no history to undo its changes against",
+                        step.id
+                    );
+                }
             }
             if !step.candidates.is_empty() {
                 if step.candidates.len() < 2 {
@@ -702,6 +722,30 @@ claims = ["b holds"]
             .map(|step| step.id.as_str())
             .collect();
         assert_eq!(ids, vec!["unproven"]);
+    }
+
+    #[test]
+    fn fails_before_needs_a_proof_and_no_candidates() {
+        let base = "[flow]\nname = \"demo\"\n\n[[step]]\nid = \"a\"\nrun = \"true\"\nfails_before = true\n";
+        let proven = format!("{base}claims = [\"x\"]\nverify = \"true\"\n");
+        assert!(flow(&proven).is_ok());
+        for (extra, refusal) in [
+            ("", "needs claims and a verify command"),
+            ("claims = [\"x\"]\n", "needs claims and a verify command"),
+            ("verify = \"true\"\n", "needs claims and a verify command"),
+            (
+                "claims = [\"x\"]\nverify = \"true\"\ncandidates = [\"p\", \"q\"]\n",
+                "candidates do not support",
+            ),
+        ] {
+            let error = format!("{:#}", flow(&format!("{base}{extra}")).unwrap_err());
+            assert!(error.contains(refusal), "{extra}: {error}");
+        }
+        // Unset, it leaves the flow's digest as it was.
+        let plain = flow(&proven.replace("fails_before = true\n", "")).unwrap();
+        assert!(!serde_json::to_string(&plain.steps[0])
+            .unwrap()
+            .contains("fails_before"));
     }
 
     #[test]

@@ -84,6 +84,21 @@ pub struct ClaimRecord {
     /// Why the claim is not verified, when it is not.
     #[serde(default)]
     pub reason: Option<String>,
+    /// The proof run on the work with its changes undone, for a step that
+    /// declares `fails_before`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub before: Option<Before>,
+}
+
+/// The proof as it ran on a copy of the work with every change since a
+/// revision undone.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Before {
+    /// The commit the changes were undone to.
+    pub commit: String,
+    pub exit_code: Option<i32>,
+    /// Digest of the proof command's combined output there.
+    pub output_digest: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -288,12 +303,15 @@ impl Receipt {
                 .iter()
                 .map(|file| file.digest.as_str()),
         );
-        objects.extend(
-            self.identity
-                .claims
-                .iter()
-                .filter_map(|claim| claim.verify_output_digest.as_deref()),
-        );
+        for claim in &self.identity.claims {
+            objects.extend(claim.verify_output_digest.as_deref());
+            objects.extend(
+                claim
+                    .before
+                    .as_ref()
+                    .map(|before| before.output_digest.as_str()),
+            );
+        }
         objects
     }
 
@@ -846,8 +864,14 @@ mod tests {
             path: "out.txt".into(),
             digest: digest::bytes(b"out"),
         });
+        let before = digest::bytes(b"before");
         body.claims.push(ClaimRecord {
             verify_output_digest: Some(proof.clone()),
+            before: Some(Before {
+                commit: "abc".into(),
+                exit_code: Some(1),
+                output_digest: before.clone(),
+            }),
             ..claim(ClaimStatus::Verified, Some("true"))
         });
         let receipt = Receipt::seal(body, Observed::default());
@@ -856,6 +880,7 @@ mod tests {
         assert!(objects.contains(&receipt.identity.stderr_digest.as_str()));
         assert!(objects.contains(&digest::bytes(b"out").as_str()));
         assert!(objects.contains(&proof.as_str()));
+        assert!(objects.contains(&before.as_str()));
     }
 
     #[test]
@@ -906,6 +931,7 @@ mod tests {
             verify_exit: None,
             verify_output_digest: None,
             reason: None,
+            before: None,
         }
     }
 

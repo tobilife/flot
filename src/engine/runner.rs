@@ -22,12 +22,12 @@ use crate::core::digest;
 use crate::core::flow::{Flow, Step};
 use crate::core::metrics::{self, Metrics, Spend};
 use crate::core::receipt::{
-    candidate_rank, sum_costs, verdict_for, ClaimCounts, DepRef, FileDigest, Observed, Receipt,
-    ReceiptIdentity, RunAttempt, RunCandidate, RunManifest, RunStep, SandboxRecord, StepStatus,
-    ToolIdentity, FLOT_VERSION,
+    candidate_rank, sum_costs, verdict_for, ClaimCounts, ClaimStatus, DepRef, FileDigest, Observed,
+    Receipt, ReceiptIdentity, RunAttempt, RunCandidate, RunManifest, RunStep, SandboxRecord,
+    StepStatus, ToolIdentity, FLOT_VERSION,
 };
 use crate::engine::baseline::Baseline;
-use crate::engine::claims::{self, Proof, ProofOutcome};
+use crate::engine::claims::{self, Proof, ProofOutcome, Red};
 use crate::engine::exec;
 use crate::engine::keying::{self, Facts};
 use crate::engine::sandbox;
@@ -283,6 +283,23 @@ impl<'a> Runner<'a> {
                 "cached receipt settled other claims than this step makes; not reused".into(),
             );
             return Ok(None);
+        }
+        // Whether the proof fails before the change depends on the revision
+        // too, which the key does not cover.
+        if step.fails_before {
+            let checked_at = known
+                .identity
+                .claims
+                .iter()
+                .find_map(|claim| claim.before.as_ref())
+                .map(|before| before.commit.as_str());
+            if checked_at != self.baseline.map(|baseline| baseline.commit.as_str()) {
+                notes.push(
+                    "cached receipt was not checked against this revision before the change; the step runs again"
+                        .into(),
+                );
+                return Ok(None);
+            }
         }
         for output in &known.identity.outputs {
             if !step.declares_output(&output.path) {
@@ -1400,7 +1417,7 @@ impl<'a> Runner<'a> {
         {
             None => None,
             Some(_) => {
-                let scratch = Scratch::new(self.store.root())?;
+                let scratch = Scratch::new(self.store.root(), "sandbox")?;
                 metrics_path = scratch.path.join("metrics.json");
                 env.insert(
                     "FLOT_METRICS".into(),
@@ -1616,7 +1633,14 @@ impl<'a> Runner<'a> {
                 if !changed.is_empty() {
                     ProofOutcome::Compromised { changed }
                 } else {
-                    match self.prove(step, command, timeout, budget.max_output_bytes, stop) {
+                    match self.prove(
+                        step,
+                        command,
+                        &self.root,
+                        timeout,
+                        budget.max_output_bytes,
+                        stop,
+                    ) {
                         Err(error) => ProofOutcome::Failed(format!("{error:#}")),
                         Ok((proof, proof_metrics, proof_notes)) => {
                             step_metrics = match (step_metrics, proof_metrics) {
@@ -1644,7 +1668,21 @@ impl<'a> Runner<'a> {
                 }
             }
         };
-        let claims = claims::settle(step, status, tolerated, proof, &mut limitations);
+        let mut claims = claims::settle(step, status, tolerated, proof, &mut limitations);
+        if step.fails_before
+            && claims
+                .iter()
+                .any(|claim| claim.status == ClaimStatus::Verified)
+        {
+            let (red, red_metrics, red_notes) =
+                self.red(step, timeout, budget.max_output_bytes, stop);
+            step_metrics = match (step_metrics, red_metrics) {
+                (Some(step), Some(red)) => Some(step.plus(red)),
+                (step, red) => step.or(red),
+            };
+            metrics_notes.extend(red_notes);
+            claims = claims::hold_before(claims, red, &mut limitations);
+        }
 
         let (stdout_inline, stdout_truncated) =
             exec::stream_preview(&outcome.stdout, budget.max_inline_bytes);
@@ -1725,23 +1763,89 @@ impl<'a> Runner<'a> {
         Ok((env, metrics_path))
     }
 
-    /// Run a proof command and keep its combined output as evidence. A proof
-    /// can spend too, an agent asked to review for instance, so it reports
-    /// through its own `$FLOT_METRICS`, counted as the step's spend.
+    /// What `step`'s proof does before the change: it runs on a copy of the
+    /// work, where it must pass, then again there with every change since
+    /// the baseline undone. Both runs count as the step's spend.
+    fn red(
+        &self,
+        step: &Step,
+        timeout: Duration,
+        max_output_bytes: usize,
+        stop: &exec::StopSignal,
+    ) -> (Red, Option<Metrics>, Vec<String>) {
+        let Some(baseline) = self.baseline else {
+            return (Red::NoRevision, None, Vec::new());
+        };
+        let command = step
+            .verify
+            .as_deref()
+            .expect("a step with fails_before has a verify command");
+        let mut spent: Option<Metrics> = None;
+        let mut notes = Vec::new();
+        let mut prove = |place: &Path| -> Result<Proof> {
+            let (proof, metrics, proof_notes) =
+                self.prove(step, command, place, timeout, max_output_bytes, stop)?;
+            spent = match (spent.take(), metrics) {
+                (Some(spent), Some(more)) => Some(spent.plus(more)),
+                (spent, more) => spent.or(more),
+            };
+            notes.extend(
+                proof_notes
+                    .into_iter()
+                    .map(|note| format!("before the change, {note}")),
+            );
+            Ok(proof)
+        };
+        let red = (|| -> Result<Red> {
+            let scratch = Scratch::new(self.store.root(), "before")?;
+            let copy = scratch.path.join("work");
+            keying::copy_workspace(&self.root, &copy, step).context("cannot copy the work")?;
+            let green = prove(&copy)?;
+            if green.timed_out || green.exit_code != Some(0) {
+                return Ok(Red::CopyFails {
+                    exit_code: green.exit_code,
+                    timed_out: green.timed_out,
+                });
+            }
+            baseline
+                .undo(&copy)
+                .context("cannot undo the changes in the copy")?;
+            Ok(Red::Ran {
+                baseline: baseline.label(),
+                commit: baseline.commit.clone(),
+                proof: prove(&copy)?,
+            })
+        })()
+        .unwrap_or_else(|error| Red::Unchecked(format!("{error:#}")));
+        (red, spent, notes)
+    }
+
+    /// Run a proof command in `place`, the flow root or a copy of it, and
+    /// keep its combined output as evidence. A proof can spend too, an agent
+    /// asked to review for instance, so it reports through its own
+    /// `$FLOT_METRICS`, counted as the step's spend.
     fn prove(
         &self,
         step: &Step,
         command: &str,
+        place: &Path,
         timeout: Duration,
         max_output_bytes: usize,
         stop: &exec::StopSignal,
     ) -> Result<(Proof, Option<Metrics>, Vec<String>)> {
-        let (env, metrics_path) = self.metered_env(step)?;
-        let verification =
-            exec::run_command(command, &self.root, &env, timeout, max_output_bytes, stop)
-                .with_context(|| {
-                    format!("verify command for step `{}` could not start", step.id)
-                })?;
+        let (mut env, metrics_path) = self.metered_env(step)?;
+        if place != self.root {
+            // A copy has no `.git` and sits inside the store: git must not
+            // find the real repository above it.
+            if let Some(parent) = place.parent() {
+                env.insert(
+                    "GIT_CEILING_DIRECTORIES".into(),
+                    parent.to_string_lossy().into_owned(),
+                );
+            }
+        }
+        let verification = exec::run_command(command, place, &env, timeout, max_output_bytes, stop)
+            .with_context(|| format!("verify command for step `{}` could not start", step.id))?;
         let (metrics, notes) = read_metrics(&metrics_path);
         let notes = notes
             .into_iter()
@@ -1855,16 +1959,17 @@ fn read_metrics(path: &Path) -> (Option<Metrics>, Vec<String>) {
 
 static SCRATCH_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
-/// A directory in the store's `tmp` for one confined execution, removed when
-/// the execution is done with it.
+/// A directory in the store's `tmp` for one confined execution or one copy
+/// of the work, removed when it is done with.
 struct Scratch {
     path: PathBuf,
 }
 
 impl Scratch {
-    fn new(store_root: &Path) -> Result<Self> {
+    /// A directory named for what it holds, `kind`.
+    fn new(store_root: &Path, kind: &str) -> Result<Self> {
         let path = store_root.join("tmp").join(format!(
-            "sandbox-{}-{}",
+            "{kind}-{}-{}",
             std::process::id(),
             SCRATCH_SEQUENCE.fetch_add(1, Ordering::Relaxed)
         ));

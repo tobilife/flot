@@ -1298,8 +1298,21 @@ fn render_audit(audit: &Audit) {
                 );
             }
         }
+        if !anchor.unread.is_empty() {
+            say!("changes no step read: {}", listed(&anchor.unread));
+        }
     }
     render_authorship(audit.authorship, &audit.signers);
+}
+
+/// Up to 20 paths, and how many more there are.
+fn listed(paths: &[String]) -> String {
+    const SHOWN: usize = 20;
+    let mut text = paths[..paths.len().min(SHOWN)].join(", ");
+    if paths.len() > SHOWN {
+        text.push_str(&format!(" and {} more", paths.len() - SHOWN));
+    }
+    text
 }
 
 /// `text` as Markdown that renders as the same text: a claim or a limitation
@@ -1375,6 +1388,13 @@ fn markdown_report(audit: &Audit, detail: &RunDetail) -> String {
                     md(&anchor.missing.join(", "))
                 );
             }
+        }
+        if !anchor.unread.is_empty() {
+            let _ = writeln!(
+                out,
+                "- Changes no step read: {}",
+                md(&listed(&anchor.unread))
+            );
         }
     }
     let _ = writeln!(out, "- Authorship: {}", audit.authorship.label());

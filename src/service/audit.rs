@@ -5,7 +5,7 @@ use serde::Serialize;
 
 use crate::core::attest::{self, Authorship, SignerCheck};
 use crate::core::digest;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::core::receipt::{Observed, Receipt, RunManifest, Verdict};
 use crate::engine::baseline::Baseline;
@@ -37,6 +37,9 @@ pub struct Anchor {
     pub drifted: Vec<StepDrift>,
     /// Steps with claims at the revision that the run did not record.
     pub missing: Vec<String>,
+    /// Files that differ here from the revision and that no step of the run
+    /// read, checked or produced: changes no claim speaks for.
+    pub unread: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -56,10 +59,20 @@ impl Anchor {
 /// cannot be read is left to the integrity findings.
 pub fn anchor(store: &Store, manifest: &RunManifest, baseline: &Baseline) -> Result<Anchor> {
     let mut drifted = Vec::new();
+    let mut read: BTreeSet<String> = BTreeSet::new();
     for step in &manifest.steps {
         let Ok(receipt) = store.load_receipt(&step.receipt_id) else {
             continue;
         };
+        let identity = &receipt.identity;
+        for file in identity
+            .inputs
+            .iter()
+            .chain(&identity.verify_inputs)
+            .chain(&identity.outputs)
+        {
+            read.insert(file.path.clone());
+        }
         if let Some(drift) = baseline.drift_of(&receipt.identity)? {
             drifted.push(StepDrift {
                 step_id: step.step_id.clone(),
@@ -68,10 +81,12 @@ pub fn anchor(store: &Store, manifest: &RunManifest, baseline: &Baseline) -> Res
         }
     }
     let missing = baseline.missing_steps(|id| manifest.steps.iter().any(|step| step.step_id == id));
+    let unread = baseline.unread(&read)?;
     Ok(Anchor {
         baseline: baseline.label(),
         drifted,
         missing,
+        unread,
     })
 }
 

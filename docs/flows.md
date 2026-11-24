@@ -310,6 +310,30 @@ proofs: NOT as at origin/main (df9bf14a7787)
 authorship: unsigned
 ```
 
+### Changes no step read
+
+Held to a revision, `flot verify` also lists the files under the flow's
+directory that differ from it (edited, added or deleted, unless git ignores
+them) and that no step of the run read as an input, checked as a proof
+input or produced. No claim speaks for those changes, so they are where a
+reviewer has to look. The flow file is left out (its proofs are compared
+above), and an untracked directory none of whose files was read is named
+once. It does not change the verdict or the exit code. Real output, after
+`src/lib.sh` (an input) and `README.md` were edited and `deploy.conf` added:
+
+```text
+$ flot verify
+run 1795561275154-f4546837d30f  receipts checked 1  root f4546837d30f
+integrity: intact
+verdict passed
+proofs: as at main (97d175a0d3cc)
+changes no step read: README.md, deploy.conf
+authorship: unsigned
+```
+
+The files are those of the working tree when `verify` runs, which in CI is
+the tree the run saw.
+
 A receipt does not record the `verify_inputs` patterns, so `verify` compares
 the files they matched, the claims and the command. The revision must be a
 commit in the repository (`fetch` it first in CI); one that is not is an

@@ -6,6 +6,8 @@ budget = { timeout_secs = 1200, max_inline_bytes = 2048 }
 # Deliberately sequential: lint and test both drive cargo, which takes a build
 # lock, so overlapping them would queue inside cargo instead of saving time.
 max_parallel = 1
+# Proofs must match main as pushed, so a change cannot also loosen its check.
+proofs_from = "origin/main"
 
 [[step]]
 id = "format"

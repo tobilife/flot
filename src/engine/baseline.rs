@@ -29,6 +29,8 @@ pub struct Baseline {
     pub rev: String,
     pub commit: String,
     root: PathBuf,
+    /// The flow file, relative to `root`.
+    flow_file: String,
     /// The flow at the revision; `None` when the flow file is not there or
     /// does not parse.
     flow: Option<Flow>,
@@ -103,10 +105,51 @@ impl Baseline {
             rev: rev.to_string(),
             commit,
             root: root.to_path_buf(),
+            flow_file: flow_file.to_string(),
             flow,
             tree,
             digests: Mutex::default(),
         })
+    }
+
+    /// Files under the flow root that differ here from the revision (edited,
+    /// added or deleted, tracked or not ignored) and that `read` does not
+    /// hold, relative to the root. The flow file is left out; its proofs are
+    /// compared step by step. An untracked directory none of whose files was
+    /// read is named once, as `dir/`.
+    pub fn unread(&self, read: &BTreeSet<String>) -> Result<Vec<String>> {
+        let git = Git::open(&self.root)?;
+        let listed = |args: &[&str]| -> Result<Vec<String>> {
+            let bytes = git.output(args, None, false)?;
+            Ok(bytes
+                .split(|&byte| byte == 0)
+                .filter(|path| !path.is_empty())
+                .map(|path| String::from_utf8_lossy(path).into_owned())
+                .collect())
+        };
+        let mut changed: BTreeSet<String> = listed(&[
+            "diff",
+            "--name-only",
+            "-z",
+            "--no-renames",
+            "--relative",
+            &self.commit,
+        ])?
+        .into_iter()
+        .collect();
+        let untracked = ["ls-files", "-z", "--others", "--exclude-standard"];
+        for path in listed(&[&untracked[..], &["--directory"]].concat())? {
+            if path.ends_with('/') && read.iter().any(|file| file.starts_with(&path)) {
+                changed.extend(listed(&[&untracked[..], &["--", &path]].concat())?);
+            } else {
+                changed.insert(path);
+            }
+        }
+        changed.remove(&self.flow_file);
+        Ok(changed
+            .into_iter()
+            .filter(|path| !read.contains(path))
+            .collect())
     }
 
     /// How the run names the baseline in its limitations.

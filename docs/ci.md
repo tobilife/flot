@@ -72,6 +72,10 @@ Run `1795532156970-2b2b51cba86d` of flow ci, root `2b2b51cba86d`; recorded verdi
 (the limitations that follow, in a collapsed `<details>` block, are left out
 here.)
 
+When files changed since the revision that no step read, the report adds a
+line `Changes no step read:` naming them (up to 20), so a reviewer sees what
+the claims do not cover ([changes no step read](flows.md#changes-no-step-read)).
+
 ## Reusing a developer's signed run
 
 A run the developer signed and shared with `flot push --sign` need not be

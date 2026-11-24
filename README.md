@@ -243,6 +243,8 @@ budgets, concurrency, outputs, guarded proofs, scope and sandbox.
   holds a recorded run to the same revision. The Claude Code plugin also
   refuses edits to those files before they happen, and to what decides
   whether they are checked: CI workflows, git hooks, Claude Code's settings.
+  `flot verify` also names the files that changed since that revision but
+  that no step read, the changes no claim speaks for.
 - **Changes kept in scope.** A step with `may_change = ["src/**"]` fails if
   it creates, edits or deletes any other file that git does not ignore. On
   Linux, `sandbox` makes the kernel refuse those writes and the network.

@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Held to a revision, `flot verify` (text, `--json` as `anchor.unread`, and
+  `--markdown`) names the files that differ from it and that no step read,
+  checked or produced: the changes no claim speaks for. The verdict and exit
+  code are unchanged.
+- flot's own flow sets `proofs_from = "origin/main"`.
 - `flot doctor` checks what the evidence relies on without changing
   anything: the flow parses, `proofs_from` is set and resolves, git ignores
   the store, the signing key and trust list, that a requested sandbox can be

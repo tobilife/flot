@@ -3203,6 +3203,117 @@ fn anchored_project() -> Project {
 }
 
 #[test]
+fn verify_names_the_changes_no_step_read() {
+    let project = anchored_project();
+    project.write("docs/old.md", "old\n");
+    git_in(project.path(), &["add", "-A"]);
+    git_in(
+        project.path(),
+        &[
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@t",
+            "commit",
+            "-qm",
+            "docs",
+        ],
+    );
+    // The step now reads src/; the flow file itself is not a change here.
+    project.write(
+        "flot.toml",
+        &ANCHORED.replace(
+            "run = \"echo 1 > out.txt\"",
+            "run = \"echo 1 > out.txt\"\ninputs = [\"src/*.txt\"]",
+        ),
+    );
+    project.write("src/read.txt", "read\n");
+    project.write("src/unread.md", "not an input\n");
+    project.write("notes/a.md", "untracked\n");
+    project.write("notes/b.md", "untracked\n");
+    project.write(".gitignore", ".flot\nout.txt\nscratch/\n.test-keys/\n");
+    project.write("scratch/tmp.txt", "ignored\n");
+    std::fs::remove_file(project.path().join("docs/old.md")).unwrap();
+    project.flot(&["run"]).ok();
+    let verified = project.flot(&["verify"]);
+    verified
+        .ok()
+        .has("proofs: as at main (")
+        .has("changes no step read: .gitignore, docs/old.md, notes/, src/unread.md")
+        .lacks("src/read.txt")
+        .lacks("scratch")
+        .lacks("flot.toml");
+    let json = project.flot(&["verify", "--json"]).json();
+    assert_eq!(
+        json["anchor"]["unread"],
+        serde_json::json!([".gitignore", "docs/old.md", "notes/", "src/unread.md"])
+    );
+    project
+        .flot(&["verify", "--markdown"])
+        .ok()
+        .has(r"- Changes no step read: \.gitignore, docs/old\.md, notes/, src/unread\.md");
+
+    // A changed proof file is the proof's business, not an unread change.
+    project.write("check.sh", "grep -q 1 out.txt # changed\n");
+    project.flot(&["run"]);
+    let drifted = project.flot(&["verify"]);
+    assert_eq!(drifted.code, 2, "{}", drifted.stdout);
+    drifted
+        .has("check.sh differs")
+        .has("changes no step read: .gitignore, docs/old.md, notes/, src/unread.md\n");
+
+    // A flow in a subdirectory sees only its own directory, named from it.
+    let repo = tempfile::tempdir().unwrap();
+    let app = repo.path().join("app");
+    std::fs::create_dir_all(&app).unwrap();
+    std::fs::write(app.join("flot.toml"), ANCHORED).unwrap();
+    std::fs::write(app.join("check.sh"), "grep -q 1 out.txt\n").unwrap();
+    std::fs::write(
+        repo.path().join(".gitignore"),
+        ".flot\nout.txt\n.test-keys/\n",
+    )
+    .unwrap();
+    std::fs::write(app.join("data.txt"), "old\n").unwrap();
+    std::fs::write(repo.path().join("top.txt"), "old\n").unwrap();
+    git_in(repo.path(), &["init", "-q", "-b", "main"]);
+    git_in(repo.path(), &["add", "-A"]);
+    git_in(
+        repo.path(),
+        &[
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@t",
+            "commit",
+            "-qm",
+            "base",
+        ],
+    );
+    std::fs::write(app.join("lib.txt"), "new\n").unwrap();
+    std::fs::write(app.join("data.txt"), "new\n").unwrap();
+    std::fs::write(repo.path().join("top.txt"), "new\n").unwrap();
+    std::fs::write(repo.path().join("elsewhere.txt"), "outside the flow\n").unwrap();
+    let flot = |args: &[&str]| {
+        let output = Command::new(flot_bin())
+            .args(args)
+            .current_dir(&app)
+            .env(
+                "FLOT_SIGNING_KEY",
+                repo.path().join(".test-keys/signing.key"),
+            )
+            .output()
+            .unwrap();
+        String::from_utf8_lossy(&output.stdout).into_owned()
+    };
+    flot(&["run"]);
+    let verified = flot(&["verify"]);
+    assert!(
+        verified.contains("changes no step read: data.txt, lib.txt\n"),
+        "{verified}"
+    );
+}
+
+#[test]
 fn a_proof_that_differs_from_the_baseline_proves_nothing() {
     let project = anchored_project();
     project

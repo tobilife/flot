@@ -20,6 +20,11 @@
 - `flot log STEP --candidate NAME --attempt N`, and the same arguments on
   `flot_step_output`, read a candidate not kept or an attempt that did not
   hold.
+- `flot search QUERY` and the `flot_search` MCP tool: a literal, case-blind
+  search of recorded runs, newest first, over each executed step's complete
+  output, its proofs' output, its claims and their reasons and limitations,
+  including attempts and candidates not kept. Each hit names its run, step,
+  candidate, attempt, source and line.
 - A metrics report without `cost_usd` is an unknown cost, not $0: `flot run`
   counts such steps as "without cost", and the cost ceiling names them.
 - `examples/slugify/compare.toml`: Claude Code and Codex implement the spec as

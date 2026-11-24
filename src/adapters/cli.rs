@@ -170,6 +170,17 @@ pub enum Command {
         #[arg(long, default_value_t = 20)]
         limit: usize,
     },
+    /// Find text in what recorded runs printed, claimed and noted, newest
+    /// run first. The match is literal and ignores case.
+    Search {
+        query: String,
+        /// How many of the newest runs to search.
+        #[arg(long, default_value_t = 50)]
+        runs: usize,
+        /// Stop after this many hits.
+        #[arg(long, default_value_t = 50)]
+        limit: usize,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -573,6 +584,45 @@ fn dispatch(
                 );
             }
             Ok(ExitCode::SUCCESS)
+        }
+        Command::Search { query, runs, limit } => {
+            let report = workspace.search(query, *runs, *limit)?;
+            if cli.json {
+                print_json(&report)?;
+            } else {
+                for hit in &report.hits {
+                    let mut place = hit.step_id.clone().unwrap_or_else(|| "(run)".into());
+                    if let Some(candidate) = &hit.candidate {
+                        place.push_str(&format!(" candidate {candidate}"));
+                    }
+                    if let Some(attempt) = hit.attempt {
+                        place.push_str(&format!(" attempt {attempt}"));
+                    }
+                    let source = match hit.line {
+                        Some(line) => format!("{}:{line}", hit.source),
+                        None => hit.source.to_string(),
+                    };
+                    say!("{}  {place}  {source}  {}", hit.run_id, hit.text);
+                }
+                say!(
+                    "{} hit(s) in {} run(s) searched{}",
+                    report.hits.len(),
+                    report.runs_searched,
+                    if report.truncated {
+                        "; more hits exist, raise --limit"
+                    } else {
+                        ""
+                    }
+                );
+                for unreadable in &report.unreadable {
+                    say!("unreadable  {unreadable}");
+                }
+            }
+            Ok(if report.unreadable.is_empty() {
+                ExitCode::SUCCESS
+            } else {
+                exit_for_fault(FaultKind::Integrity)
+            })
         }
         Command::Runs { limit } => {
             let list = workspace.runs(*limit)?;

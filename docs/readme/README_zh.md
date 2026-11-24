@@ -63,7 +63,8 @@
   Claude Code 和 Codex 都通过了，Codex 只报告了 token 而没有报告花费，所以保留了 $0.10 的 Claude。
 - **需要别人信任这个结果。** `flot bundle` 给审阅者或另一台机器一个可以导入并验证的文件；
   认可谁的收据，由签名和对方自己的信任列表决定。
-- **想知道两次运行之间变了什么。** `flot diff` 会逐一指出收据或状态发生变化的步骤。
+- **想知道两次运行之间变了什么。** `flot diff` 会逐一指出收据或状态发生变化的步骤，
+  `flot search` 会从最新的运行开始，找出输出、声明或限制中提到某条消息的运行。
 
 以下情况它并不合适：
 
@@ -100,7 +101,7 @@ Fix the failing test. When you are done, run flot_run and show me the verdict
 and any claim that is not verified.
 ```
 
-智能体会获得用于规划、运行、查看、验证和比较运行的工具。声明未被证明的运行会以
+智能体会获得用于规划、运行、查看、验证、比较和搜索运行的工具。声明未被证明的运行会以
 `unverified` 返回，而不是工具错误，所以智能体不会把缺失的证明误认为偶发故障。除 `flot_run`
 之外的所有工具都标记为只读；无界面运行的智能体需要事先批准 `flot_run`，参见
 [审批](../mcp.md#approvals)。每个工具及其约定见 [MCP 服务器](../mcp.md)。

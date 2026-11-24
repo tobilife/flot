@@ -13,6 +13,7 @@
 | `flot log STEP [RUN] [--stderr] [--candidate NAME] [--attempt N]` | complete output one step of a run printed; by default the receipt the run kept, else another candidate it ran or an earlier attempt |
 | `flot cat DIGEST` | one stored object, byte-exact |
 | `flot runs [--limit N]` | recorded runs, newest first; imported ones are marked |
+| `flot search QUERY [--runs N] [--limit N]` | lines of recorded output, claims and limitations that contain QUERY (literal, any case), newest run first; a reused step is searched in the run that executed it, and attempts and candidates not kept are searched too |
 | `flot gc [--dry-run]` | drop evidence no recorded run references |
 | `flot bundle [RUN] [-o FILE] [--sign]` | one portable file: run, receipts, every object they name (streams, produced files, proofs), signatures |
 | `flot import FILE [--require-trusted]` | authenticate a bundle and absorb it into this store |

@@ -671,7 +671,7 @@ fn the_mcp_server_handshakes_and_runs_the_flow_over_stdio() {
         .collect();
     assert_eq!(replies.len(), 3, "the notification must not be answered");
     assert_eq!(replies[0]["result"]["serverInfo"]["name"], "flot");
-    assert_eq!(replies[1]["result"]["tools"].as_array().unwrap().len(), 9);
+    assert_eq!(replies[1]["result"]["tools"].as_array().unwrap().len(), 10);
     assert_eq!(
         replies[2]["result"]["structuredContent"]["manifest"]["verdict"],
         "passed"
@@ -2845,4 +2845,56 @@ verify = "test $(cat answer) = 42"
         .ok()
         .has("candidates patchy held after 2 attempts (cost unknown), steady held ($0.500000); kept steady");
     project.flot(&["verify"]).ok().has("integrity: intact");
+}
+
+#[test]
+fn search_finds_what_runs_recorded_and_names_where() {
+    let project = Project::new(CANDIDATES);
+    project.write("question", "life\n");
+    project.flot(&["run"]).ok();
+    // A candidate not kept is searched, with the line its output said it on.
+    project
+        .flot(&["search", "WRONG READ"])
+        .ok()
+        .has("  solve candidate wrong  stdout:1  wrong read life")
+        .has("1 hit(s) in 1 run(s) searched");
+    // A reused step's hits belong to the run that executed it.
+    project.flot(&["run"]).ok().has("cached   solve");
+    project
+        .flot(&["search", "cheap read"])
+        .ok()
+        .has("1 hit(s) in 2 run(s) searched");
+    // Claims with their verdicts, and the run's own limitations.
+    project
+        .flot(&["search", "the answer is 42"])
+        .ok()
+        .has("  solve candidate wrong  claim  the answer is 42 [refuted]");
+    project
+        .flot(&["search", "kept cheap"])
+        .ok()
+        .has("  (run)  limitation  solve: candidates wrong refuted");
+    let limited = project.flot(&["search", "read life", "--limit", "2"]);
+    limited
+        .ok()
+        .has("2 hit(s) in 2 run(s) searched; more hits exist, raise --limit");
+    let json = project
+        .flot(&["--json", "search", "pricey read"])
+        .ok()
+        .json();
+    assert_eq!(json["hits"][0]["candidate"], "pricey");
+    assert_eq!(json["hits"][0]["source"], "stdout");
+    assert_eq!(json["hits"][0]["line"], 1);
+    assert_eq!(json["runs_searched"], 2);
+    assert_eq!(json["truncated"], false);
+    project
+        .flot(&["search", "no such text"])
+        .ok()
+        .has("0 hit(s) in 2 run(s) searched");
+
+    let project = Project::new(&RETRYING.replace("GOAL", "2"));
+    project.flot(&["run"]).ok();
+    project
+        .flot(&["search", "count is 1"])
+        .ok()
+        .has("  fix attempt 1  proof:1  count is 1");
 }

@@ -76,7 +76,8 @@ It pays off when:
   another machine one file to import and verify; signatures and their own
   trust list decide whose receipts count.
 - **You want to know what changed between two runs.** `flot diff` names each
-  step whose receipt or status changed.
+  step whose receipt or status changed, and `flot search` finds the runs whose
+  output, claims or limitations mention a message, newest first.
 
 It is not the tool when:
 
@@ -117,7 +118,7 @@ Fix the failing test. When you are done, run flot_run and show me the verdict
 and any claim that is not verified.
 ```
 
-The agent gets tools to plan, run, show, verify and compare runs. A run whose
+The agent gets tools to plan, run, show, verify, compare and search runs. A run whose
 claims were not proven comes back as `unverified`, not as a tool error, so the
 agent cannot mistake a missing proof for a glitch. Every tool but `flot_run`
 is marked read-only; a headless agent needs `flot_run` approved in advance, as

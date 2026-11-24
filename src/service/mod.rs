@@ -5,6 +5,7 @@
 pub mod audit;
 pub mod bundle;
 pub mod keys;
+pub mod search;
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -449,6 +450,12 @@ impl Workspace {
             }
         }
         Ok(list)
+    }
+
+    /// Search the newest `runs` recorded runs for `query`, literally and
+    /// ignoring case; at most `limit` hits.
+    pub fn search(&self, query: &str, runs: usize, limit: usize) -> Result<search::SearchReport> {
+        search::search(&self.store()?, query, runs, limit)
     }
 
     pub fn gc(&self, dry_run: bool) -> Result<GcReport> {

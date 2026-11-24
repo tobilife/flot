@@ -243,6 +243,11 @@ impl Server {
                 count("max_bytes").unwrap_or(DEFAULT_OBJECT_BYTES),
             )?)?,
             "flot_runs" => serde_json::to_value(workspace.runs(count("limit").unwrap_or(20))?)?,
+            "flot_search" => serde_json::to_value(workspace.search(
+                &required("query")?,
+                count("runs").unwrap_or(50),
+                count("limit").unwrap_or(50),
+            )?)?,
             other => unreachable!("`call` admits only catalog tools, not `{other}`"),
         };
         Ok(value)
@@ -581,6 +586,17 @@ fn tool_catalog() -> Vec<Value> {
             json!({ "limit": { "type": "integer", "minimum": 1, "description": "Maximum runs to return." } }),
             &[],
         ),
+        tool(
+            "flot_search",
+            Effect::Reads,
+            "Find text in recorded runs, newest first: each executed step's complete stdout and stderr, its proofs' output, its claims and their reasons, and limitations, including attempts and candidates that were not kept. The match is literal and ignores case. Use it to find when an error first appeared or which run a message came from; read a whole output with flot_step_output.",
+            json!({
+                "query": { "type": "string", "description": "Text to find." },
+                "runs": { "type": "integer", "minimum": 1, "description": "How many of the newest runs to search; defaults to 50." },
+                "limit": { "type": "integer", "minimum": 1, "description": "Stop after this many hits; defaults to 50." }
+            }),
+            &["query"],
+        ),
     ]
 }
 
@@ -669,11 +685,28 @@ verify = "grep -q flot artifact.txt"
     }
 
     #[test]
+    fn search_finds_a_steps_output_line() {
+        let (_dir, server) = project(PROVEN);
+        call(&server, "flot_run", json!({}));
+        let found = call(&server, "flot_search", json!({ "query": "FLOT" }));
+        assert_eq!(found["isError"], false, "{found}");
+        let hits = found["structuredContent"]["hits"].as_array().unwrap();
+        assert_eq!(hits[0]["source"], "claim");
+        assert_eq!(hits[0]["text"], "artifact.txt mentions flot [verified]");
+        assert_eq!(hits[1]["step_id"], "write");
+        assert_eq!(hits[1]["source"], "stdout");
+        assert_eq!(hits[1]["line"], 1);
+        assert_eq!(hits[1]["text"], "flot");
+        let empty = call(&server, "flot_search", json!({ "query": "" }));
+        assert_eq!(empty["isError"], true, "{empty}");
+    }
+
+    #[test]
     fn every_catalog_tool_declares_an_object_schema() {
         let (_dir, server) = project(PROVEN);
         let response = server.handle(&request("tools/list", json!({}))).unwrap();
         let tools = response["result"]["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 9);
+        assert_eq!(tools.len(), 10);
         for entry in tools {
             assert!(entry["name"].as_str().unwrap().starts_with("flot_"));
             assert!(!entry["description"].as_str().unwrap().is_empty());

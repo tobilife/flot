@@ -83,6 +83,7 @@ from the shell.
 | `flot_step_output` | complete output of one step of a run, by step id (`step`, `run`, `candidate`, `attempt`, `stderr`, `max_bytes`) |
 | `flot_read_object` | one stored object by digest, with `max_bytes` |
 | `flot_runs` | recorded runs with verdicts and roots, and any that cannot be read |
+| `flot_search` | text in recorded runs' output, proofs, claims and limitations, newest first (`query`, `runs`, `limit`) |
 
 ## Replies and errors
 

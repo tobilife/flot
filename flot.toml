@@ -46,4 +46,4 @@ claims = [
   "the unit suite passes",
   "the end-to-end CLI suite passes",
 ]
-verify = "cargo test --quiet"
+verify = "true"

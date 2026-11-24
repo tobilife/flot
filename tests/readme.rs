@@ -68,3 +68,21 @@ fn the_claude_code_plugin_names_the_release_being_built() {
     assert_eq!(entry["name"], manifest["name"]);
     assert_eq!(entry["source"], "./plugins/claude-code");
 }
+
+#[test]
+fn the_github_action_installs_the_release_being_built() {
+    let action = read("action.yml");
+    let wanted = format!(
+        "  version:\n    description: flot release to install, such as {v}; `path` uses the flot already on PATH.\n    default: \"{v}\"\n",
+        v = env!("CARGO_PKG_VERSION")
+    );
+    assert!(
+        action.contains(&wanted),
+        "action.yml installs another version by default"
+    );
+    let uses = format!("uses: tobilife/flot@v{}", env!("CARGO_PKG_VERSION"));
+    assert!(
+        read("docs/ci.md").contains(&uses),
+        "docs/ci.md uses another release of the action"
+    );
+}

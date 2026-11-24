@@ -34,8 +34,13 @@ verify = "cargo clippy --all-targets -- -D warnings"
 id = "test"
 run = "cargo test"
 needs = ["build"]
-# tests/readme.rs reads the READMEs, so they key this step too.
-inputs = ["src/**/*.rs", "tests/**/*.rs", "Cargo.toml", "README.md", "docs/readme/*.md"]
+# tests/readme.rs reads the READMEs and the files that name the release, so
+# they key this step too.
+inputs = [
+  "src/**/*.rs", "tests/**/*.rs", "Cargo.toml", "README.md", "docs/readme/*.md",
+  "docs/ci.md", "action.yml", "plugins/claude-code/.claude-plugin/plugin.json",
+  ".claude-plugin/marketplace.json",
+]
 claims = [
   "the unit suite passes",
   "the end-to-end CLI suite passes",

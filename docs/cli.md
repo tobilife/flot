@@ -7,7 +7,7 @@
 | `flot run [--only STEP] [--force] [--jobs N] [--max-cost USD] [--sign] [--proofs-from REV]` | execute and record receipts; `--sign` then signs the run; `--proofs-from` holds each proof to a git revision ([proofs from a revision](flows.md#proofs-from-a-revision)) |
 | `flot sign [RUN]` | sign a run executed here with the host key |
 | `flot show [RUN]` | steps, claims and limitations of a run |
-| `flot verify [RUN] [--proofs-from REV]` | re-authenticate a run from the store alone; with a revision (or the flow's `proofs_from`), also check its proofs are as they are there |
+| `flot verify [RUN] [--proofs-from REV] [--markdown]` | re-authenticate a run from the store alone; with a revision (or the flow's `proofs_from`), also check its proofs are as they are there; `--markdown` prints the check as a report ([in CI](ci.md)) |
 | `flot guard PATH... [--hook]` | name the paths whose change would touch the proofs and exit 2 if any; `--hook` answers a Claude Code `PreToolUse` payload |
 | `flot diff [LEFT] [RIGHT]` | step-by-step comparison by receipt identity; by default `latest~1` against `latest` |
 | `flot receipt ID` | one receipt as JSON (id prefix accepted) |

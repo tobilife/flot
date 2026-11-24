@@ -76,6 +76,10 @@ It pays off when:
   another machine one file to import and verify, and `flot push` and
   `flot pull` share runs through a git remote you already use; signatures and
   the reader's own trust list decide whose receipts count.
+- **A pull request must not merge on a weaker check.** The GitHub action
+  runs the flow in CI, holds every proof to the base branch, and puts the
+  report in the job summary and on the pull request; as a required check it
+  blocks the merge.
 - **You want to know what changed between two runs.** `flot diff` names each
   step whose receipt or status changed, and `flot search` finds the runs whose
   output, claims or limitations mention a message, newest first.
@@ -345,6 +349,7 @@ with `flot --version`, the flow file, the command you ran and its output.
 ## Documentation
 
 - [Writing flows](docs/flows.md): steps, keys, receipts, claims, attempts, candidates, budgets, concurrency, outputs, guarded proofs and scope.
+- [In CI](docs/ci.md): the GitHub action, the pull request report, and reusing a developer's signed run.
 - [CLI reference](docs/cli.md): commands, selecting runs and flows, `--json` and exit codes.
 - [MCP server](docs/mcp.md): registration, tools, replies, errors and cancellation.
 - [Running coding agents](docs/agents.md): an end-to-end agent run, attempts with feedback, two agents compared, spend and the cost ceiling.

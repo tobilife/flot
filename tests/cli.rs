@@ -3200,6 +3200,12 @@ fn a_proof_that_differs_from_the_baseline_proves_nothing() {
     assert_eq!(held.code, 2, "{}", held.stdout);
     held.has("proofs: NOT as at main")
         .has("work: check.sh differs");
+    let report = project.flot(&["verify", "--proofs-from", "main", "--markdown"]);
+    assert_eq!(report.code, 2, "{}", report.stdout);
+    report
+        .has("### flot: unverified, proofs differ from main")
+        .has("recorded verdict passed")
+        .has("- Proofs: **not as at main");
     // Nor does a receipt that passed against its own baseline stand in.
     let reused = project.flot(&["run", "--proofs-from", "main"]);
     assert_eq!(reused.code, 2, "{}", reused.stdout);
@@ -3323,4 +3329,31 @@ fn a_step_that_changes_files_outside_may_change_fails() {
     project
         .flot(&["plan"])
         .has("must be a relative path inside the flow root");
+}
+
+#[test]
+fn a_markdown_report_renders_what_a_flow_says_as_text() {
+    let project = Project::new(
+        r#"
+[flow]
+name = "report"
+
+[[step]]
+id = "write"
+run = "echo flot > artifact.txt"
+claims = ["see [this](https://example.com) | ![x](y) <b>bold</b>", "artifact.txt holds flot"]
+verify = "grep -q flot artifact.txt"
+"#,
+    );
+    project.flot(&["run"]).ok();
+    let report = project.flot(&["verify", "--markdown"]);
+    report
+        .ok()
+        .has("### flot: passed")
+        .has("- Integrity: intact")
+        .has("| `write` | ok | see \\[this\\]\\(https://example\\.com\\) \\| \\!\\[x\\]\\(y\\) &lt;b\\>bold&lt;/b\\> | verified |")
+        .has("|  |  | artifact\\.txt holds flot | verified |")
+        .lacks("Proofs:");
+    let both = project.flot(&["--json", "verify", "--markdown"]);
+    assert_eq!(both.code, 3, "{}", both.stderr);
 }

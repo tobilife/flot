@@ -48,6 +48,14 @@
   outside those globs and its `outputs` (and not ignored by git) fails, naming
   each file. Such a step runs with no other step beside it, and the scope is
   part of its key.
+- `flot verify --markdown`: the check as Markdown for a pull request comment
+  or a job summary, with the headline the exit code gives; claims and
+  limitations are escaped so that they render as text.
+- A GitHub action (`action.yml`): installs a release binary, runs the flow,
+  holds proofs to the base branch of a pull request, reports in the job
+  summary and in one pull request comment, and fails the job unless
+  `flot verify` exits 0. With `signers`, it trusts the keys a file on the base
+  branch lists and pulls their signed runs first. See `docs/ci.md`.
 - A metrics report without `cost_usd` is an unknown cost, not $0: `flot run`
   counts such steps as "without cost", and the cost ceiling names them.
 - `examples/slugify/compare.toml`: Claude Code and Codex implement the spec as

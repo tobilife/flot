@@ -1,0 +1,160 @@
+name: flot
+description: Run a flot flow, check its evidence and hold its proofs to the base branch, then report the verdict on the job and the pull request.
+author: tobilife
+branding:
+  icon: check-square
+  color: green
+
+inputs:
+  version:
+    description: flot release to install, such as 0.2.2; `path` uses the flot already on PATH.
+    default: "0.2.2"
+  working-directory:
+    description: Directory of the flow; flot finds the nearest flot.toml at or above it.
+    default: "."
+  run:
+    description: Run the flow before checking it. With `false`, an earlier step ran it, and the latest run executed on this runner is checked.
+    default: "true"
+  signers:
+    description: A file of `NAME KEY` lines, relative to the repository root, read from the base branch of a pull request (else from the commit checked out). Its keys are trusted, and runs they signed are pulled from `refs/flot/runs` first, so steps whose inputs match are reused instead of executed.
+    default: ""
+  proofs-from:
+    description: Git revision every proof must match. Empty means the base branch of a pull request, and none otherwise; `none` turns it off.
+    default: ""
+  comment:
+    description: On a pull request, post the report as a comment and update it on later runs. Needs `pull-requests write`.
+    default: "true"
+  token:
+    description: Token for the pull request comment.
+    default: ${{ github.token }}
+
+outputs:
+  verdict:
+    description: The recorded verdict of the run checked (passed, unverified or failed).
+    value: ${{ steps.check.outputs.verdict }}
+  exit-code:
+    description: The exit code of `flot verify`; 0 only when the run passed, its evidence is intact and its proofs are as at the revision.
+    value: ${{ steps.check.outputs.exit-code }}
+
+runs:
+  using: composite
+  steps:
+    - name: Install flot
+      if: inputs.version != 'path'
+      shell: bash
+      env:
+        VERSION: ${{ inputs.version }}
+      run: |
+        set -euo pipefail
+        case "$RUNNER_OS-$RUNNER_ARCH" in
+          Linux-X64) target=x86_64-unknown-linux-musl ;;
+          Linux-ARM64) target=aarch64-unknown-linux-musl ;;
+          macOS-X64) target=x86_64-apple-darwin ;;
+          macOS-ARM64) target=aarch64-apple-darwin ;;
+          Windows-X64) target=x86_64-pc-windows-msvc ;;
+          *) echo "::error::flot has no release binary for $RUNNER_OS $RUNNER_ARCH"; exit 1 ;;
+        esac
+        name="flot-v${VERSION}-${target}"
+        case "$target" in *windows*) archive="$name.zip" ;; *) archive="$name.tar.gz" ;; esac
+        dir="$RUNNER_TEMP/flot-install"
+        mkdir -p "$dir"
+        cd "$dir"
+        base="https://github.com/tobilife/flot/releases/download/v${VERSION}"
+        curl -fsSL -o "$archive" "$base/$archive"
+        curl -fsSL -o "$archive.sha256" "$base/$archive.sha256"
+        if command -v sha256sum >/dev/null; then sha256sum -c "$archive.sha256"; else shasum -a 256 -c "$archive.sha256"; fi
+        case "$archive" in *.zip) unzip -q "$archive" ;; *) tar xzf "$archive" ;; esac
+        echo "$dir/$name" >> "$GITHUB_PATH"
+
+    - name: Fetch the base revision
+      if: github.base_ref != ''
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        BASE: ${{ github.base_ref }}
+      run: git fetch --no-tags --depth=1 origin "+refs/heads/${BASE}:refs/remotes/origin/${BASE}"
+
+    - name: Trust signers and pull their runs
+      if: inputs.signers != ''
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        SIGNERS: ${{ inputs.signers }}
+        BASE: ${{ github.base_ref }}
+      run: |
+        set -euo pipefail
+        # From the base branch: a pull request must not choose whom CI trusts.
+        rev=HEAD
+        if [ -n "$BASE" ]; then rev="origin/$BASE"; fi
+        git show "$rev:$SIGNERS" | while read -r name key; do
+          case "$name" in ''|'#'*) continue ;; esac
+          flot trust add "$name" "$key"
+        done
+        # Untrusted bundles are refused, which is not a failure of this job.
+        flot pull --require-trusted || echo "::notice::flot pull refused some runs; their steps run here instead"
+
+    - name: Run the flow
+      if: inputs.run == 'true'
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        PROOFS_FROM: ${{ inputs.proofs-from }}
+        BASE: ${{ github.base_ref }}
+      run: |
+        set -uo pipefail
+        args=()
+        if [ "$PROOFS_FROM" = "" ] && [ -n "$BASE" ]; then args=(--proofs-from "origin/$BASE"); fi
+        if [ "$PROOFS_FROM" != "" ] && [ "$PROOFS_FROM" != none ]; then args=(--proofs-from "$PROOFS_FROM"); fi
+        # The verdict is judged by the check below, which also reports it.
+        flot --version
+        flot run ${args[@]+"${args[@]}"} || echo "flot run exited $?"
+
+    - name: Check the run
+      id: check
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        PROOFS_FROM: ${{ inputs.proofs-from }}
+        BASE: ${{ github.base_ref }}
+      run: |
+        set -uo pipefail
+        args=()
+        if [ "$PROOFS_FROM" = "" ] && [ -n "$BASE" ]; then args=(--proofs-from "origin/$BASE"); fi
+        if [ "$PROOFS_FROM" != "" ] && [ "$PROOFS_FROM" != none ]; then args=(--proofs-from "$PROOFS_FROM"); fi
+        report="$RUNNER_TEMP/flot-report.md"
+        code=0
+        flot verify --markdown ${args[@]+"${args[@]}"} > "$report" || code=$?
+        if [ ! -s "$report" ]; then
+          printf '### flot: no report\n\n`flot verify` exited %s without a report; the job log says why.\n' "$code" > "$report"
+        fi
+        cat "$report" >> "$GITHUB_STEP_SUMMARY"
+        verdict=$(flot --json show 2>/dev/null | jq -r '.verdict // empty' || true)
+        echo "verdict=${verdict}" >> "$GITHUB_OUTPUT"
+        echo "exit-code=${code}" >> "$GITHUB_OUTPUT"
+        echo "report=${report}" >> "$GITHUB_OUTPUT"
+
+    - name: Comment on the pull request
+      if: inputs.comment == 'true' && github.event.pull_request.number != ''
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+        REPORT: ${{ steps.check.outputs.report }}
+        PR: ${{ github.event.pull_request.number }}
+        REPO: ${{ github.repository }}
+      run: |
+        set -uo pipefail
+        marker='<!-- flot-report -->'
+        body="$(printf '%s\n%s' "$marker" "$(cat "$REPORT")")"
+        existing=$(gh api "repos/$REPO/issues/$PR/comments" --paginate \
+          --jq ".[] | select(.body | startswith(\"$marker\")) | .id" | head -n 1)
+        if [ -n "$existing" ]; then
+          gh api -X PATCH "repos/$REPO/issues/comments/$existing" -f body="$body" >/dev/null
+        else
+          gh api -X POST "repos/$REPO/issues/$PR/comments" -f body="$body" >/dev/null
+        fi || echo "::warning::flot could not comment on the pull request; the job summary has the report"
+
+    - name: Verdict
+      shell: bash
+      env:
+        CODE: ${{ steps.check.outputs.exit-code }}
+      run: exit "$CODE"

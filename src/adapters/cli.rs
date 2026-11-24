@@ -118,6 +118,10 @@ pub enum Command {
         /// `proofs_from`.
         #[arg(long, value_name = "REV")]
         proofs_from: Option<String>,
+        /// Print a Markdown report of the run and this check, for a pull
+        /// request comment or a CI job summary.
+        #[arg(long)]
+        markdown: bool,
     },
     /// Sign a run executed here with the host key (see `flot key init`).
     Sign {
@@ -485,9 +489,21 @@ fn dispatch(
             }
             Ok(exit_for(detail.manifest.verdict))
         }
-        Command::Verify { run, proofs_from } => {
+        Command::Verify {
+            run,
+            proofs_from,
+            markdown,
+        } => {
+            if *markdown && cli.json {
+                anyhow::bail!("--markdown and --json each choose the output; name one");
+            }
             let audit = workspace.verify(run, proofs_from.as_deref())?;
-            if cli.json {
+            if *markdown {
+                print!(
+                    "{}",
+                    markdown_report(&audit, &workspace.show(&audit.run_id)?)
+                );
+            } else if cli.json {
                 print_json(&audit)?;
             } else {
                 render_audit(&audit);
@@ -1153,6 +1169,138 @@ fn render_audit(audit: &Audit) {
         }
     }
     render_authorship(audit.authorship, &audit.signers);
+}
+
+/// `text` as Markdown that renders as the same text: a claim or a limitation
+/// may come from an agent, and must not add links, images, markup or rows.
+fn md(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for character in text.chars() {
+        match character {
+            '\\' | '`' | '*' | '_' | '{' | '}' | '[' | ']' | '(' | ')' | '#' | '+' | '-' | '.'
+            | '!' | '|' | '~' | '>' | '=' => {
+                out.push('\\');
+                out.push(character);
+            }
+            '<' => out.push_str("&lt;"),
+            '&' => out.push_str("&amp;"),
+            '\n' | '\r' => out.push(' '),
+            other if other.is_control() => {}
+            other => out.push(other),
+        }
+    }
+    out
+}
+
+/// A run and the check `flot verify` made of it, for a pull request comment
+/// or a CI job summary.
+fn markdown_report(audit: &Audit, detail: &RunDetail) -> String {
+    use std::fmt::Write;
+    let manifest = &detail.manifest;
+    // The same judgment as the exit code of `flot verify`.
+    let headline = match &audit.anchor {
+        _ if !audit.intact => "evidence broken".to_string(),
+        Some(anchor) if !anchor.holds() && manifest.verdict == Verdict::Passed => {
+            format!("unverified, proofs differ from {}", md(&anchor.baseline))
+        }
+        _ => manifest.verdict.label().to_string(),
+    };
+    let mut out = String::new();
+    let _ = writeln!(out, "### flot: {headline}\n");
+    let _ = writeln!(
+        out,
+        "Run `{}` of flow {}, root `{}`{}; recorded verdict {}.\n",
+        audit.run_id,
+        md(&manifest.flow),
+        digest::short(&audit.root_digest),
+        if detail.imported { ", imported" } else { "" },
+        manifest.verdict.label()
+    );
+    let _ = writeln!(
+        out,
+        "- Integrity: {}",
+        if audit.intact { "intact" } else { "**broken**" }
+    );
+    for finding in &audit.findings {
+        let _ = writeln!(out, "  - {}", md(finding));
+    }
+    if let Some(anchor) = &audit.anchor {
+        if anchor.holds() {
+            let _ = writeln!(out, "- Proofs: as at {}", md(&anchor.baseline));
+        } else {
+            let _ = writeln!(out, "- Proofs: **not as at {}**", md(&anchor.baseline));
+            for drift in &anchor.drifted {
+                let _ = writeln!(
+                    out,
+                    "  - `{}`: {}",
+                    drift.step_id,
+                    md(&drift.reasons.join(", "))
+                );
+            }
+            if !anchor.missing.is_empty() {
+                let _ = writeln!(
+                    out,
+                    "  - claims there that this run does not make: {}",
+                    md(&anchor.missing.join(", "))
+                );
+            }
+        }
+    }
+    let _ = writeln!(out, "- Authorship: {}", audit.authorship.label());
+    let counts = manifest.claims;
+    let _ = writeln!(
+        out,
+        "- Claims: {} verified, {} unverified, {} refuted",
+        counts.verified, counts.unverified, counts.refuted
+    );
+    if manifest.spend.reporting_steps > 0 {
+        let _ = writeln!(
+            out,
+            "- Spend: {}",
+            crate::core::metrics::format_usd(manifest.spend.cost_micro_usd)
+        );
+    }
+    let _ = writeln!(out, "\n| Step | Status | Claim | |\n|---|---|---|---|");
+    for step in &manifest.steps {
+        let status = format!(
+            "{}{}",
+            step.status.label(),
+            if step.cached { ", reused" } else { "" }
+        );
+        let claims = detail.step_claims.get(&step.step_id);
+        match claims.filter(|claims| !claims.is_empty()) {
+            None => {
+                let _ = writeln!(out, "| `{}` | {status} | | |", step.step_id);
+            }
+            Some(claims) => {
+                for (index, claim) in claims.iter().enumerate() {
+                    let step_cell = if index == 0 {
+                        format!("`{}`", step.step_id)
+                    } else {
+                        String::new()
+                    };
+                    let status_cell = if index == 0 { status.as_str() } else { "" };
+                    let text = match &claim.reason {
+                        Some(reason) => format!("{} ({})", md(&claim.text), md(reason)),
+                        None => md(&claim.text),
+                    };
+                    let _ = writeln!(
+                        out,
+                        "| {step_cell} | {status_cell} | {text} | {} |",
+                        claim.status.label()
+                    );
+                }
+            }
+        }
+    }
+    if !manifest.limitations.is_empty() {
+        let _ = writeln!(out, "\n<details><summary>Limitations</summary>\n");
+        for limitation in &manifest.limitations {
+            let _ = writeln!(out, "- {}", md(limitation));
+        }
+        let _ = writeln!(out, "\n</details>");
+    }
+    out
 }
 
 fn render_signed(signed: &SignReport) {

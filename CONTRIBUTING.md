@@ -57,13 +57,15 @@ the maintainer decides so.
 1. Rename `## Unreleased` in [CHANGELOG.md](CHANGELOG.md) to the new version,
    and set the same `version` in `Cargo.toml` and in the Claude Code plugin's
    [plugin.json](plugins/claude-code/.claude-plugin/plugin.json); installed
-   plugins update only when that version changes.
+   plugins update only when that version changes. Set it too as the default
+   `version` the GitHub [action](action.yml) installs, and in the tag
+   [docs/ci.md](docs/ci.md) uses.
 2. Update all three READMEs together: [English](README.md),
    [한국어](docs/readme/README_ko.md) and [中文](docs/readme/README_zh.md).
    Each states the release under its header (`**X.Y.Z**` and one line on what
    changed), and every change to one README is made in all three.
-   `tests/readme.rs` fails while any of them, or the plugin, names another
-   version.
+   `tests/readme.rs` fails while any of them, the plugin or the action names
+   another version.
 3. Commit, then push a tag: `git tag vX.Y.Z && git push origin vX.Y.Z`.
 
 The [release workflow](.github/workflows/release.yml) checks that the tag,

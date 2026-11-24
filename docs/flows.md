@@ -330,6 +330,24 @@ protected  tests/acceptance.py: the proof of step `implement` reads it
 protected  flot.toml: it is the flow file, which says what proves the work
 ```
 
+It also protects what decides whether the proofs are checked at all, in the
+repository the flow is in (or the flow's directory outside one): Claude Code's
+settings, which run the hook below, CI workflows, which run the flow, git
+hooks and git's configuration, which can point it at other hooks, and the
+user's own `~/.claude/settings.json`. In this repository (real output):
+
+```text
+$ flot guard .github/workflows/ci.yml .claude/settings.json .git/hooks/pre-push ~/.claude/settings.json src/lib.rs
+protected  .github/workflows/ci.yml: it is a CI workflow, which decides what CI checks
+protected  .claude/settings.json: it configures Claude Code, including the hook that enforces this guard
+protected  .git/hooks/pre-push: it is a git hook, code git runs on its own
+protected  ~/.claude/settings.json: it configures Claude Code for this user, including the hook that enforces this guard
+```
+
+An agent that is refused one of these can still ask you to make the change.
+The hook stops an agent, not a pull request: to keep CI from being edited
+away, make the job that runs flot a required check on the protected branch.
+
 `flot guard --hook` reads a Claude Code `PreToolUse` payload on stdin and
 answers with a denial; the [Claude Code plugin](mcp.md#claude-code-plugin)
 installs it for `Edit`, `Write`, `MultiEdit` and `NotebookEdit`. A shell

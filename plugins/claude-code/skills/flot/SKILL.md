@@ -25,9 +25,10 @@ exited 0. Report what the receipts prove, not what you expect.
 - The step's inline output keeps its first and last lines. Read all of it with
   `flot_step_output` (`step`, and `stderr: true` for stderr).
 - Fix the code under test. Do not edit the flow's proof commands or the files
-  they read to make a claim pass; that voids the evidence. If a check itself
-  is wrong, say so and leave the change to the user. A hook refuses such
-  edits; do not work around it with a shell command.
+  they read to make a claim pass; that voids the evidence. The same goes for
+  what runs the checks: CI workflows, git hooks, Claude Code settings. If a
+  check itself is wrong, say so and leave the change to the user. A hook
+  refuses such edits; do not work around it with a shell command.
 - Run `flot_run` again after the fix.
 
 ## Looking back

@@ -387,7 +387,16 @@ fn dispatch(
                     }
                 }
             }
-            let guarded: Vec<_> = flows.iter().flat_map(|flow| flow.guard(&targets)).collect();
+            // One reason per file: flows in one repository guard its harness
+            // files alike.
+            let guarded: Vec<_> = targets
+                .iter()
+                .filter_map(|target| {
+                    flows
+                        .iter()
+                        .find_map(|flow| flow.guard(std::slice::from_ref(target)).pop())
+                })
+                .collect();
             if *hook {
                 // Claude Code reads a denial on stdout; the exit stays 0 so
                 // the hook's `|| true` keeps a failure to run from blocking.

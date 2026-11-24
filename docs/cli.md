@@ -8,7 +8,7 @@
 | `flot sign [RUN]` | sign a run executed here with the host key |
 | `flot show [RUN]` | steps, claims and limitations of a run |
 | `flot verify [RUN] [--proofs-from REV] [--markdown]` | re-authenticate a run from the store alone; with a revision (or the flow's `proofs_from`), also check its proofs are as they are there; `--markdown` prints the check as a report ([in CI](ci.md)) |
-| `flot guard PATH... [--hook]` | name the paths whose change would touch the proofs and exit 2 if any; `--hook` answers a Claude Code `PreToolUse` payload |
+| `flot guard PATH... [--hook]` | name the paths whose change would touch the proofs or decide whether they are checked (CI workflows, git hooks, Claude Code settings) and exit 2 if any; `--hook` answers a Claude Code `PreToolUse` payload |
 | `flot diff [LEFT] [RIGHT]` | step-by-step comparison by receipt identity; by default `latest~1` against `latest` |
 | `flot receipt ID` | one receipt as JSON (id prefix accepted) |
 | `flot log STEP [RUN] [--stderr] [--candidate NAME] [--attempt N]` | complete output one step of a run printed; by default the receipt the run kept, else another candidate it ran or an earlier attempt |

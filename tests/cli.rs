@@ -3298,6 +3298,67 @@ fn a_proof_that_differs_from_the_baseline_proves_nothing() {
 }
 
 #[test]
+fn guard_protects_what_decides_whether_proofs_are_checked() {
+    let project = Project::new(ANCHORED);
+    git_in(project.path(), &["init", "-q"]);
+    let harness = [
+        (".claude/settings.json", "it configures Claude Code"),
+        (".claude/settings.local.json", "it configures Claude Code"),
+        (".github/workflows/ci.yml", "it is a CI workflow"),
+        (".git/hooks/pre-commit", "it is a git hook"),
+        (".git/config", "it is git configuration"),
+    ];
+    for (path, reason) in harness {
+        let guarded = project.flot(&["guard", path]);
+        assert_eq!(guarded.code, 2, "{path}: {}", guarded.stdout);
+        guarded.has(&format!("protected  {path}: {reason}"));
+    }
+    // Outside a repository, the flow's directory stands in for it.
+    let bare = Project::new(ANCHORED);
+    bare.flot(&["guard", ".claude/settings.json"])
+        .has("protected  .claude/settings.json: it configures Claude Code");
+    for path in [
+        ".github/dependabot.yml",
+        ".claude/agents/reviewer.md",
+        ".git-blame-ignore-revs",
+        "docs/.github/workflows/ci.yml",
+    ] {
+        project.flot(&["guard", path]).ok();
+    }
+
+    // A flow in a subdirectory guards its repository's harness, named from
+    // the repository, and once however many flows find it.
+    project.write(
+        "sub/flot.toml",
+        "[flow]\nname = \"sub\"\n\n[[step]]\nid = \"inner\"\nrun = \"true\"\n",
+    );
+    let nested = project.flot(&["-f", "sub/flot.toml", "guard", ".github/workflows/ci.yml"]);
+    assert_eq!(nested.code, 2, "{}", nested.stdout);
+    nested.has("protected  .github/workflows/ci.yml: it is a CI workflow");
+    let both = project.flot(&["guard", "sub/x", ".github/workflows/ci.yml"]);
+    assert_eq!(both.stdout.matches("ci.yml").count(), 1, "{}", both.stdout);
+
+    // The user's own Claude Code settings, wherever the session is.
+    let home = tempfile::tempdir().unwrap();
+    let settings = home.path().join(".claude/settings.json");
+    let output = Command::new(flot_bin())
+        .args(["guard", settings.to_str().unwrap()])
+        .current_dir(project.path())
+        .env("HOME", home.path())
+        .env("FLOT_SIGNING_KEY", project.key_path())
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(output.status.code(), Some(2), "{stdout}");
+    assert!(
+        stdout.contains(
+            "protected  ~/.claude/settings.json: it configures Claude Code for this user"
+        ),
+        "{stdout}"
+    );
+}
+
+#[test]
 fn guard_names_the_files_that_prove_the_work() {
     let project = Project::new(ANCHORED);
     project.write("check.sh", "true\n");

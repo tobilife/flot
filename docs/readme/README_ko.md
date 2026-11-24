@@ -108,8 +108,8 @@ codex mcp add flot -- flot mcp      # Codex CLI
 ```
 
 Claude Code에서는 대신 플러그인을 설치할 수 있습니다. 같은 서버를 등록하고, Claude가
-변경이 동작한다고 말하기 전에 플로우를 실행하게 하는 스킬과, 플로우 파일과 증명이 읽는
-파일의 편집을 거부하는 훅을 더합니다. `flot`은 `PATH`에 있어야 합니다.
+변경이 동작한다고 말하기 전에 플로우를 실행하게 하는 스킬과, 플로우 파일, 증명이 읽는
+파일, CI 워크플로, git 훅, Claude Code 자신의 설정 편집을 거부하는 훅을 더합니다. `flot`은 `PATH`에 있어야 합니다.
 
 ```text
 /plugin install flot --marketplace tobilife/flot
@@ -221,7 +221,8 @@ key)**를 만듭니다. 키가 같으면 이전 영수증을 재사용하고 그
 - **에이전트가 고칠 수 없는 증명.** `proofs_from = "origin/main"`이면 그 리비전과
   다른 증명(명령, 주장, 증명이 읽는 파일)의 주장은 unverified로 남고,
   `flot verify --proofs-from`은 기록된 실행을 같은 리비전에 비춰 봅니다. Claude Code
-  플러그인은 그 파일들의 편집을 일어나기 전에 거부합니다.
+  플러그인은 그 파일들의 편집을 일어나기 전에 거부하고, 그것들이 검사되는지를 정하는
+  CI 워크플로, git 훅, Claude Code 설정의 편집도 거부합니다.
 - **범위 안의 변경.** `may_change = ["src/**"]`를 둔 단계가 git이 무시하지 않는 다른
   파일을 만들거나 고치거나 지우면 실패합니다. Linux에서는 `sandbox`로 그런 쓰기와
   네트워크를 커널이 거부하게 할 수 있습니다.

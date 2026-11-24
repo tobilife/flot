@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- `flot guard`, and so the Claude Code hook, also protects what decides
+  whether proofs are checked: `.claude/settings.json` and
+  `settings.local.json`, `.github/workflows/`, `.git/hooks/`, `.git/config`
+  (in the flow's repository) and `~/.claude/settings.json`.
 - `flot bundle` and `flot push` refuse a run that carries a credential-shaped
   token (GitHub, GitLab, npm, Slack, Anthropic, OpenAI, AWS, Google, PEM
   private keys) in its output, receipts or produced files, naming the step and

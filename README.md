@@ -119,8 +119,9 @@ codex mcp add flot -- flot mcp      # Codex CLI
 
 In Claude Code you can install the plugin instead: it registers the same
 server, adds a skill that runs the flow before Claude says a change works, and
-adds a hook that refuses edits to the flow file and the files its proofs read.
-flot must be on your `PATH`.
+adds a hook that refuses edits to the flow file, the files its proofs read,
+CI workflows, git hooks and Claude Code's own settings. flot must be on your
+`PATH`.
 
 ```text
 /plugin install flot --marketplace tobilife/flot
@@ -238,7 +239,8 @@ budgets, concurrency, outputs, guarded proofs, scope and sandbox.
   proof that differs from that revision (its command, its claims or the files
   it reads) leaves its claims unverified, and `flot verify --proofs-from`
   holds a recorded run to the same revision. The Claude Code plugin also
-  refuses edits to those files before they happen.
+  refuses edits to those files before they happen, and to what decides
+  whether they are checked: CI workflows, git hooks, Claude Code's settings.
 - **Changes kept in scope.** A step with `may_change = ["src/**"]` fails if
   it creates, edits or deletes any other file that git does not ignore. On
   Linux, `sandbox` makes the kernel refuse those writes and the network.

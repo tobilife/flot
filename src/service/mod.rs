@@ -164,6 +164,42 @@ pub struct Guarded {
     pub reason: String,
 }
 
+/// `path` relative to `base` (as given or resolved), `/`-separated.
+fn relative_to(path: &Path, base: &Path) -> Option<String> {
+    [Some(base.to_path_buf()), base.canonicalize().ok()]
+        .into_iter()
+        .flatten()
+        .find_map(|base| {
+            let relative = path.strip_prefix(normalize(&base)).ok()?;
+            Some(
+                relative
+                    .components()
+                    .map(|part| part.as_os_str().to_string_lossy())
+                    .collect::<Vec<_>>()
+                    .join("/"),
+            )
+        })
+}
+
+/// Why `relative` (to the flow's directory or its repository) decides
+/// whether the evidence is checked at all: the agent's own settings, which
+/// run the hook that enforces the guard, CI workflows, which run the flow,
+/// and git hooks, which run code on their own.
+fn harness(relative: &str) -> Option<String> {
+    let reason = match relative {
+        ".claude/settings.json" | ".claude/settings.local.json" => {
+            "it configures Claude Code, including the hook that enforces this guard"
+        }
+        ".git/config" => "it is git configuration, which can point git at other hooks",
+        _ if relative.starts_with(".git/hooks/") => "it is a git hook, code git runs on its own",
+        _ if relative.starts_with(".github/workflows/") => {
+            "it is a CI workflow, which decides what CI checks"
+        }
+        _ => return None,
+    };
+    Some(reason.to_string())
+}
+
 /// `path` without `.` and with `..` applied, without touching the disk: the
 /// file may not exist yet.
 fn normalize(path: &Path) -> PathBuf {
@@ -317,59 +353,75 @@ impl Workspace {
     }
 
     /// Which of `paths` (absolute) changing would touch this flow's proofs:
-    /// the flow file, a file a step's proof reads, or the store. A flow file
-    /// that is missing guards nothing; one that does not parse still guards
-    /// itself and the store.
+    /// the flow file, a file a step's proof reads, the store, or what decides
+    /// whether those are checked at all (see [`harness`]). A flow file that is
+    /// missing guards nothing; one that does not parse still guards itself,
+    /// the store and the harness.
     pub fn guard(&self, paths: &[PathBuf]) -> Vec<Guarded> {
         if !self.flow_path.is_file() {
             return Vec::new();
         }
         let flow = self.flow().ok();
-        let roots: Vec<PathBuf> = [Some(self.root.clone()), self.root.canonicalize().ok()]
-            .into_iter()
-            .flatten()
-            .collect();
+        // The repository the flow is in, which may hold it in a
+        // subdirectory, else the flow's own directory.
+        let top = self
+            .root
+            .ancestors()
+            .find(|dir| dir.join(".git").is_dir())
+            .unwrap_or(&self.root);
+        let home = std::env::var_os("HOME")
+            .or_else(|| std::env::var_os("USERPROFILE"))
+            .map(PathBuf::from);
         let mut guarded = Vec::new();
         for path in paths {
             let path = normalize(path);
-            let Some(relative) = roots
-                .iter()
-                .find_map(|root| path.strip_prefix(normalize(root)).ok())
-            else {
-                continue;
-            };
-            let relative = relative
-                .components()
-                .map(|part| part.as_os_str().to_string_lossy())
-                .collect::<Vec<_>>()
-                .join("/");
-            let reason = if Some(relative.as_str())
-                == self.flow_path.file_name().and_then(|name| name.to_str())
-            {
-                Some("it is the flow file, which says what proves the work".to_string())
-            } else if relative == crate::store::STORE_DIR
-                || relative.starts_with(&format!("{}/", crate::store::STORE_DIR))
-            {
-                Some("it is in the flot store, which holds the evidence".to_string())
-            } else {
-                flow.iter().flat_map(|flow| &flow.steps).find_map(|step| {
+            let found = relative_to(&path, &self.root)
+                .and_then(|relative| {
+                    let reason = self.guarded_in_flow(flow.as_ref(), &relative)?;
+                    Some((relative, reason))
+                })
+                .or_else(|| {
+                    let relative = relative_to(&path, top)?;
+                    harness(&relative).map(|reason| (relative, reason))
+                })
+            .or_else(|| {
+                let relative = relative_to(&path, home.as_deref()?)?;
+                (relative == ".claude/settings.json").then(|| {
+                    (
+                        format!("~/{relative}"),
+                        "it configures Claude Code for this user, including the hook that enforces this guard".to_string(),
+                    )
+                })
+            });
+            if let Some((path, reason)) = found {
+                guarded.push(Guarded { path, reason });
+            }
+        }
+        guarded
+    }
+
+    /// Why `relative` (to the flow's directory) is part of this flow's
+    /// evidence, if it is.
+    fn guarded_in_flow(&self, flow: Option<&Flow>, relative: &str) -> Option<String> {
+        if Some(relative) == self.flow_path.file_name().and_then(|name| name.to_str()) {
+            Some("it is the flow file, which says what proves the work".to_string())
+        } else if relative == crate::store::STORE_DIR
+            || relative.starts_with(&format!("{}/", crate::store::STORE_DIR))
+        {
+            Some("it is in the flot store, which holds the evidence".to_string())
+        } else {
+            flow.into_iter()
+                .flat_map(|flow| &flow.steps)
+                .find_map(|step| {
                     step.verify_inputs
                         .iter()
                         .filter_map(|pattern| glob::Pattern::new(pattern).ok())
                         .any(|pattern| {
-                            pattern.matches_with(&relative, crate::engine::keying::match_options())
+                            pattern.matches_with(relative, crate::engine::keying::match_options())
                         })
                         .then(|| format!("the proof of step `{}` reads it", step.id))
                 })
-            };
-            if let Some(reason) = reason {
-                guarded.push(Guarded {
-                    path: relative,
-                    reason,
-                });
-            }
         }
-        guarded
     }
 
     /// Write the starter flow. Refuses to replace an existing file unless

@@ -55,6 +55,19 @@ and check did the same there. That bundle was unsigned; a later review made
 imports reusable only from trusted signers (see [Evidence is not cache](evidence.md#evidence-is-not-cache)), so
 today the same hand-off needs `bundle --sign` and `trust add`.
 
+After the agent steps were isolated from the local Claude Code setup (see the
+next section), one more fresh run of the same example, with the implementer
+limited to `Read,Edit,Write` and the reviewer to `Read,Grep,Glob,Write`:
+
+```
+9. isolated agent steps    implement 1v, review 1v (APPROVE)    PASSED  $0.48
+```
+
+The implementation cost $0.14 and the review $0.34, against $1.67 to $2.10
+for the earlier fresh runs, and this `slug.py` keeps the accent on `ǿ`
+(`slugify("Ǿre") == "ore"`). The reviewer again said it could not execute
+code and reviewed by reading; the claim was settled by the check, not by it.
+
 ## Three reviewers in parallel
 
 `examples/parallel-review.toml` was run once, copied to the root of a clone of

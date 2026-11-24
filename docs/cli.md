@@ -8,6 +8,7 @@
 | `flot sign [RUN]` | sign a run executed here with the host key |
 | `flot show [RUN]` | steps, claims and limitations of a run |
 | `flot verify [RUN] [--proofs-from REV] [--markdown]` | re-authenticate a run from the store alone; with a revision (or the flow's `proofs_from`), also check its proofs are as they are there; `--markdown` prints the check as a report ([in CI](ci.md)) |
+| `flot doctor` | check what the evidence relies on here: the flow parses, `proofs_from` is set and resolves, git ignores the store, the signing key and trust list, that a requested sandbox can be enforced, and that no Claude Code settings switch hooks off; changes nothing and exits 1 if a check fails |
 | `flot guard [PATH...] [--command CMD] [--hook]` | name the paths whose change would touch the proofs or decide whether they are checked (CI workflows, git hooks, Claude Code settings) and exit 2 if any; `--command` reads a shell command line for the files it writes and for downloaded code piped into an interpreter; `--hook` answers a Claude Code `PreToolUse` payload |
 | `flot diff [LEFT] [RIGHT]` | step-by-step comparison by receipt identity; by default `latest~1` against `latest` |
 | `flot receipt ID` | one receipt as JSON (id prefix accepted) |
@@ -57,7 +58,7 @@ JSON reader decodes to the same text; `flot cat` is byte-exact.
 
 ## Exit codes
 
-`0` passed; `1` failed, or evidence that does not authenticate (a
+`0` passed; `1` failed, a `flot doctor` check that fails, or evidence that does not authenticate (a
 broken run, a tampered receipt or object, a bundle that fails its checks, a
 store record that cannot be read); `2` unverified claims, a non-identical
 diff, a run whose proofs differ from the revision `verify` holds it to, or a

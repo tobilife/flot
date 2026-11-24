@@ -4,6 +4,7 @@
 
 pub mod audit;
 pub mod bundle;
+pub mod doctor;
 pub mod keys;
 pub mod search;
 pub mod share;

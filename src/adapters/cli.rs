@@ -19,6 +19,7 @@ use crate::core::receipt::{ClaimStatus, RunManifest, StepStatus, Verdict};
 use crate::core::shell;
 use crate::service::audit::Audit;
 use crate::service::bundle::ImportPolicy;
+use crate::service::doctor::Status;
 use crate::service::{
     fault_kind, FaultKind, Guarded, Plan, RunDetail, RunOptions, RunReport, Sharing, SignReport,
     Workspace,
@@ -97,10 +98,15 @@ pub enum Command {
         #[arg(long, value_name = "REV")]
         proofs_from: Option<String>,
     },
-    /// Say whether changing these files would touch the flow's proofs: the
-    /// flow file, a step's verify_inputs, or the store. Exits 2 when one
-    /// would. With --hook, reads a Claude Code PreToolUse payload on stdin
-    /// and answers with a denial on stdout.
+    /// Check what this setup relies on: the flow, proofs held to a
+    /// revision, the store kept out of git, keys, trust, the sandbox, and
+    /// agent settings that would switch the guard off. Exits 1 when one
+    /// fails. Changes nothing.
+    Doctor,
+    /// Say whether changing these files would touch the flow's proofs or
+    /// decide whether they are checked. Exits 2 when one would. With
+    /// --command, reads a shell command line; with --hook, a Claude Code
+    /// PreToolUse payload on stdin, answering with a denial on stdout.
     Guard {
         paths: Vec<PathBuf>,
         /// Also read a shell command line for the files it writes and for
@@ -372,6 +378,27 @@ fn dispatch(
             say!("wrote {}", path.display());
             say!("next: flot plan");
             Ok(ExitCode::SUCCESS)
+        }
+        Command::Doctor => {
+            let checks = workspace.doctor();
+            if cli.json {
+                print_json(&checks)?;
+            } else {
+                for found in &checks {
+                    let status = match found.status {
+                        Status::Ok => "ok",
+                        Status::Note => "note",
+                        Status::Warn => "warn",
+                        Status::Fail => "FAIL",
+                    };
+                    say!("{status:<5} {:<15} {}", found.check, found.detail);
+                }
+            }
+            Ok(if checks.iter().any(|found| found.status == Status::Fail) {
+                ExitCode::from(1)
+            } else {
+                ExitCode::SUCCESS
+            })
         }
         Command::Guard {
             paths,

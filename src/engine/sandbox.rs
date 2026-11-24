@@ -109,6 +109,23 @@ impl Prepared {
     pub fn apply(&self, _command: &mut std::process::Command) {}
 }
 
+/// Whether a step confined to write only beneath `root`, without network,
+/// can start here: the policy is prepared and a trivial child is confined
+/// with it. Returns the mechanism that would enforce it.
+pub fn probe(root: &Path) -> Result<String> {
+    let prepared = prepare(false, Some(&[root.to_path_buf()]), &[])?;
+    let mut command = std::process::Command::new("sh");
+    command
+        .args(["-c", "exit 0"])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    prepared.apply(&mut command);
+    let status = command.status()?;
+    anyhow::ensure!(status.success(), "a confined child exited with {status}");
+    Ok(prepared.mechanism)
+}
+
 /// `write` resolved against `root`; each path must exist.
 pub fn resolve(root: &Path, write: &[String]) -> Result<Vec<PathBuf>> {
     write

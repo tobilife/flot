@@ -122,6 +122,8 @@ server, adds a skill that runs the flow before Claude says a change works, and
 adds a hook that refuses edits, and shell commands that name the file, to the
 flow file, the files its proofs read, CI workflows, git hooks and Claude
 Code's own settings, as well as `curl … | sh`. flot must be on your `PATH`.
+`flot doctor` checks the setup, including settings that would switch the hook
+off.
 
 ```text
 /plugin install flot --marketplace tobilife/flot

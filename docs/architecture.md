@@ -2,13 +2,13 @@
 
 ```
 core      digest · receipt · flow · metrics · compare
-          attest · fault · secrets                       pure model, no IO
+          attest · fault · secrets · shell               pure model, no IO
 store     content-addressed objects, receipts, runs
 engine    keying · claims · scheduler · exec · runner   flow -> receipts
           git · baseline · sandbox
 service   Workspace: plan run show verify diff receipt
           read_object runs gc sign bundle import key    the one contract
-          trust search push pull guard
+          trust search push pull guard doctor
 adapters  cli · mcp                                     parse and render only
 main.rs   composition root: hands the MCP server to the CLI
 ```
@@ -34,7 +34,7 @@ the content store with host-sealed cache and trust, the CLI with typed exit
 codes, an MCP stdio server over the same functions, authenticated receipt
 bundles, spend accounting with a run cost ceiling, signed attestations with a
 local trust list and key handovers, guarded proofs, produced files kept and restored, an enforced
-layer architecture, attempts with feedback, candidates, run search, sharing through git, a Claude Code plugin, and 322 tests including end-to-end runs through the real
+layer architecture, attempts with feedback, candidates, run search, sharing through git that refuses credential-shaped tokens, a Claude Code plugin whose guard reads edits and shell commands, `flot doctor`, and 335 tests including end-to-end runs through the real
 binary, a real MCP handshake and a cross-store bundle import.
 
 Not there yet: confining steps outside Linux, and confining reads (a step

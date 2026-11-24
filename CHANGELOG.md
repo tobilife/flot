@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- `flot doctor` checks what the evidence relies on without changing
+  anything: the flow parses, `proofs_from` is set and resolves, git ignores
+  the store, the signing key and trust list, that a requested sandbox can be
+  enforced (by confining a trivial child), and Claude Code settings that set
+  `disableAllHooks`, `bypassPermissions` or hold a credential. Exits 1 when a
+  check fails.
 - `flot guard --command CMD` reads a shell command line for the files it
   writes (redirections, `rm`, `mv`, `cp`, `tee`, `sed -i`, `git checkout`, ...)
   and refuses `curl … | sh`. The Claude Code hook now also runs before `Bash`.

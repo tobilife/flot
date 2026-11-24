@@ -12,6 +12,11 @@
   at it.
 - `latest~N` names the run executed N runs before the latest, and `flot diff`
   (and `flot_diff`) compares `latest~1` with `latest` by default.
+- A wildcard input skips what git ignores and never enters `.git`, so `**/*`
+  hashes the project instead of `target/`: on this repository `flot plan` with
+  `inputs = ["**/*"]` went from 13082 files in 2 minutes to 53 files in 0.2 s.
+  A path the pattern spells out is still followed, and outputs still reach
+  ignored build products.
 - A new `.flot` store writes its own `.gitignore`, so `git status` stays clean.
 - `flot_run` tells agents that a cached step is as strong as a fresh run, so
   they stop forcing re-runs to double-check it.

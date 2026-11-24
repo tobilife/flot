@@ -28,6 +28,14 @@ output patterns, and the receipt ids of upstream steps. Equal key ⇒ the same w
 Declaring inputs is what makes a cache hit trustworthy; a step with none carries
 a limitation saying so, in `flot plan` and in its receipt.
 
+Input and proof-input patterns are globs relative to the flow file (`*` stays
+within a directory, `**` crosses them). A wildcard skips what git ignores
+(`.gitignore` files, `.git/info/exclude`, global excludes), so `**/*` means the
+project's sources, not `target/` or `node_modules/`; it never enters `.git` or
+`.flot`. A path the pattern spells out is always followed: `target/gen/*.rs`
+and `.env` are inputs even when git ignores them. Output patterns reach ignored
+files too, because products usually are ignored build output.
+
 ## Receipts
 
 Split in two. `identity` is deterministic — command, step key,

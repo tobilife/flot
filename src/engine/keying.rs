@@ -7,7 +7,7 @@
 //! changes every identity flot has ever recorded.
 
 use std::collections::{BTreeMap, HashMap};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 
@@ -90,6 +90,78 @@ pub struct Scan {
     pub problems: Vec<String>,
 }
 
+/// Which files a wildcard may reach.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Reach {
+    /// Skip what git ignores (`.gitignore` files, `.git/info/exclude`, the
+    /// user's global excludes): build trees and caches are not what a step
+    /// reads, and hashing them makes every key change.
+    Tracked,
+    /// Everything: a step's products are often ignored build output.
+    Everything,
+}
+
+/// The directories before a pattern's first wildcard, and whether it has one.
+fn literal_base(pattern: &str) -> (&str, bool) {
+    let mut base = "";
+    let mut rest = pattern;
+    while let Some((part, tail)) = rest.split_once('/') {
+        if part.contains(['*', '?', '[']) {
+            return (base, true);
+        }
+        base = &pattern[..pattern.len() - tail.len() - 1];
+        rest = tail;
+    }
+    (base, rest.contains(['*', '?', '[']))
+}
+
+/// Files under `root` a pattern names. A wildcard never enters `.git` or the
+/// store, and with [`Reach::Tracked`] it skips what git ignores below the
+/// pattern's literal directories; a path the pattern spells
+/// out is always followed.
+fn candidates(root: &Path, pattern: &str, reach: Reach) -> Result<Vec<PathBuf>, String> {
+    let compiled = glob::Pattern::new(pattern).map_err(|error| error.to_string())?;
+    let (base, wild) = literal_base(pattern);
+    if !wild {
+        let path = root.join(pattern);
+        return Ok(if path.is_file() {
+            vec![path]
+        } else {
+            Vec::new()
+        });
+    }
+    let start = root.join(base);
+    if !start.is_dir() {
+        return Ok(Vec::new());
+    }
+    let tracked = reach == Reach::Tracked;
+    let walker = ignore::WalkBuilder::new(&start)
+        .standard_filters(false)
+        .git_ignore(tracked)
+        .git_exclude(tracked)
+        .git_global(tracked)
+        .parents(tracked)
+        .require_git(false)
+        .follow_links(true)
+        .filter_entry(|entry| {
+            let name = entry.file_name();
+            !(entry.depth() > 0
+                && entry.file_type().is_some_and(|kind| kind.is_dir())
+                && (name == ".git" || name == crate::store::STORE_DIR))
+        })
+        .build();
+    Ok(walker
+        .flatten()
+        .map(ignore::DirEntry::into_path)
+        .filter(|path| {
+            path.is_file()
+                && path
+                    .strip_prefix(root)
+                    .is_ok_and(|relative| compiled.matches_path_with(relative, match_options()))
+        })
+        .collect())
+}
+
 /// Resolve globs, relative to `root`, handing each matched file's bytes to
 /// `keep`, which returns the digest to record for it. Files are read one at a
 /// time so a large tree is never held in memory at once.
@@ -97,23 +169,13 @@ pub fn scan_globs<E>(
     root: &Path,
     patterns: &[String],
     kind: &str,
+    reach: Reach,
     mut keep: impl FnMut(&[u8]) -> Result<String, E>,
 ) -> Result<Scan, E> {
     let mut files: BTreeMap<String, (String, bool)> = BTreeMap::new();
     let mut scan = Scan::default();
-    let Some(root_text) = root.to_str() else {
-        scan.problems.push(format!(
-            "the flow root {} is not valid UTF-8",
-            root.display()
-        ));
-        scan.unmatched = patterns.to_vec();
-        return Ok(scan);
-    };
-    // The root is a literal path; only the pattern is a pattern.
-    let escaped_root = glob::Pattern::escape(root_text);
     for pattern in patterns {
-        let absolute = format!("{}/{}", escaped_root.trim_end_matches('/'), pattern);
-        let entries = match glob::glob(&absolute) {
+        let entries = match candidates(root, pattern, reach) {
             Ok(entries) => entries,
             Err(error) => {
                 scan.problems
@@ -122,10 +184,7 @@ pub fn scan_globs<E>(
             }
         };
         let mut matched = 0usize;
-        for entry in entries.flatten() {
-            if !entry.is_file() {
-                continue;
-            }
+        for entry in entries {
             let relative = entry
                 .strip_prefix(root)
                 .unwrap_or(&entry)
@@ -219,7 +278,7 @@ pub fn scan_outputs(
     patterns: &[String],
     keep: impl FnMut(&[u8]) -> Result<String>,
 ) -> Result<Scan> {
-    let mut scan = scan_globs(root, patterns, "output", keep)?;
+    let mut scan = scan_globs(root, patterns, "output", Reach::Everything, keep)?;
     let mut linked = Vec::new();
     for file in &scan.files {
         if !within_root(root, &file.path)? {
@@ -256,7 +315,7 @@ pub fn digest_globs(
     kind: &str,
     pending: &[FileDigest],
 ) -> (Vec<FileDigest>, Vec<String>) {
-    let mut scan = match scan_globs(root, patterns, kind, |bytes| {
+    let mut scan = match scan_globs(root, patterns, kind, Reach::Tracked, |bytes| {
         Ok::<_, std::convert::Infallible>(digest::bytes(bytes))
     }) {
         Ok(scan) => scan,
@@ -445,5 +504,56 @@ mod tests {
             vec!["edited", "gone", "new"]
         );
         assert!(changed_paths(&before, &before).is_empty());
+    }
+
+    fn matched(root: &Path, pattern: &str, reach: Reach) -> Vec<String> {
+        let scan = scan_globs(root, &[pattern.to_string()], "input", reach, |_| {
+            Ok::<_, std::convert::Infallible>(String::new())
+        })
+        .unwrap_or_else(|never| match never {});
+        scan.files.into_iter().map(|file| file.path).collect()
+    }
+
+    #[test]
+    fn a_literal_base_stops_at_the_first_wildcard() {
+        assert_eq!(literal_base("Cargo.toml"), ("", false));
+        assert_eq!(literal_base("src/lib.rs"), ("src", false));
+        assert_eq!(literal_base("src/**/*.rs"), ("src", true));
+        assert_eq!(literal_base("a/b/c*/d"), ("a/b", true));
+        assert_eq!(literal_base("**/*"), ("", true));
+        assert_eq!(literal_base("src/[ab].rs"), ("src", true));
+    }
+
+    #[test]
+    fn a_wildcard_input_skips_what_git_ignores_unless_the_pattern_spells_it_out() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        for path in [
+            "src/lib.rs",
+            "target/debug/gen.rs",
+            ".git/hooks/x.rs",
+            ".flot/tmp/y.rs",
+        ] {
+            std::fs::create_dir_all(root.join(path).parent().unwrap()).unwrap();
+            std::fs::write(root.join(path), "fn main() {}").unwrap();
+        }
+        std::fs::write(root.join(".gitignore"), "target/\n").unwrap();
+
+        assert_eq!(matched(root, "**/*.rs", Reach::Tracked), ["src/lib.rs"]);
+        // Named through its literal directories, an ignored tree is an input.
+        assert_eq!(
+            matched(root, "target/**/*.rs", Reach::Tracked),
+            ["target/debug/gen.rs"]
+        );
+        assert_eq!(
+            matched(root, "target/debug/gen.rs", Reach::Tracked),
+            ["target/debug/gen.rs"]
+        );
+        // Products are often ignored build output; a wildcard reaches them,
+        // but never git's own files or the store.
+        assert_eq!(
+            matched(root, "**/*.rs", Reach::Everything),
+            ["src/lib.rs", "target/debug/gen.rs"]
+        );
     }
 }

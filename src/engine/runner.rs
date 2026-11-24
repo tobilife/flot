@@ -970,9 +970,13 @@ impl<'a> Runner<'a> {
     /// Recorded outputs that now differ from what was recorded, or that are
     /// gone, and files matching an output pattern that appeared since.
     fn changed_outputs(&self, step: &Step, recorded: &[FileDigest]) -> Vec<String> {
-        let now = match keying::scan_globs(&self.root, &step.outputs, "output", |bytes| {
-            Ok::<_, std::convert::Infallible>(digest::bytes(bytes))
-        }) {
+        let now = match keying::scan_globs(
+            &self.root,
+            &step.outputs,
+            "output",
+            keying::Reach::Everything,
+            |bytes| Ok::<_, std::convert::Infallible>(digest::bytes(bytes)),
+        ) {
             Ok(scan) => scan.files,
             Err(never) => match never {},
         };

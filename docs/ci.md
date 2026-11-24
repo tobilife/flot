@@ -108,5 +108,10 @@ by its id.
 - The comment needs `pull-requests: write`. A pull request from a fork gets a
   read-only token, so the action leaves a warning and the report stays in the
   job summary.
-- The action is tested in this repository's CI on pushes to `main`; the
-  comment path runs only on a pull request.
+- The action runs in this repository's CI on every push and pull request.
+  It was tried on a test pull request
+  ([#1](https://github.com/tobilife/flot/pull/1), closed): the first commit
+  left the proofs as on `main`, and the comment said `passed`; the second
+  changed the `test` step's `verify` to `true`, and the same comment was
+  updated to "unverified", naming `test: its verify command differs`, and the
+  job failed.

@@ -510,13 +510,23 @@ fn independent_steps_overlap_only_when_concurrency_is_allowed() {
         "one job must not overlap the two 600ms branches, took {serial_ms}ms"
     );
 
-    let parallel = Project::new(FAN_OUT);
-    let parallel_ms = run_duration_ms(&parallel, &["run", "--jobs", "2", "--json"]);
-    assert!(
-        parallel_ms < 1100,
-        "two jobs must overlap the branches, took {parallel_ms}ms"
-    );
+    Project::new(RENDEZVOUS).flot(&["run", "--jobs", "2"]).ok();
 }
+
+/// Each branch waits until the other has started, so the run passes only if
+/// they overlap, however slowly processes start on the host.
+const RENDEZVOUS: &str = r#"
+[flow]
+name = "rendezvous"
+
+[[step]]
+id = "left"
+run = "touch left.here; n=0; until [ -e right.here ]; do n=$((n+1)); [ $n -lt 200 ]; sleep 0.05; done"
+
+[[step]]
+id = "right"
+run = "touch right.here; n=0; until [ -e left.here ]; do n=$((n+1)); [ $n -lt 200 ]; sleep 0.05; done"
+"#;
 
 #[test]
 fn concurrency_does_not_change_receipts_or_the_run_root() {
@@ -562,11 +572,12 @@ fn a_parallel_run_states_what_concurrency_does_not_prove() {
 
 #[test]
 fn max_parallel_in_the_flow_file_enables_overlap_without_a_flag() {
-    let project = Project::new(
-        &FAN_OUT.replace("name = \"fan-out\"", "name = \"fan-out\"\nmax_parallel = 2"),
-    );
-    let elapsed = run_duration_ms(&project, &["run", "--json"]);
-    assert!(elapsed < 1100, "took {elapsed}ms");
+    Project::new(&RENDEZVOUS.replace(
+        "name = \"rendezvous\"",
+        "name = \"rendezvous\"\nmax_parallel = 2",
+    ))
+    .flot(&["run"])
+    .ok();
 }
 
 #[test]

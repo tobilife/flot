@@ -4,7 +4,8 @@
 |---|---|
 | `flot init` | write a starter `flot.toml` in the current directory |
 | `flot plan [--only STEP] [--force]` | predicted execution, reuse and evidence gaps; runs nothing |
-| `flot run [--only STEP] [--force] [--jobs N] [--max-cost USD]` | execute and record receipts |
+| `flot run [--only STEP] [--force] [--jobs N] [--max-cost USD] [--sign]` | execute and record receipts; `--sign` then signs the run |
+| `flot sign [RUN]` | sign a run executed here with the host key |
 | `flot show [RUN]` | steps, claims and limitations of a run |
 | `flot verify [RUN]` | re-authenticate a run from the store alone |
 | `flot diff LEFT RIGHT` | step-by-step comparison by receipt identity |

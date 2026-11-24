@@ -18,7 +18,9 @@ use crate::core::digest;
 use crate::core::receipt::{ClaimStatus, RunManifest, StepStatus, Verdict};
 use crate::service::audit::Audit;
 use crate::service::bundle::ImportPolicy;
-use crate::service::{fault_kind, FaultKind, Plan, RunDetail, RunOptions, RunReport, Workspace};
+use crate::service::{
+    fault_kind, FaultKind, Plan, RunDetail, RunOptions, RunReport, SignReport, Workspace,
+};
 
 const INVALID_REQUEST: u8 = 3;
 
@@ -80,6 +82,10 @@ pub enum Command {
         /// dollars through $FLOT_METRICS. Overrides the flow's `max_cost_usd`.
         #[arg(long, value_name = "USD", allow_negative_numbers = true)]
         max_cost: Option<f64>,
+        /// Sign the recorded run with the host key (see `flot key init`),
+        /// whatever its verdict. The key is checked before anything runs.
+        #[arg(long)]
+        sign: bool,
     },
     /// Summarize a recorded run.
     Show {
@@ -88,6 +94,11 @@ pub enum Command {
     },
     /// Re-authenticate a recorded run against the store.
     Verify {
+        #[arg(default_value = "latest")]
+        run: String,
+    },
+    /// Sign a run executed here with the host key (see `flot key init`).
+    Sign {
         #[arg(default_value = "latest")]
         run: String,
     },
@@ -258,7 +269,12 @@ fn dispatch(
             force,
             jobs,
             max_cost,
+            sign,
         } => {
+            if *sign {
+                // A missing key must stop the run before it spends anything.
+                Workspace::key_show()?;
+            }
             let report = workspace.run(&RunOptions {
                 only: only.clone(),
                 force: *force,
@@ -266,12 +282,33 @@ fn dispatch(
                 max_cost_usd: *max_cost,
                 ..RunOptions::default()
             })?;
+            let signed = if *sign {
+                Some(workspace.sign(&report.manifest.run_id)?)
+            } else {
+                None
+            };
             if cli.json {
-                print_json(&report)?;
+                let mut value = serde_json::to_value(&report)?;
+                if let Some(signed) = &signed {
+                    value["signed"] = serde_json::to_value(signed)?;
+                }
+                print_json(&value)?;
             } else {
                 render_run(&report);
+                if let Some(signed) = &signed {
+                    render_signed(signed);
+                }
             }
             Ok(exit_for(report.manifest.verdict))
+        }
+        Command::Sign { run } => {
+            let signed = workspace.sign(run)?;
+            if cli.json {
+                print_json(&signed)?;
+            } else {
+                render_signed(&signed);
+            }
+            Ok(ExitCode::SUCCESS)
         }
         Command::Show { run } => {
             let detail = workspace.show(run)?;
@@ -692,6 +729,20 @@ fn render_audit(audit: &Audit) {
     }
     say!("verdict {}", audit.verdict.label());
     render_authorship(audit.authorship, &audit.signers);
+}
+
+fn render_signed(signed: &SignReport) {
+    say!(
+        "{} run {}  root {}  by {}",
+        if signed.added {
+            "signed"
+        } else {
+            "already signed"
+        },
+        signed.run_id,
+        digest::short(&signed.root_digest),
+        signed.signer
+    );
 }
 
 fn render_authorship(authorship: Authorship, signers: &[SignerCheck]) {

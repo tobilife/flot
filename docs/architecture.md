@@ -6,7 +6,8 @@ core      digest · receipt · flow · metrics · compare
 store     content-addressed objects, receipts, runs
 engine    keying · claims · scheduler · exec · runner   flow -> receipts
 service   Workspace: plan run show verify diff receipt
-          read_object runs gc bundle import key trust   the one contract
+          read_object runs gc sign bundle import key    the one contract
+          trust
 adapters  cli · mcp                                     parse and render only
 main.rs   composition root: hands the MCP server to the CLI
 ```
@@ -31,11 +32,11 @@ the content store with host-sealed cache and trust, the CLI with typed exit
 codes, an MCP stdio server over the same functions, authenticated receipt
 bundles, spend accounting with a run cost ceiling, signed attestations with a
 local trust list, guarded proofs, produced files kept and restored, an enforced
-layer architecture, and 269 tests including end-to-end runs through the real
+layer architecture, and 272 tests including end-to-end runs through the real
 binary, a real MCP handshake and a cross-store bundle import.
 
 Not there yet: key rotation (today a lost key means re-trusting a new one by
-hand), signing local runs without exporting a bundle, and sandboxing steps
+hand) and sandboxing steps
 (they run with your permissions; see [Execution](flows.md#execution)).
 
 Process-group cancellation uses POSIX signals, so timeouts behave correctly on

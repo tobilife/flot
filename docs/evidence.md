@@ -63,9 +63,16 @@ host C $ flot run                     5 ran
 ## Who produced it
 
 Integrity says the evidence was not altered; it does not say who produced it.
-`flot bundle --sign` adds an Ed25519 attestation over the run manifest, which
-transitively covers every receipt and byte. Whether to believe the signer is
-the importer's decision, kept in their own trust list:
+`flot sign`, `flot run --sign` and `flot bundle --sign` add an Ed25519
+attestation over the run manifest, which transitively covers every receipt and
+byte. The attestation is kept in the store, so `flot verify` reports it and
+every later bundle of the run carries it; a CI job can sign each run as it
+records it and export only the runs someone asks for. flot signs only a run
+executed on this host whose evidence still authenticates: an imported run, or
+one whose receipts or objects were altered, is refused. Whether to believe the
+signer is the reader's decision, kept in their own trust list; even your own
+signature reads as `untrusted` in your own `flot verify` until you trust your
+own key:
 
 ```
 host A $ flot key init

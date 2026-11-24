@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- `flot sign [RUN]` and `flot run --sign` sign a run executed here without
+  exporting it; the attestation is kept in the store, so `flot verify` reports
+  it and every later bundle carries it. A run that was imported, or whose
+  evidence no longer authenticates, is never signed; `flot bundle --sign` now
+  refuses the latter too. `run --sign` checks for the key before anything runs.
+
 ## 0.1.1
 
 - MCP tools carry annotations: every tool but `flot_run` is read-only, so hosts

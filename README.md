@@ -161,8 +161,9 @@ budgets, concurrency, outputs and guarded proofs.
 - **Reuse you can trust.** A cache hit requires the same command over the same
   input content and the same upstream receipts, sealed by this host. Failures
   are never cached.
-- **Evidence that travels.** `flot bundle --sign` produces one file a reviewer
-  can import and verify. Imported receipts stand in for local work only when a
+- **Evidence that travels.** `flot run --sign` signs each run as it is
+  recorded, and `flot bundle` produces one file a reviewer can import and
+  verify. Imported receipts stand in for local work only when a
   signer the reviewer trusts signed them, and only while that trust lasts.
 - **Bounded runs.** Timeouts and output limits stop work and say so; a cost
   ceiling stops starting steps once agents have reported that much spend.

@@ -2078,3 +2078,58 @@ fn plan_says_when_a_step_declares_no_inputs() {
     let project = Project::new(TWO_STEPS);
     project.flot(&["plan"]).ok().has("declares no inputs");
 }
+
+#[test]
+fn a_run_signed_here_carries_its_signature_into_verify_and_bundles() {
+    let project = Project::new(TWO_STEPS);
+    let key = project.flot(&["key", "init", "--json"]).json()["public_key"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let run = project.flot(&["run", "--sign", "--json"]);
+    run.ok();
+    assert_eq!(run.json()["signed"]["signer"], key.as_str());
+    assert_eq!(run.json()["signed"]["added"], true);
+    project.flot(&["sign"]).ok().has("already signed");
+
+    project.flot(&["trust", "add", "me", &key]).ok();
+    let audit = project.flot(&["verify", "--json"]).json();
+    assert_eq!(audit["authorship"], "trusted", "{audit}");
+
+    let path = project.path().join("signed.json");
+    project.flot(&["bundle", "-o", path.to_str().unwrap()]).ok();
+    let bundle: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    assert_eq!(bundle["attestations"][0]["key"], key.as_str());
+}
+
+#[test]
+fn run_sign_without_a_key_runs_nothing() {
+    let project = Project::new(TWO_STEPS);
+    let output = project.flot(&["run", "--sign"]);
+    assert_eq!(output.code, 3, "stderr:\n{}", output.stderr);
+    output.has("no signing key");
+    assert!(!project.path().join(".flot").exists());
+}
+
+#[test]
+fn a_run_whose_evidence_was_altered_is_never_signed() {
+    let project = Project::new(TWO_STEPS);
+    project.flot(&["key", "init"]).ok();
+    project.flot(&["run"]).ok();
+    let path = receipt_file(&project, 0);
+    let text = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(&path, text.replacen("echo first", "echo forged", 1)).unwrap();
+    for args in [&["sign"][..], &["bundle", "--sign"][..]] {
+        let output = project.flot(args);
+        assert_eq!(output.code, 1, "{args:?} stderr:\n{}", output.stderr);
+        output.has("will not sign it");
+    }
+    assert!(
+        !project.path().join(".flot/attestations").exists()
+            || std::fs::read_dir(project.path().join(".flot/attestations"))
+                .unwrap()
+                .next()
+                .is_none()
+    );
+}

@@ -20,7 +20,7 @@
 
 <code>cargo install flot-cli</code>
 
-Latest release **0.2.1**: signing keys rotate with a handover readers can follow, and the README is in Chinese too · [changelog](CHANGELOG.md)
+Latest release **0.2.2**: long step output shows its first and last lines, `flot log` prints all of it, `flot diff` compares the last two runs, and wildcard inputs skip what git ignores · [changelog](CHANGELOG.md)
 
 </div>
 
@@ -94,26 +94,30 @@ This repository gates itself with flot ([`flot.toml`](flot.toml)):
 
 ```
 $ flot run --force
-ran      format               ok        202ms  claims 1v/0u/0r  receipt 615ce7404393
-ran      build                ok        932ms  claims 1v/0u/0r  receipt e3c7508755b7
-ran      lint                 ok        862ms  claims 1v/0u/0r  receipt db240db9fd11
-ran      test                 ok        5595ms  claims 2v/0u/0r  receipt afb9fde398e0
+ran      format               ok        183ms  claims 1v/0u/0r  receipt 7c8c480702e0
+ran      build                ok        876ms  claims 1v/0u/0r  receipt 2f5273d0f500
+ran      lint                 ok        816ms  claims 1v/0u/0r  receipt 48a64dd4723f
+ran      test                 ok        5657ms  claims 2v/0u/0r  receipt 3a0fd0619f68
+    complete output: flot log test 1795521673839-85aac97d67a6
 
-PASSED 1795517538528-696bfb25ef73  root 696bfb25ef73  15977ms
+PASSED 1795521673839-85aac97d67a6  root 85aac97d67a6  16144ms
+limitations:
+  - test: inline output trimmed to 2048 bytes per stream; complete streams are in the store
 
 $ flot run     # nothing changed: receipts are reused and the root is identical
-cached   format               ok        202ms  claims 1v/0u/0r  receipt 615ce7404393
-cached   build                ok        932ms  claims 1v/0u/0r  receipt e3c7508755b7
-cached   lint                 ok        862ms  claims 1v/0u/0r  receipt db240db9fd11
-cached   test                 ok        5595ms  claims 2v/0u/0r  receipt afb9fde398e0
+cached   format               ok        183ms  claims 1v/0u/0r  receipt 7c8c480702e0
+cached   build                ok        876ms  claims 1v/0u/0r  receipt 2f5273d0f500
+cached   lint                 ok        816ms  claims 1v/0u/0r  receipt 48a64dd4723f
+cached   test                 ok        5657ms  claims 2v/0u/0r  receipt 3a0fd0619f68
 
-PASSED 1795517556256-696bfb25ef73  root 696bfb25ef73  363ms
+PASSED 1795521691818-85aac97d67a6  root 85aac97d67a6  412ms
 ```
 
-Recorded with flot 0.2.1. The second run took 0.36 s instead of 16 s because
+Recorded with flot 0.2.2. The second run took 0.41 s instead of 16 s because
 all four receipts were reused; a reused step reports the duration it was
-recorded with. The tail of each step's output, printed under its line, and the
-run's one limitation (inline output trimmed) are left out here.
+recorded with and prints nothing else. Under each step that ran, flot also
+prints the first and last lines of its output, left out here; `flot log test`
+prints all of it.
 
 `1v/0u/0r` counts verified, unverified and refuted claims. See the
 [CLI reference](docs/cli.md) for every command, run selectors, `--json` and

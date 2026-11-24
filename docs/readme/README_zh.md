@@ -20,7 +20,7 @@
 
 <code>cargo install flot-cli</code>
 
-最新版本 **0.2.1**：签名密钥可以通过交接声明更换，README 新增中文版 · [更新日志](../../CHANGELOG.md)
+最新版本 **0.2.2**：较长的步骤输出同时显示开头和结尾，`flot log` 打印完整输出，`flot diff` 比较最近两次运行，通配输入会跳过 git 忽略的文件 · [更新日志](../../CHANGELOG.md)
 
 </div>
 
@@ -88,25 +88,28 @@ flot show        # 最近一次运行的步骤、声明和局限
 
 ```
 $ flot run --force
-ran      format               ok        202ms  claims 1v/0u/0r  receipt 615ce7404393
-ran      build                ok        932ms  claims 1v/0u/0r  receipt e3c7508755b7
-ran      lint                 ok        862ms  claims 1v/0u/0r  receipt db240db9fd11
-ran      test                 ok        5595ms  claims 2v/0u/0r  receipt afb9fde398e0
+ran      format               ok        183ms  claims 1v/0u/0r  receipt 7c8c480702e0
+ran      build                ok        876ms  claims 1v/0u/0r  receipt 2f5273d0f500
+ran      lint                 ok        816ms  claims 1v/0u/0r  receipt 48a64dd4723f
+ran      test                 ok        5657ms  claims 2v/0u/0r  receipt 3a0fd0619f68
+    complete output: flot log test 1795521673839-85aac97d67a6
 
-PASSED 1795517538528-696bfb25ef73  root 696bfb25ef73  15977ms
+PASSED 1795521673839-85aac97d67a6  root 85aac97d67a6  16144ms
+limitations:
+  - test: inline output trimmed to 2048 bytes per stream; complete streams are in the store
 
 $ flot run     # 没有任何变化：收据被复用，根摘要完全相同
-cached   format               ok        202ms  claims 1v/0u/0r  receipt 615ce7404393
-cached   build                ok        932ms  claims 1v/0u/0r  receipt e3c7508755b7
-cached   lint                 ok        862ms  claims 1v/0u/0r  receipt db240db9fd11
-cached   test                 ok        5595ms  claims 2v/0u/0r  receipt afb9fde398e0
+cached   format               ok        183ms  claims 1v/0u/0r  receipt 7c8c480702e0
+cached   build                ok        876ms  claims 1v/0u/0r  receipt 2f5273d0f500
+cached   lint                 ok        816ms  claims 1v/0u/0r  receipt 48a64dd4723f
+cached   test                 ok        5657ms  claims 2v/0u/0r  receipt 3a0fd0619f68
 
-PASSED 1795517556256-696bfb25ef73  root 696bfb25ef73  363ms
+PASSED 1795521691818-85aac97d67a6  root 85aac97d67a6  412ms
 ```
 
-以上输出由 flot 0.2.1 记录。第二次运行复用了全部四份收据，用时 0.36 秒而不是 16 秒；
-被复用的步骤显示的是记录时的耗时。每个步骤那一行下面打印的输出末尾部分，
-以及本次运行的一条局限（内联输出被截断），这里都省略了。
+以上输出由 flot 0.2.2 记录。第二次运行复用了全部四份收据，用时 0.41 秒而不是 16 秒；
+被复用的步骤只显示记录时的耗时，不再打印其他内容。对于实际运行的步骤，flot 还会在那一行
+下面打印输出的开头和结尾几行，这里省略了；`flot log test` 可以打印完整输出。
 
 `1v/0u/0r` 分别统计已验证、未验证和被驳回的声明。所有命令、运行选择方式、`--json` 和
 退出码见 [CLI 参考](../cli.md)。

@@ -20,7 +20,7 @@
 
 <code>cargo install flot-cli</code>
 
-최신 릴리스 **0.2.1**: 서명 키를 인계 문서와 함께 교체할 수 있고, README에 중국어가 추가되었습니다 · [변경 기록](../../CHANGELOG.md)
+최신 릴리스 **0.2.2**: 긴 단계 출력은 앞과 끝을 함께 보여 주고, `flot log`로 전체를 보며, `flot diff`는 최근 두 실행을 비교하고, 와일드카드 입력은 git이 무시하는 파일을 건너뜁니다 · [변경 기록](../../CHANGELOG.md)
 
 </div>
 
@@ -92,25 +92,29 @@ flot show        # 최근 실행의 단계, 주장, 한계(limitation)
 
 ```
 $ flot run --force
-ran      format               ok        202ms  claims 1v/0u/0r  receipt 615ce7404393
-ran      build                ok        932ms  claims 1v/0u/0r  receipt e3c7508755b7
-ran      lint                 ok        862ms  claims 1v/0u/0r  receipt db240db9fd11
-ran      test                 ok        5595ms  claims 2v/0u/0r  receipt afb9fde398e0
+ran      format               ok        183ms  claims 1v/0u/0r  receipt 7c8c480702e0
+ran      build                ok        876ms  claims 1v/0u/0r  receipt 2f5273d0f500
+ran      lint                 ok        816ms  claims 1v/0u/0r  receipt 48a64dd4723f
+ran      test                 ok        5657ms  claims 2v/0u/0r  receipt 3a0fd0619f68
+    complete output: flot log test 1795521673839-85aac97d67a6
 
-PASSED 1795517538528-696bfb25ef73  root 696bfb25ef73  15977ms
+PASSED 1795521673839-85aac97d67a6  root 85aac97d67a6  16144ms
+limitations:
+  - test: inline output trimmed to 2048 bytes per stream; complete streams are in the store
 
 $ flot run     # 바뀐 것이 없음: 영수증이 재사용되고 루트 다이제스트도 같음
-cached   format               ok        202ms  claims 1v/0u/0r  receipt 615ce7404393
-cached   build                ok        932ms  claims 1v/0u/0r  receipt e3c7508755b7
-cached   lint                 ok        862ms  claims 1v/0u/0r  receipt db240db9fd11
-cached   test                 ok        5595ms  claims 2v/0u/0r  receipt afb9fde398e0
+cached   format               ok        183ms  claims 1v/0u/0r  receipt 7c8c480702e0
+cached   build                ok        876ms  claims 1v/0u/0r  receipt 2f5273d0f500
+cached   lint                 ok        816ms  claims 1v/0u/0r  receipt 48a64dd4723f
+cached   test                 ok        5657ms  claims 2v/0u/0r  receipt 3a0fd0619f68
 
-PASSED 1795517556256-696bfb25ef73  root 696bfb25ef73  363ms
+PASSED 1795521691818-85aac97d67a6  root 85aac97d67a6  412ms
 ```
 
-flot 0.2.1로 기록한 출력입니다. 두 번째 실행은 영수증 네 개를 모두 재사용해 16초가 아니라
-0.36초 걸렸고, 재사용된 단계는 기록될 때의 소요 시간을 보여 줍니다. 단계마다 그 줄 아래에
-찍히는 출력 끝부분과 실행의 한계 항목 하나(인라인 출력 잘림)는 여기서 생략했습니다.
+flot 0.2.2로 기록한 출력입니다. 두 번째 실행은 영수증 네 개를 모두 재사용해 16초가 아니라
+0.41초 걸렸고, 재사용된 단계는 기록될 때의 소요 시간만 보여 주고 다른 출력은 없습니다.
+실행된 단계 아래에는 출력의 앞과 끝 몇 줄도 찍히는데 여기서는 생략했고, 전체는
+`flot log test`로 볼 수 있습니다.
 
 `1v/0u/0r`은 검증됨(verified), 미검증(unverified), 반박됨(refuted) 주장의 개수입니다.
 모든 명령, 실행 지정 방법, `--json`, 종료 코드는 [CLI 레퍼런스](../cli.md)에 있습니다.

@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.2
 
 - A reused step prints one line in `flot run`; its output was shown when it
   ran and is still in the store.
@@ -19,6 +19,8 @@
   ignored build products.
 - `flot run` and `flot show` print a limitation several steps share once,
   naming the steps, instead of once per step.
+- This repository's own gate declares the READMEs as inputs of its test step:
+  `tests/readme.rs` reads them, and a README edit left a cached pass in place.
 - A new `.flot` store writes its own `.gitignore`, so `git status` stays clean.
 - `flot_run` tells agents that a cached step is as strong as a fresh run, so
   they stop forcing re-runs to double-check it.

@@ -11,6 +11,14 @@
 # the cost ceiling sees it; then exit with the agent's status. A rejected
 # review is re-rolled on the next run, because only settled receipts are
 # reused.
+#
+# Agent steps run apart from your personal Claude Code setup:
+# --setting-sources project skips user settings (plugins, hooks, a personal
+# CLAUDE.md), --strict-mcp-config loads no MCP servers, and --tools names the
+# only tools the step gets. That keeps a receipt from depending on whose
+# machine ran it, and it is most of the cost: one reviewer that wrote NONE cost
+# $0.90 with a full personal setup and $0.04 without it. --max-budget-usd stops
+# one agent call; the flow's max_cost_usd stops starting new steps.
 
 [flow]
 name = "slugify"
@@ -20,12 +28,14 @@ budget = { timeout_secs = 600, max_inline_bytes = 2048 }
 
 [[step]]
 id = "implement"
-# --permission-mode acceptEdits lets a headless agent write files. Token counts
-# include cache reads and writes, which dominate an agent call.
+# --permission-mode acceptEdits lets a headless agent write files; --tools
+# names the only tools it gets. Token counts include cache reads and writes,
+# which dominate an agent call.
 run = """
 mkdir -p .flot-work
 status=0
 claude -p "Implement SPEC.md as slug.py. Create or edit only slug.py; do not write tests or other files." \
+  --setting-sources project --strict-mcp-config --tools Read,Edit,Write \
   --permission-mode acceptEdits --max-budget-usd 1.5 --output-format json > .flot-work/implement.json || status=$?
 jq '{input_tokens: (.usage.input_tokens + .usage.cache_read_input_tokens + .usage.cache_creation_input_tokens),
      output_tokens: .usage.output_tokens, cost_usd: .total_cost_usd}' .flot-work/implement.json > "$FLOT_METRICS" || true
@@ -49,6 +59,7 @@ mkdir -p .flot-work
 rm -f REVIEW.md
 status=0
 claude -p "Review slug.py against SPEC.md. Write REVIEW.md whose first line is exactly APPROVE or REJECT, followed by your reasons. Do not edit slug.py." \
+  --setting-sources project --strict-mcp-config --tools Read,Grep,Glob,Write \
   --permission-mode acceptEdits --max-budget-usd 1.0 --output-format json > .flot-work/review.json || status=$?
 jq '{input_tokens: (.usage.input_tokens + .usage.cache_read_input_tokens + .usage.cache_creation_input_tokens),
      output_tokens: .usage.output_tokens, cost_usd: .total_cost_usd}' .flot-work/review.json > "$FLOT_METRICS" || true

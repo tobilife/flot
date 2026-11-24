@@ -438,16 +438,47 @@ fn write_message(output: &Mutex<impl Write>, message: &Value) -> Result<()> {
     Ok(())
 }
 
-fn tool(name: &str, description: &str, properties: Value, required: &[&str]) -> Value {
+/// Whether a tool only reads the store, or runs the flow's commands.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Effect {
+    Reads,
+    Runs,
+}
+
+fn tool(
+    name: &str,
+    effect: Effect,
+    description: &str,
+    properties: Value,
+    required: &[&str],
+) -> Value {
     let mut schema = Map::new();
     schema.insert("type".into(), json!("object"));
     schema.insert("properties".into(), properties);
     schema.insert("required".into(), json!(required));
     schema.insert("additionalProperties".into(), json!(false));
+    // Hosts use these hints to decide what needs a person's approval. Running
+    // a flow executes arbitrary, unsandboxed commands, so it claims nothing
+    // reassuring; reading the store changes nothing and reaches nothing.
+    let annotations = match effect {
+        Effect::Reads => json!({
+            "readOnlyHint": true,
+            "destructiveHint": false,
+            "idempotentHint": true,
+            "openWorldHint": false,
+        }),
+        Effect::Runs => json!({
+            "readOnlyHint": false,
+            "destructiveHint": true,
+            "idempotentHint": false,
+            "openWorldHint": true,
+        }),
+    };
     json!({
         "name": name,
         "description": description,
         "inputSchema": Value::Object(schema),
+        "annotations": annotations,
     })
 }
 
@@ -455,6 +486,7 @@ fn tool_catalog() -> Vec<Value> {
     vec![
         tool(
             "flot_plan",
+            Effect::Reads,
             "Show what the flow would run, what it would reuse from receipts, and which claims have no proof command. Runs nothing.",
             json!({
                 "only": { "type": "string", "description": "Limit to one step and its dependencies." },
@@ -464,6 +496,7 @@ fn tool_catalog() -> Vec<Value> {
         ),
         tool(
             "flot_run",
+            Effect::Runs,
             "Execute the flow and record a receipt per step. The verdict is `passed` only when every step succeeded and every claim was proven; `unverified` means work completed without proof.",
             json!({
                 "only": { "type": "string", "description": "Limit to one step and its dependencies." },
@@ -475,18 +508,21 @@ fn tool_catalog() -> Vec<Value> {
         ),
         tool(
             "flot_show",
+            Effect::Reads,
             "Summarize a recorded run: steps, claim verdicts and limitations. Accepts `latest` (the newest run executed here), a run id, or a prefix of at least 4 characters of a run id or its root.",
             json!({ "run": { "type": "string", "description": "Run selector; defaults to latest." } }),
             &[],
         ),
         tool(
             "flot_verify",
+            Effect::Reads,
             "Re-authenticate a recorded run from the store alone: receipt bodies against their ids, dependency references, every evidence object re-read against its digest, and the run root. Signatures are judged against this host's trust list.",
             json!({ "run": { "type": "string", "description": "Run selector; defaults to latest." } }),
             &[],
         ),
         tool(
             "flot_diff",
+            Effect::Reads,
             "Compare two runs by receipt identity. Identical receipts mean the same work over the same inputs reached the same verdict.",
             json!({
                 "left": { "type": "string", "description": "Run selector." },
@@ -496,12 +532,14 @@ fn tool_catalog() -> Vec<Value> {
         ),
         tool(
             "flot_receipt",
+            Effect::Reads,
             "Read one receipt as structured data. Accepts a full receipt id or an unambiguous hex prefix.",
             json!({ "receipt_id": { "type": "string", "description": "Receipt id or hex prefix." } }),
             &["receipt_id"],
         ),
         tool(
             "flot_read_object",
+            Effect::Reads,
             "Read a stored object, such as a step's complete stdout, by digest. Use the digest from a receipt when its inline preview was trimmed.",
             json!({
                 "digest": { "type": "string", "description": "sha256:<hex> digest from a receipt." },
@@ -511,6 +549,7 @@ fn tool_catalog() -> Vec<Value> {
         ),
         tool(
             "flot_runs",
+            Effect::Reads,
             "List recorded runs, newest first, with their verdicts, root digests and whether they were imported; runs that cannot be read are named under `unreadable`.",
             json!({ "limit": { "type": "integer", "minimum": 1, "description": "Maximum runs to return." } }),
             &[],
@@ -601,6 +640,19 @@ verify = "grep -q flot artifact.txt"
             assert!(entry["name"].as_str().unwrap().starts_with("flot_"));
             assert!(!entry["description"].as_str().unwrap().is_empty());
             assert_eq!(entry["inputSchema"]["type"], "object");
+        }
+    }
+
+    #[test]
+    fn only_running_the_flow_is_announced_as_having_effects() {
+        let (_dir, server) = project(PROVEN);
+        let response = server.handle(&request("tools/list", json!({}))).unwrap();
+        for entry in response["result"]["tools"].as_array().unwrap() {
+            let runs = entry["name"] == "flot_run";
+            let hints = &entry["annotations"];
+            assert_eq!(hints["readOnlyHint"], !runs, "{}", entry["name"]);
+            assert_eq!(hints["destructiveHint"], runs, "{}", entry["name"]);
+            assert_eq!(hints["openWorldHint"], runs, "{}", entry["name"]);
         }
     }
 

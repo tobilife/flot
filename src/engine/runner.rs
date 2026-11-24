@@ -337,6 +337,7 @@ impl<'a> Runner<'a> {
         let mut reports: Vec<StepReport> = Vec::new();
         let mut totals = ClaimCounts::default();
         let mut spend = Spend::default();
+        let mut silent: Vec<&str> = Vec::new();
         let mut limitations: Vec<String> = Vec::new();
 
         // Assemble in dependency order, never in completion order: the run root
@@ -365,6 +366,9 @@ impl<'a> Runner<'a> {
                 spend.add_reused(receipt.observed.metrics);
             } else if receipt.identity.status != StepStatus::Cancelled {
                 spend.add_executed(receipt.observed.metrics);
+                if receipt.observed.metrics.is_none() {
+                    silent.push(step_id.as_str());
+                }
             }
             for limitation in &step_limitations {
                 limitations.push(format!("{}: {}", step_id, limitation));
@@ -408,10 +412,11 @@ impl<'a> Runner<'a> {
             ));
         }
         if let Some(ceiling) = ceiling_micro_usd {
-            if spend.silent_steps > 0 {
+            if !silent.is_empty() {
                 limitations.push(format!(
-                    "{} executed step(s) reported no metrics; the cost ceiling cannot see what they spent",
-                    spend.silent_steps
+                    "{} executed step(s) reported no metrics ({}); the cost ceiling cannot see what they spent",
+                    silent.len(),
+                    silent.join(", ")
                 ));
             }
             if spend.cost_micro_usd > ceiling {

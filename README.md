@@ -72,8 +72,10 @@ and any claim that is not verified.
 
 The agent gets tools to plan, run, show, verify and compare runs. A run whose
 claims were not proven comes back as `unverified`, not as a tool error, so the
-agent cannot mistake a missing proof for a glitch. See [MCP server](docs/mcp.md)
-for every tool and its contract.
+agent cannot mistake a missing proof for a glitch. Every tool but `flot_run`
+is marked read-only; a headless agent needs `flot_run` approved in advance, as
+[Approvals](docs/mcp.md#approvals) shows. See [MCP server](docs/mcp.md) for
+every tool and its contract.
 
 ### Use flot from the terminal (CLI)
 

@@ -2,7 +2,7 @@
 
 `flot mcp` speaks newline-delimited JSON-RPC on stdio, with the same functions
 behind it as the CLI, so a host and a human get the same receipts, verdicts and
-digests:
+digests.
 
 ## Register flot with your agent
 
@@ -17,12 +17,47 @@ codex mcp add flot -- flot mcp      # Codex CLI
 
 Any other client that speaks MCP over stdio can run `flot mcp` the same way.
 
-With Claude Code 2.1.330 registered this way, the prompt "Fix the failing test.
-When you are done, run flot_run and show me the verdict and any claim that is
-not verified." on a one-function Python project fixed the bug, called
-`flot_run`, and reported `passed` with one verified claim, for $0.24.
-The Codex command was checked against `codex mcp add --help` in codex-cli
-0.167, which registers the server; a Codex session has not been run yet.
+## Approvals
+
+Every tool except `flot_run` only reads the store, and says so: its MCP
+annotations mark it read-only, non-destructive and closed-world, so a host can
+let it through without asking. `flot_run` executes the flow's commands, which
+are not sandboxed, and is annotated as destructive and open-world; a host
+should ask before it runs.
+
+An agent running without a person to ask therefore needs `flot_run` approved
+in advance:
+
+```bash
+claude -p "…" --allowedTools mcp__flot__flot_run   # Claude Code, headless
+```
+
+```toml
+# ~/.codex/config.toml, for codex exec
+[mcp_servers.flot]
+command = "flot"
+args = ["mcp"]
+default_tools_approval_mode = "approve"
+```
+
+Approve it only in projects whose `flot.toml` you have read.
+
+## Tested with
+
+Each host was given a one-function Python project with a failing test and a
+one-step flow proving the suite, and the prompt "Fix the failing test. When you
+are done, run flot_run and show me the verdict and any claim that is not
+verified."
+
+- **Claude Code 2.1.330:** fixed the bug, called `flot_run`, and reported
+  `passed` with one verified claim, for $0.24.
+- **Codex CLI 0.167** (`codex exec`, ChatGPT sign-in): fixed the bug and called
+  `flot_run`, which reported `passed` with one verified claim, once `flot_run`
+  was approved as above. Without that, the call was refused ("MCP tool call
+  requires approval, but approval policy is never") and the agent ran the
+  `flot` CLI instead, which records the same receipts. With the annotations,
+  `flot_show` went through without approval and `flot_run` still did not;
+  before them, `flot_show` was refused too.
 
 ## A session
 

@@ -798,7 +798,7 @@ run = "echo no metrics here"
     project
         .flot(&["run"])
         .ok()
-        .has("1 executed step(s) reported no metrics");
+        .has("1 executed step(s) reported no metrics (quiet)");
 }
 
 #[test]

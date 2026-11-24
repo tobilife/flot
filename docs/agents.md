@@ -79,11 +79,34 @@ budget defaults were not documented anywhere. They are now, in
 [Budgets](flows.md#budgets).
 
 The claims here only prove that each reviewer wrote a verdict, not that the
-verdict is right; the review itself is evidence for a person to read. Spend is
-dominated by context, not by the answer: each `NONE` cost about $0.90, almost
-all of it in the agent's own prompt and tool context, which depends on the
-local Claude Code setup. The two `silent` steps are the shell steps, which
-report no metrics because they spend nothing.
+verdict is right; the review itself is evidence for a person to read.
+
+Spend was dominated by context, not by the answer: each `NONE` cost about
+$0.90, almost all of it in the user's own Claude Code setup (plugins, hooks,
+personal instructions and MCP servers) that every call loaded. The example now
+runs each agent apart from that setup (`--setting-sources project`,
+`--strict-mcp-config`, and only the tools the step needs). The same change,
+staged this time, reviewed again:
+
+```
+ran      stage                ok        11ms  claims 1v/0u/0r
+ran      contracts            ok        79735ms  claims 1v/0u/0r
+ran      performance          ok        67966ms  claims 1v/0u/0r
+ran      security             ok        72592ms  claims 1v/0u/0r
+ran      gate                 ok        11991ms  claims 2v/0u/0r
+
+PASSED  96161ms
+spent $0.416301 (in 105481 / out 3401 tokens, 3 reporting step(s), 2 silent)  ceiling $4.000000
+```
+
+$3.25 became $0.42: each `NONE` cost $0.04 to $0.05, and the contract
+reviewer, which still found the same consequence, $0.33. The second run took
+longer in wall-clock time, so the saving is in tokens, not in latency.
+Staging the change is why the example now diffs against `HEAD`: `git diff`
+alone shows nothing once a change is staged, and the `stage` step's own proof
+(`test -s .flot-work/change.diff`) would have stopped the run before any
+reviewer was paid for. The two `silent` steps are the shell steps, which report
+no metrics because they spend nothing; the run names them.
 
 ## Spend and the cost ceiling
 

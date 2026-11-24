@@ -15,6 +15,14 @@
 # left from an earlier run can never pass for this run's; report spend through
 # $FLOT_METRICS even when the agent fails, so the cost ceiling sees it; then
 # exit with the agent's status.
+#
+# Agent steps run apart from your personal Claude Code setup:
+# --setting-sources project skips user settings (plugins, hooks, a personal
+# CLAUDE.md), --strict-mcp-config loads no MCP servers, and --tools names the
+# only tools the step gets. That keeps a receipt from depending on whose
+# machine ran it, and it is most of the cost: one reviewer that wrote NONE cost
+# $0.90 with a full personal setup and $0.04 without it. --max-budget-usd stops
+# one agent call; the flow's max_cost_usd stops starting new steps.
 
 [flow]
 name = "parallel-review"
@@ -25,9 +33,10 @@ budget = { timeout_secs = 1200, max_inline_bytes = 4096 }
 
 [[step]]
 id = "stage"
-run = "mkdir -p .flot-work && git diff > .flot-work/change.diff"
-# The diff is a function of the tree, so the tree keys it: change the code and
-# the diff is taken again, and the reviewers see the new one.
+run = "mkdir -p .flot-work && git diff HEAD > .flot-work/change.diff"
+# Staged and unstaged changes against HEAD. The diff is a function of the
+# tree, so the tree keys it: change the code and the diff is taken again, and
+# the reviewers see the new one.
 inputs = ["src/**/*.rs", "tests/**/*.rs", "Cargo.toml", "Cargo.lock"]
 outputs = [".flot-work/change.diff"]
 claims = ["there is a change to review"]
@@ -40,6 +49,7 @@ mkdir -p .flot-work
 rm -f .flot-work/security.md
 status=0
 claude -p "Review .flot-work/change.diff for injection, path traversal, unchecked input and secret handling. Write .flot-work/security.md with one finding per line, or write the single line NONE to that file. Write no other file." \
+  --setting-sources project --strict-mcp-config --tools Read,Grep,Glob,Write --max-budget-usd 1 \
   --permission-mode acceptEdits --output-format json > .flot-work/security.json || status=$?
 jq '{input_tokens: (.usage.input_tokens + .usage.cache_read_input_tokens + .usage.cache_creation_input_tokens),
      output_tokens: .usage.output_tokens, cost_usd: .total_cost_usd}' .flot-work/security.json > "$FLOT_METRICS" || true
@@ -58,6 +68,7 @@ mkdir -p .flot-work
 rm -f .flot-work/performance.md
 status=0
 claude -p "Review .flot-work/change.diff for added allocations, copies, unbounded growth and blocking calls. Write .flot-work/performance.md with one finding per line, or write the single line NONE to that file. Write no other file." \
+  --setting-sources project --strict-mcp-config --tools Read,Grep,Glob,Write --max-budget-usd 1 \
   --permission-mode acceptEdits --output-format json > .flot-work/performance.json || status=$?
 jq '{input_tokens: (.usage.input_tokens + .usage.cache_read_input_tokens + .usage.cache_creation_input_tokens),
      output_tokens: .usage.output_tokens, cost_usd: .total_cost_usd}' .flot-work/performance.json > "$FLOT_METRICS" || true
@@ -76,6 +87,7 @@ mkdir -p .flot-work
 rm -f .flot-work/contracts.md
 status=0
 claude -p "Review .flot-work/change.diff for changed shared contracts: keys, serialized formats, defaults and exit codes, and name the consumers that must change. Write .flot-work/contracts.md, or write the single line NONE to that file. Write no other file." \
+  --setting-sources project --strict-mcp-config --tools Read,Grep,Glob,Write --max-budget-usd 2 \
   --permission-mode acceptEdits --output-format json > .flot-work/contracts.json || status=$?
 jq '{input_tokens: (.usage.input_tokens + .usage.cache_read_input_tokens + .usage.cache_creation_input_tokens),
      output_tokens: .usage.output_tokens, cost_usd: .total_cost_usd}' .flot-work/contracts.json > "$FLOT_METRICS" || true

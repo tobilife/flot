@@ -236,7 +236,8 @@ budgets, concurrency, outputs, guarded proofs, scope and sandbox.
 - **No proof, no pass.** A claim is `verified` only when its proof command ran
   after the step succeeded and exited zero. A failed, timed-out, killed or
   tolerated step proves nothing, and a proof whose files changed while it ran
-  does not count.
+  does not count. `flot flaky` names a step or proof whose result changed
+  across runs on the same inputs, which a proof must not do.
 - **Proofs the agent cannot rewrite.** With `proofs_from = "origin/main"`, a
   proof that differs from that revision (its command, its claims or the files
   it reads) leaves its claims unverified, and `flot verify --proofs-from`

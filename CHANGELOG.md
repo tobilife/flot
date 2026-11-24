@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- `flot flaky [--runs N]` names steps that were `ok` and `failed` on one key,
+  and proofs that were `verified` and `refuted` over one step key and one set
+  of proof files, in the newest runs executed here; exits 2 when there is one.
+  `flot doctor` warns about them.
 - Held to a revision, `flot verify` (text, `--json` as `anchor.unread`, and
   `--markdown`) names the files that differ from it and that no step read,
   checked or produced: the changes no claim speaks for. The verdict and exit

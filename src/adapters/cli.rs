@@ -249,6 +249,13 @@ pub enum Command {
         #[arg(long, default_value_t = 50)]
         limit: usize,
     },
+    /// Name the steps and proofs that gave different results on the same
+    /// inputs in runs executed here. Exits 2 when there is one.
+    Flaky {
+        /// How many of the newest runs to read.
+        #[arg(long, default_value_t = 50)]
+        runs: usize,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -925,6 +932,51 @@ fn dispatch(
                 );
             }
             Ok(ExitCode::SUCCESS)
+        }
+        Command::Flaky { runs } => {
+            let report = workspace.flaky(*runs)?;
+            if cli.json {
+                print_json(&report)?;
+            } else {
+                for found in report.steps.iter().chain(&report.claims) {
+                    match &found.claim {
+                        None => say!(
+                            "step `{}` (key {}) on the same inputs:",
+                            found.step_id,
+                            found.key
+                        ),
+                        Some(claim) => say!(
+                            "proof of \"{}\" (step `{}`, key {}) over the same files:",
+                            claim,
+                            found.step_id,
+                            found.key
+                        ),
+                    }
+                    for outcome in &found.outcomes {
+                        let count = outcome.runs.len();
+                        say!(
+                            "  {:<9} in {count} run{}, newest {}",
+                            outcome.outcome,
+                            if count == 1 { "" } else { "s" },
+                            outcome.runs[0]
+                        );
+                    }
+                }
+                for unreadable in &report.unreadable {
+                    say!("unreadable  {unreadable}");
+                }
+                say!(
+                    "{} step(s) and {} proof(s) gave different results on the same inputs in {} run(s) read",
+                    report.steps.len(),
+                    report.claims.len(),
+                    report.runs_read
+                );
+            }
+            Ok(if report.is_empty() {
+                ExitCode::SUCCESS
+            } else {
+                ExitCode::from(2)
+            })
         }
         Command::Search { query, runs, limit } => {
             let report = workspace.search(query, *runs, *limit)?;

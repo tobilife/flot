@@ -146,6 +146,29 @@ impl Workspace {
             }
         });
 
+        if stored {
+            checks.push(match self.flaky(50) {
+                Ok(report) if report.is_empty() => check(
+                    "history",
+                    Status::Ok,
+                    format!(
+                        "no step or proof changed its result on the same inputs in {}",
+                        counted(report.runs_read, "run")
+                    ),
+                ),
+                Ok(report) => check(
+                    "history",
+                    Status::Warn,
+                    format!(
+                        "{} and {} changed their result on the same inputs; a proof that does is not one (`flot flaky`)",
+                        counted(report.steps.len(), "step"),
+                        counted(report.claims.len(), "proof")
+                    ),
+                ),
+                Err(error) => check("history", Status::Fail, format!("{error:#}")),
+            });
+        }
+
         if let Some(flow) = &flow {
             let confined: Vec<&str> = flow
                 .steps

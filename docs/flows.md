@@ -55,6 +55,31 @@ records the proof command, its exit code and a digest of its output.
 `allow_failure = true` lets a run continue past a failed step, but proves
 nothing: that step's claims stay unverified.
 
+### Proofs that change their mind
+
+A proof run twice over the same step and the same files must say the same
+thing; one that does depends on something the flow does not declare (time,
+the network, the machine, chance), and a pass from it proves little.
+`flot flaky` reads the newest runs executed here (`--runs N`, default 50;
+imported runs ran elsewhere and are skipped) and names each step that was
+`ok` and `failed` on one key, and each proof that was `verified` and
+`refuted` over one step key and one set of proof files. It exits 2 when there
+is one, and `flot doctor` warns. A claim left unverified because its step
+failed is the step's flakiness, not the proof's. Real output, for a proof
+that passes on even seconds, after six `flot run --force`:
+
+```text
+$ flot flaky
+proof of "the checkout page loads" (step `e2e`, key f8e6bec8c477) over the same files:
+  refuted   in 4 runs, newest 1795561545037-15d92f3670c1
+  verified  in 2 runs, newest 1795561544365-388edc142298
+0 step(s) and 1 proof(s) gave different results on the same inputs in 6 run(s) read
+```
+
+A success is reused rather than run again, so a flaky proof shows up only
+across runs that executed it: after `--force`, on another branch's inputs
+and back, or where a failure made the step run again.
+
 ## Verdict
 
 `failed` if any step did not reach `ok` or any claim was refuted;

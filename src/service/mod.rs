@@ -5,6 +5,7 @@
 pub mod audit;
 pub mod bundle;
 pub mod doctor;
+pub mod flaky;
 pub mod keys;
 pub mod search;
 pub mod share;
@@ -682,6 +683,12 @@ impl Workspace {
     /// ignoring case; at most `limit` hits.
     pub fn search(&self, query: &str, runs: usize, limit: usize) -> Result<search::SearchReport> {
         search::search(&self.store()?, query, runs, limit)
+    }
+
+    /// Steps and proofs that gave different results on the same inputs in
+    /// the newest `runs` runs executed here.
+    pub fn flaky(&self, runs: usize) -> Result<flaky::FlakyReport> {
+        flaky::flaky(&self.store()?, runs)
     }
 
     pub fn gc(&self, dry_run: bool) -> Result<GcReport> {

@@ -8,7 +8,7 @@
 | `flot sign [RUN]` | sign a run executed here with the host key |
 | `flot show [RUN]` | steps, claims and limitations of a run |
 | `flot verify [RUN] [--proofs-from REV] [--markdown]` | re-authenticate a run from the store alone; with a revision (or the flow's `proofs_from`), also check its proofs are as they are there; `--markdown` prints the check as a report ([in CI](ci.md)) |
-| `flot doctor` | check what the evidence relies on here: the flow parses, `proofs_from` is set and resolves, git ignores the store, the signing key and trust list, that a requested sandbox can be enforced, and that no Claude Code settings switch hooks off; changes nothing and exits 1 if a check fails |
+| `flot doctor` | check what the evidence relies on here: the flow parses, `proofs_from` is set and resolves, git ignores the store, the signing key and trust list, no flaky step or proof in recent runs, that a requested sandbox can be enforced, and that no Claude Code settings switch hooks off; changes nothing and exits 1 if a check fails |
 | `flot guard [PATH...] [--command CMD] [--hook]` | name the paths whose change would touch the proofs or decide whether they are checked (CI workflows, git hooks, Claude Code settings) and exit 2 if any; `--command` reads a shell command line for the files it writes and for downloaded code piped into an interpreter; `--hook` answers a Claude Code `PreToolUse` payload |
 | `flot diff [LEFT] [RIGHT]` | step-by-step comparison by receipt identity; by default `latest~1` against `latest` |
 | `flot receipt ID` | one receipt as JSON (id prefix accepted) |
@@ -16,6 +16,7 @@
 | `flot cat DIGEST` | one stored object, byte-exact |
 | `flot runs [--limit N]` | recorded runs, newest first; imported ones are marked |
 | `flot search QUERY [--runs N] [--limit N]` | lines of recorded output, claims and limitations that contain QUERY (literal, any case), newest run first; a reused step is searched in the run that executed it, and attempts and candidates not kept are searched too |
+| `flot flaky [--runs N]` | name the steps and proofs that gave different results on the same inputs in runs executed here; exits 2 if any |
 | `flot gc [--dry-run]` | drop evidence no recorded run references |
 | `flot bundle [RUN] [-o FILE] [--sign] [--allow-secrets]` | one portable file: run, receipts, every object they name (streams, produced files, proofs), signatures; a run that carries a credential-shaped token is refused |
 | `flot import FILE [--require-trusted]` | authenticate a bundle and absorb it into this store |
@@ -60,7 +61,7 @@ JSON reader decodes to the same text; `flot cat` is byte-exact.
 
 `0` passed; `1` failed, a `flot doctor` check that fails, or evidence that does not authenticate (a
 broken run, a tampered receipt or object, a bundle that fails its checks, a
-store record that cannot be read); `2` unverified claims, a non-identical
+store record that cannot be read); `2` unverified claims, a flaky step or proof, a non-identical
 diff, a run whose proofs differ from the revision `verify` holds it to, or a
 path `flot guard` protects; `3` invalid request, including usage errors and policy refusals such as
 `--require-trusted`; `4` the environment failed (IO, permissions, a store busy

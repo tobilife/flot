@@ -17,6 +17,11 @@ codex mcp add flot -- flot mcp      # Codex CLI
 
 Any other client that speaks MCP over stdio can run `flot mcp` the same way.
 
+With Claude Code 2.1.330 registered this way, the prompt "Fix the failing test.
+When you are done, run flot_run and show me the verdict and any claim that is
+not verified." on a one-function Python project fixed the bug, called
+`flot_run`, and reported `passed` with one verified claim, for $0.24.
+
 ## A session
 
 ```

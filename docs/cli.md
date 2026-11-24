@@ -8,9 +8,10 @@
 | `flot sign [RUN]` | sign a run executed here with the host key |
 | `flot show [RUN]` | steps, claims and limitations of a run |
 | `flot verify [RUN]` | re-authenticate a run from the store alone |
-| `flot diff LEFT RIGHT` | step-by-step comparison by receipt identity |
+| `flot diff [LEFT] [RIGHT]` | step-by-step comparison by receipt identity; by default `latest~1` against `latest` |
 | `flot receipt ID` | one receipt as JSON (id prefix accepted) |
-| `flot cat DIGEST` | complete stored output of a step |
+| `flot log STEP [RUN] [--stderr]` | complete output one step of a run printed |
+| `flot cat DIGEST` | one stored object, byte-exact |
 | `flot runs [--limit N]` | recorded runs, newest first; imported ones are marked |
 | `flot gc [--dry-run]` | drop evidence no recorded run references |
 | `flot bundle [RUN] [-o FILE] [--sign]` | one portable file: run, receipts, every object they name (streams, produced files, proofs), signatures |
@@ -24,8 +25,15 @@
 ## Selecting a run
 
 `RUN` is `latest` (the newest run executed here; an imported run is never
-`latest`), a full run id, or a prefix of at least four characters of a run id
-or of the root digest it ends with.
+`latest`), `latest~N` (the run executed here N runs before it, so `latest~1` is
+the previous one), a full run id, or a prefix of at least four characters of a
+run id or of the root digest it ends with.
+
+`flot run` prints one line per step. A step that executed also shows the first
+and last lines of its output (the middle is marked as omitted when it exceeds
+`max_inline_bytes`) and, when something was left out, the `flot log` command
+that prints all of it. A reused step prints only its line; its output is still
+one `flot log` away. `flot show` points each failed step at its `flot log`.
 
 ## Selecting a flow
 

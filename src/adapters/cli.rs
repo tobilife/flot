@@ -102,12 +102,27 @@ pub enum Command {
         #[arg(default_value = "latest")]
         run: String,
     },
-    /// Compare two runs step by step.
-    Diff { left: String, right: String },
+    /// Compare two runs step by step: by default, the latest run against the
+    /// one before it.
+    Diff {
+        #[arg(default_value = "latest~1")]
+        left: String,
+        #[arg(default_value = "latest")]
+        right: String,
+    },
     /// Print one receipt as JSON.
     Receipt { receipt_id: String },
     /// Write a stored object (complete step output) to stdout.
     Cat { object: String },
+    /// Write the complete output one step of a run printed to stdout.
+    Log {
+        step: String,
+        #[arg(default_value = "latest")]
+        run: String,
+        /// The step's stderr instead of its stdout.
+        #[arg(long)]
+        stderr: bool,
+    },
     /// Write a run's receipts and output objects to one portable file.
     Bundle {
         #[arg(default_value = "latest")]
@@ -367,6 +382,12 @@ fn dispatch(
         Command::Cat { object } => {
             use std::io::Write;
             std::io::stdout().write_all(&workspace.object(object)?)?;
+            Ok(ExitCode::SUCCESS)
+        }
+        Command::Log { step, run, stderr } => {
+            use std::io::Write;
+            let digest = workspace.step_output(run, step, *stderr)?;
+            std::io::stdout().write_all(&workspace.object(&digest)?)?;
             Ok(ExitCode::SUCCESS)
         }
         Command::Bundle { run, out, sign } => {
@@ -654,18 +675,32 @@ fn render_run(report: &RunReport) {
         for output in &step.outputs {
             say!("    > {}  {}", output.path, digest::short(&output.digest));
         }
+        // A reused step's output was shown when it ran; `flot show` and
+        // `flot cat` still have it.
+        if step.cached {
+            continue;
+        }
         if !step.stdout_inline.trim().is_empty() {
             for line in step.stdout_inline.lines() {
                 say!("    | {line}");
-            }
-            if step.stdout_truncated {
-                say!("    | ... (flot cat {} for the rest)", step.stdout_digest);
             }
         }
         if !step.stderr_inline.trim().is_empty() {
             for line in step.stderr_inline.lines() {
                 say!("    ! {line}");
             }
+        }
+        if step.stdout_truncated || step.stderr_truncated {
+            say!(
+                "    complete output: flot log {}{} {}",
+                step.step_id,
+                if step.stdout_truncated {
+                    ""
+                } else {
+                    " --stderr"
+                },
+                report.manifest.run_id
+            );
         }
     }
     let manifest = &report.manifest;
@@ -754,6 +789,13 @@ fn render_detail(detail: &RunDetail) {
                     say!("        reason: {reason}");
                 }
             }
+        }
+        if matches!(step.status, StepStatus::Failed | StepStatus::Timeout) {
+            say!(
+                "      output: flot log {} {}",
+                step.step_id,
+                manifest.run_id
+            );
         }
     }
     say!(

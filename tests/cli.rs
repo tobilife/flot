@@ -632,7 +632,7 @@ fn the_mcp_server_handshakes_and_runs_the_flow_over_stdio() {
         .collect();
     assert_eq!(replies.len(), 3, "the notification must not be answered");
     assert_eq!(replies[0]["result"]["serverInfo"]["name"], "flot");
-    assert_eq!(replies[1]["result"]["tools"].as_array().unwrap().len(), 8);
+    assert_eq!(replies[1]["result"]["tools"].as_array().unwrap().len(), 9);
     assert_eq!(
         replies[2]["result"]["structuredContent"]["manifest"]["verdict"],
         "passed"
@@ -842,7 +842,7 @@ fn an_invalid_cost_ceiling_is_refused() {
 }
 
 #[test]
-fn the_truncation_hint_names_a_digest_that_cat_can_read() {
+fn the_truncation_hint_names_a_command_that_prints_all_of_it() {
     let project = Project::new(
         r#"
 [flow]
@@ -859,13 +859,10 @@ run = "yes flot | head -c 300"
     let hint = run
         .stdout
         .lines()
-        .find(|line| line.contains("flot cat"))
+        .find_map(|line| line.trim().strip_prefix("complete output: flot "))
         .expect("a trimmed step prints a recovery hint");
-    let digest = hint
-        .split_whitespace()
-        .find(|word| word.starts_with("sha256:"))
-        .unwrap();
-    assert_eq!(project.flot(&["cat", digest]).ok().stdout.len(), 300);
+    let args: Vec<&str> = hint.split_whitespace().collect();
+    assert_eq!(project.flot(&args).ok().stdout.len(), 300);
 }
 
 fn public_key(project: &Project) -> String {
@@ -2271,4 +2268,78 @@ fn a_rotation_that_cannot_write_its_handover_keeps_the_old_key() {
         project.flot(&["key", "show", "--json"]).json()["public_key"],
         old.as_str()
     );
+}
+
+#[test]
+fn a_reused_step_is_one_line_its_output_stays_in_the_store() {
+    let project = Project::new(TWO_STEPS);
+    project.flot(&["run"]).ok().has("    | first");
+    project
+        .flot(&["run"])
+        .ok()
+        .has("cached   a")
+        .lacks("    | first")
+        .lacks("    | second");
+}
+
+#[test]
+fn diff_compares_the_latest_run_with_the_one_before_by_default() {
+    let project = Project::new(TWO_STEPS);
+    project.flot(&["run"]).ok();
+    let first = run_id(&project);
+    project.flot(&["run", "--force"]).ok();
+    let second = run_id(&project);
+    assert_ne!(first, second);
+    let diff = project.flot(&["diff", "--json"]).json();
+    assert_eq!(diff["left"], first.as_str(), "{diff}");
+    assert_eq!(diff["right"], second.as_str(), "{diff}");
+    let shown = project.flot(&["show", "--json", "latest~1"]).json();
+    assert_eq!(shown["run_id"], first.as_str());
+
+    let far = project.flot(&["show", "latest~2"]);
+    assert_eq!(far.code, 3, "stderr:\n{}", far.stderr);
+    far.has("goes back further than the 2 run(s)");
+    let garbled = project.flot(&["show", "latest~one"]);
+    assert_eq!(garbled.code, 3, "stderr:\n{}", garbled.stderr);
+    garbled.has("not a run selector");
+}
+
+#[test]
+fn log_prints_a_steps_complete_output_and_show_points_a_failure_at_it() {
+    let project = Project::new(
+        r#"
+[flow]
+name = "loud"
+
+[[step]]
+id = "noisy"
+run = "for i in $(seq 1 3000); do echo line $i; done; echo oops >&2; exit 1"
+"#,
+    );
+    let run = project.flot(&["run"]);
+    assert_eq!(run.code, 1, "stderr:\n{}", run.stderr);
+    // The run shows where the output starts and where it ends, not all of it.
+    run.has("    | line 1\n")
+        .has("    | line 3000\n")
+        .lacks("    | line 1500\n")
+        .has("output omitted here")
+        .has("complete output: flot log noisy");
+    let log = project.flot(&["log", "noisy"]);
+    log.ok().has("line 1\n").has("line 3000\n");
+    project.flot(&["log", "noisy", "--stderr"]).ok().has("oops");
+    let id = run_id(&project);
+    project
+        .flot(&["show"])
+        .has(&format!("output: flot log noisy {id}"));
+    let missing = project.flot(&["log", "quiet"]);
+    assert_eq!(missing.code, 3, "stderr:\n{}", missing.stderr);
+    missing.has("its steps are noisy");
+}
+
+#[test]
+fn a_new_store_keeps_itself_out_of_git() {
+    let project = Project::new(TWO_STEPS);
+    project.flot(&["run"]).ok();
+    let ignore = std::fs::read_to_string(project.path().join(".flot/.gitignore")).unwrap();
+    assert!(ignore.lines().any(|line| line == "*"), "{ignore}");
 }

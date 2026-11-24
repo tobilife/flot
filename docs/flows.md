@@ -67,7 +67,10 @@ value wins.
 Admission limits stop work and report it, never as a success: a step that hits
 one is `timeout` or `failed`, and a proof that hits one leaves its claims
 unverified. A delivery budget only trims what travels inline in receipts and
-replies; the complete stream stays retrievable with `flot cat <digest>`.
+replies: the preview keeps the first quarter and the last three quarters of the
+budget, cut at line breaks, because builds and test runners report what failed
+at the end. The complete stream stays retrievable with `flot log STEP` (MCP
+`flot_step_output`).
 
 A budget is not part of the step key: a receipt that succeeded under a larger
 budget is still reused after the budget shrinks.

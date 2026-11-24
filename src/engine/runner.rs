@@ -929,9 +929,9 @@ impl<'a> Runner<'a> {
         let claims = claims::settle(step, status, tolerated, proof, &mut limitations);
 
         let (stdout_inline, stdout_truncated) =
-            exec::inline_preview(&outcome.stdout, budget.max_inline_bytes);
+            exec::stream_preview(&outcome.stdout, budget.max_inline_bytes);
         let (stderr_inline, stderr_truncated) =
-            exec::inline_preview(&outcome.stderr, budget.max_inline_bytes);
+            exec::stream_preview(&outcome.stderr, budget.max_inline_bytes);
 
         Ok(Receipt::seal(
             ReceiptIdentity {

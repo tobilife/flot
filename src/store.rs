@@ -147,6 +147,13 @@ impl Store {
         }
         fs::create_dir_all(&self.root)
             .with_context(|| format!("cannot create {}", self.root.display()))?;
+        // The store is this host's evidence, shared through bundles; a
+        // committed copy would only be refused elsewhere. Keep it out of git
+        // without asking the user to edit their own ignore file.
+        write_atomic(
+            &self.root.join(".gitignore"),
+            b"# Created by flot. The store is local; share runs with `flot bundle`.\n*\n",
+        )?;
         write_atomic(&format_path, STORE_FORMAT.to_string().as_bytes())
     }
 
@@ -504,28 +511,42 @@ impl Store {
         Ok(ids)
     }
 
-    /// Resolve `latest` (the newest run this host executed), an exact run id,
-    /// or a prefix of at least `MIN_RUN_PREFIX` characters of a run id or of
-    /// the root digest it ends with.
+    /// Resolve `latest` (the newest run this host executed), `latest~N` (the
+    /// run executed here N runs before it), an exact run id, or a prefix of at
+    /// least `MIN_RUN_PREFIX` characters of a run id or of the root digest it
+    /// ends with.
     pub fn resolve_run(&self, spec: &str) -> Result<RunManifest> {
         let ids = self.list_runs()?;
         if ids.is_empty() {
             bail!("no runs recorded yet — run `flot run` first");
         }
-        let run_id = if spec == "latest" {
+        let back = match spec.strip_prefix("latest") {
+            Some("") => Some(0),
+            Some(rest) => match rest.strip_prefix('~').map(str::parse::<usize>) {
+                Some(Ok(back)) => Some(back),
+                _ => bail!("`{spec}` is not a run selector; use `latest` or `latest~N`"),
+            },
+            None => None,
+        };
+        let run_id = if let Some(back) = back {
             let pointed = fs::read_to_string(self.root.join("latest"))
                 .map(|text| text.trim().to_string())
                 .ok()
                 .filter(|id| ids.contains(id));
-            match pointed {
-                Some(id) => id,
-                None => ids
-                    .iter()
-                    .find(|id| !self.is_imported(id))
-                    .with_context(|| {
-                        "no run was executed here yet; name an imported run by its id"
-                    })?
-                    .clone(),
+            let local: Vec<&String> = ids.iter().filter(|id| !self.is_imported(id)).collect();
+            let newest = match pointed {
+                Some(id) => local.iter().position(|local| **local == id).unwrap_or(0),
+                None => 0,
+            };
+            if local.is_empty() {
+                bail!("no run was executed here yet; name an imported run by its id");
+            }
+            match local.get(newest + back) {
+                Some(id) => (*id).clone(),
+                None => bail!(
+                    "`{spec}` goes back further than the {} run(s) executed here",
+                    local.len() - newest
+                ),
             }
         } else if ids.iter().any(|id| id == spec) {
             spec.to_string()

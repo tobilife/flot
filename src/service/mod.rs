@@ -316,6 +316,31 @@ impl Workspace {
         Ok(receipt)
     }
 
+    /// The digest of the complete output one step of a run printed: stdout,
+    /// or stderr when `stderr`. Read it with [`Workspace::object`] or
+    /// [`Workspace::read_object`].
+    pub fn step_output(&self, run: &str, step: &str, stderr: bool) -> Result<String> {
+        let manifest = self.store()?.resolve_run(run)?;
+        let Some(entry) = manifest.steps.iter().find(|entry| entry.step_id == step) else {
+            let steps: Vec<&str> = manifest
+                .steps
+                .iter()
+                .map(|entry| entry.step_id.as_str())
+                .collect();
+            bail!(
+                "run {} has no step `{step}`; its steps are {}",
+                manifest.run_id,
+                steps.join(", ")
+            );
+        };
+        let identity = self.receipt(&entry.receipt_id)?.identity;
+        Ok(if stderr {
+            identity.stderr_digest
+        } else {
+            identity.stdout_digest
+        })
+    }
+
     /// The complete bytes of a stored object, authenticated against its digest.
     pub fn object(&self, digest: &str) -> Result<Vec<u8>> {
         self.store()?.read_bytes(digest)

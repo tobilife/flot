@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+- A reused step prints one line in `flot run`; its output was shown when it
+  ran and is still in the store.
+- A step's inline output keeps its first and last lines, where builds and
+  test runners report failures, instead of only its beginning. A trimmed step
+  names the `flot log` command that prints all of it.
+- `flot log STEP [RUN] [--stderr]` and MCP `flot_step_output` print the
+  complete output of one step by its id; `flot show` points each failed step
+  at it.
+- `latest~N` names the run executed N runs before the latest, and `flot diff`
+  (and `flot_diff`) compares `latest~1` with `latest` by default.
+- A new `.flot` store writes its own `.gitignore`, so `git status` stays clean.
+- `flot_run` tells agents that a cached step is as strong as a fresh run, so
+  they stop forcing re-runs to double-check it.
+
 ## 0.2.1
 
 - `flot key rotate` replaces the signing key and writes a handover that the

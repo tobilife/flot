@@ -78,9 +78,10 @@ from the shell.
 | `flot_run` | execute and record receipts (`only`, `force`, `jobs`, `max_cost_usd`) |
 | `flot_show` | steps, claim verdicts and limitations of a run |
 | `flot_verify` | re-authenticate a run from the store |
-| `flot_diff` | compare two runs by receipt identity |
+| `flot_diff` | compare two runs by receipt identity; `left` defaults to `latest~1`, `right` to `latest` |
 | `flot_receipt` | one receipt, by id or hex prefix |
-| `flot_read_object` | complete step output by digest, with `max_bytes` |
+| `flot_step_output` | complete output of one step of a run, by step id (`step`, `run`, `stderr`, `max_bytes`) |
+| `flot_read_object` | one stored object by digest, with `max_bytes` |
 | `flot_runs` | recorded runs with verdicts and roots, and any that cannot be read |
 
 ## Replies and errors

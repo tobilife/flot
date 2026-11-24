@@ -221,12 +221,17 @@ impl Server {
             })?)?,
             "flot_show" => serde_json::to_value(workspace.show(&run_selector())?)?,
             "flot_verify" => serde_json::to_value(workspace.verify(&run_selector())?)?,
-            "flot_diff" => {
-                serde_json::to_value(workspace.diff(&required("left")?, &required("right")?)?)?
-            }
+            "flot_diff" => serde_json::to_value(workspace.diff(
+                &text("left").unwrap_or_else(|| "latest~1".into()),
+                &text("right").unwrap_or_else(|| "latest".into()),
+            )?)?,
             "flot_receipt" => serde_json::to_value(workspace.receipt(&required("receipt_id")?)?)?,
             "flot_read_object" => serde_json::to_value(workspace.read_object(
                 &required("digest")?,
+                count("max_bytes").unwrap_or(DEFAULT_OBJECT_BYTES),
+            )?)?,
+            "flot_step_output" => serde_json::to_value(workspace.read_object(
+                &workspace.step_output(&run_selector(), &required("step")?, flag("stderr"))?,
                 count("max_bytes").unwrap_or(DEFAULT_OBJECT_BYTES),
             )?)?,
             "flot_runs" => serde_json::to_value(workspace.runs(count("limit").unwrap_or(20))?)?,
@@ -497,10 +502,10 @@ fn tool_catalog() -> Vec<Value> {
         tool(
             "flot_run",
             Effect::Runs,
-            "Execute the flow and record a receipt per step. The verdict is `passed` only when every step succeeded and every claim was proven; `unverified` means work completed without proof.",
+            "Execute the flow and record a receipt per step. The verdict is `passed` only when every step succeeded and every claim was proven; `unverified` means work completed without proof. A step with `cached: true` was not executed again because the same command already succeeded over byte-identical inputs and upstream receipts; its reused receipt is as strong as a fresh run, so do not force a re-run to double-check it. A step's inline output keeps its first and last lines; flot_step_output returns all of it.",
             json!({
                 "only": { "type": "string", "description": "Limit to one step and its dependencies." },
-                "force": { "type": "boolean", "description": "Re-run instead of reusing receipts." },
+                "force": { "type": "boolean", "description": "Execute every selected step even when an identical receipt could be reused; for steps that are flaky or depend on something undeclared." },
                 "jobs": { "type": "integer", "minimum": 1, "description": "Run up to this many independent steps at once." },
                 "max_cost_usd": { "type": "number", "minimum": 0, "description": "Stop starting new steps once executed steps have reported this many dollars through $FLOT_METRICS." }
             }),
@@ -525,10 +530,10 @@ fn tool_catalog() -> Vec<Value> {
             Effect::Reads,
             "Compare two runs by receipt identity. Identical receipts mean the same work over the same inputs reached the same verdict.",
             json!({
-                "left": { "type": "string", "description": "Run selector." },
-                "right": { "type": "string", "description": "Run selector." }
+                "left": { "type": "string", "description": "Run selector; defaults to latest~1, the run before the latest." },
+                "right": { "type": "string", "description": "Run selector; defaults to latest." }
             }),
-            &["left", "right"],
+            &[],
         ),
         tool(
             "flot_receipt",
@@ -546,6 +551,18 @@ fn tool_catalog() -> Vec<Value> {
                 "max_bytes": { "type": "integer", "minimum": 1, "description": "Inline byte ceiling; the complete object stays retrievable." }
             }),
             &["digest"],
+        ),
+        tool(
+            "flot_step_output",
+            Effect::Reads,
+            "Read the complete output one step of a run printed, such as the failing test log behind a trimmed preview.",
+            json!({
+                "step": { "type": "string", "description": "Step id." },
+                "run": { "type": "string", "description": "Run selector; defaults to latest." },
+                "stderr": { "type": "boolean", "description": "Read stderr instead of stdout." },
+                "max_bytes": { "type": "integer", "minimum": 1, "description": "Inline byte ceiling; the complete object stays retrievable." }
+            }),
+            &["step"],
         ),
         tool(
             "flot_runs",
@@ -631,11 +648,22 @@ verify = "grep -q flot artifact.txt"
     }
 
     #[test]
+    fn a_steps_output_is_read_by_step_id_without_a_digest() {
+        let (_dir, server) = project(PROVEN);
+        call(&server, "flot_run", json!({}));
+        let output = call(&server, "flot_step_output", json!({ "step": "write" }));
+        assert_eq!(output["isError"], false, "{output}");
+        assert_eq!(output["structuredContent"]["text"], "flot\n");
+        let missing = call(&server, "flot_step_output", json!({ "step": "read" }));
+        assert_eq!(missing["isError"], true, "{missing}");
+    }
+
+    #[test]
     fn every_catalog_tool_declares_an_object_schema() {
         let (_dir, server) = project(PROVEN);
         let response = server.handle(&request("tools/list", json!({}))).unwrap();
         let tools = response["result"]["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 8);
+        assert_eq!(tools.len(), 9);
         for entry in tools {
             assert!(entry["name"].as_str().unwrap().starts_with("flot_"));
             assert!(!entry["description"].as_str().unwrap().is_empty());
@@ -816,7 +844,8 @@ run = "yes flot | head -c 4000"
             ),
             ("flot_run", json!({ "max_cost_usd": -1 }), "at least 0"),
             ("flot_show", json!({ "run": 123 }), "`run` must be a string"),
-            ("flot_diff", json!({ "left": "a" }), "`right` is required"),
+            ("flot_diff", json!({ "left": 5 }), "`left` must be a string"),
+            ("flot_receipt", json!({}), "`receipt_id` is required"),
             ("flot_runs", json!("everything"), "must be an object"),
         ] {
             let message = invalid(json!({ "name": name, "arguments": arguments }));

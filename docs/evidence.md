@@ -143,6 +143,7 @@ host B $ flot trust list
 ```
 .flot/
   FORMAT                     store format; another format is refused, not migrated
+  .gitignore                 keeps the store out of git; share runs with bundles
   objects/<ab>/<digest>      complete stdout/stderr, produced files, proof output,
                              per-run observations
   receipts/<digest>.json     one receipt per distinct piece of work

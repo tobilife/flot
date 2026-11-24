@@ -32,7 +32,7 @@ the content store with host-sealed cache and trust, the CLI with typed exit
 codes, an MCP stdio server over the same functions, authenticated receipt
 bundles, spend accounting with a run cost ceiling, signed attestations with a
 local trust list and key handovers, guarded proofs, produced files kept and restored, an enforced
-layer architecture, and 282 tests including end-to-end runs through the real
+layer architecture, and 289 tests including end-to-end runs through the real
 binary, a real MCP handshake and a cross-store bundle import.
 
 Not there yet: sandboxing steps (they run with your permissions; see

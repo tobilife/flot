@@ -43,6 +43,18 @@ proves each of those checks and records receipts in `.flot/`.
   [docs/](docs) in the same change, and only show output that a real run
   printed.
 
+## Releasing
+
+1. Rename `## Unreleased` in [CHANGELOG.md](CHANGELOG.md) to the new version,
+   and set the same `version` in `Cargo.toml`.
+2. Commit, then push a tag: `git tag vX.Y.Z && git push origin vX.Y.Z`.
+
+The [release workflow](.github/workflows/release.yml) checks that the tag,
+`Cargo.toml` and the changelog agree, runs the tests, builds binaries for
+Linux (x86_64, aarch64; static musl) and macOS (x86_64, aarch64), publishes
+them with checksums on a GitHub release whose notes are the changelog section,
+and publishes the crate through crates.io trusted publishing.
+
 ## Reporting security issues
 
 Do not open a public issue for a vulnerability; follow [SECURITY.md](SECURITY.md).

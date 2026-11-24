@@ -122,6 +122,24 @@ pub struct Step {
     /// with no other step beside it so that what changed is its own doing.
     #[serde(default)]
     pub may_change: Vec<String>,
+    /// Confinement the kernel enforces on the step: no network, writes only
+    /// beneath some paths. Where it cannot be enforced the step is not run.
+    #[serde(default)]
+    pub sandbox: Option<Sandbox>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Sandbox {
+    /// Whether the step may use the network. A confined step may not unless
+    /// this says so.
+    #[serde(default)]
+    pub network: bool,
+    /// Paths, relative to the flow root, the step may write beneath; absent,
+    /// writes are not restricted. The temporary directory and `/dev` are
+    /// always writable.
+    #[serde(default)]
+    pub write: Option<Vec<String>>,
 }
 
 impl Step {
@@ -293,6 +311,23 @@ impl Flow {
                     "step `{}` declares verify_inputs without a verify command that reads them",
                     step.id
                 );
+            }
+            if let Some(sandbox) = &step.sandbox {
+                if sandbox.network && sandbox.write.is_none() {
+                    bail!(
+                        "step `{}` has a sandbox that restricts nothing; set `network = false` or `write`",
+                        step.id
+                    );
+                }
+                for path in sandbox.write.iter().flatten() {
+                    if !is_contained(path) || path.contains(['*', '?', '[']) {
+                        bail!(
+                            "step `{}` sandbox write `{}` must be a path inside the flow root, without wildcards",
+                            step.id,
+                            path
+                        );
+                    }
+                }
             }
             for pattern in &step.may_change {
                 if !is_contained(pattern) {

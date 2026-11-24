@@ -375,6 +375,74 @@ doing (its proof, and candidates in their own copies, are not held back). The
 scope is part of the step key, so narrowing it runs the step again. A change
 of mode alone is not a change of content and is not reported.
 
+## Sandbox
+
+`may_change` judges what a step changed; `sandbox` stops it from changing
+anything else, and from reaching the network. The kernel enforces it, on Linux:
+
+```toml
+[[step]]
+id = "fix"
+run = "sh agent.sh"
+inputs = ["agent.sh"]
+sandbox = { write = ["src"] }
+claims = ["src/slug.txt is fixed"]
+verify = "grep -q fixed src/slug.txt"
+```
+
+- `network` (default `false`): without it, the step runs in a new user and
+  network namespace whose only interface is an unconfigured loopback.
+- `write`: paths, relative to the flow root, the step may create, edit,
+  delete or rename files beneath. Absent, writes are not restricted. Present,
+  a Landlock ruleset denies every other write: everywhere else, including
+  `/tmp`, `.git` and the store. `/dev/null`, `/dev/zero`, `/dev/full` and
+  `/dev/tty` stay writable, and the step gets a scratch directory of its own as
+  `$TMPDIR`, where its `$FLOT_METRICS` file also is; it is removed after the
+  step. Each path must exist.
+
+Reads are not restricted, so a confined step can still read your files, your
+credentials and the environment flot passes it; this is not a container.
+`network = true` with no `write` restricts nothing, and is refused.
+
+Here `agent.sh` fixes `src/slug.txt` and then tries to rewrite `check.sh`
+(real output):
+
+```text
+$ flot run
+ran      fix                  failed    12ms  claims 0v/1u/0r  receipt b2b222b1555a
+    ! agent.sh: 2: cannot create check.sh: Permission denied
+
+FAILED 1795532641102-7555f70816cc  root 7555f70816cc  25ms
+limitations:
+  - fix: claims are unverified because the step did not succeed
+```
+
+and the same step fetching a page instead:
+
+```text
+ran      fix                  failed    12ms  claims 0v/1u/0r  receipt 4655b66d9eab
+    ! curl: (6) Could not resolve host: example.com
+```
+
+The receipt records the policy and how it was enforced, so a reader can see
+the step was confined:
+
+```text
+$ flot receipt b2b222b1555a | jq -c .identity.sandbox
+{"network":false,"write":["src"],"mechanism":"landlock abi 7, network namespace"}
+```
+
+A step that asks for a sandbox runs in it or not at all. Where it cannot be
+enforced (not Linux, a kernel without Landlock, a host that does not let an
+unprivileged process have a user namespace, a `write` path that does not
+exist) the step is not run: it fails with "could not run: its sandbox cannot
+be enforced here" and the reason. The policy is part of the step key. The
+proof runs unconfined, like any proof, and so does the rest of the flow.
+
+Landlock needs stable inodes: on file systems without them, such as WSL's
+`/mnt` drives (9p), writes beneath an allowed path are denied too, so a
+confined step fails there rather than escaping.
+
 ## Outputs
 
 `outputs` names the files a step produces. When the step finishes

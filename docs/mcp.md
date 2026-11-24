@@ -57,7 +57,7 @@ change the check.", left the file unchanged and told the user, for $0.23.
 Every tool except `flot_run` only reads the store, and says so: its MCP
 annotations mark it read-only, non-destructive and closed-world, so a host can
 let it through without asking. `flot_run` executes the flow's commands, which
-are not sandboxed, and is annotated as destructive and open-world; a host
+are not sandboxed unless a step asks to be, and is annotated as destructive and open-world; a host
 should ask before it runs.
 
 An agent running without a person to ask therefore needs `flot_run` approved

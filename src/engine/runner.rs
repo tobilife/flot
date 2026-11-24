@@ -23,13 +23,14 @@ use crate::core::flow::{Flow, Step};
 use crate::core::metrics::{self, Metrics, Spend};
 use crate::core::receipt::{
     candidate_rank, sum_costs, verdict_for, ClaimCounts, DepRef, FileDigest, Observed, Receipt,
-    ReceiptIdentity, RunAttempt, RunCandidate, RunManifest, RunStep, StepStatus, ToolIdentity,
-    FLOT_VERSION,
+    ReceiptIdentity, RunAttempt, RunCandidate, RunManifest, RunStep, SandboxRecord, StepStatus,
+    ToolIdentity, FLOT_VERSION,
 };
 use crate::engine::baseline::Baseline;
 use crate::engine::claims::{self, Proof, ProofOutcome};
 use crate::engine::exec;
 use crate::engine::keying::{self, Facts};
+use crate::engine::sandbox;
 use crate::engine::scheduler;
 use crate::store::Store;
 
@@ -1366,6 +1367,7 @@ impl<'a> Runner<'a> {
                 limitations,
                 tool: ToolIdentity::default(),
                 candidate: self.candidate.clone(),
+                sandbox: None,
             },
             Observed {
                 started_at_ms: exec::now_ms(),
@@ -1386,9 +1388,62 @@ impl<'a> Runner<'a> {
     ) -> Result<Receipt> {
         let mut limitations = facts.limitations.clone();
         let budget = self.flow.resolved_budget(step);
-        let (mut env, metrics_path) = self.metered_env(step)?;
+        let (mut env, mut metrics_path) = self.metered_env(step)?;
         env.extend(extra.clone());
         let timeout = Duration::from_secs(budget.timeout_secs);
+        // A confined step writes its metrics and temporary files in a scratch
+        // directory of its own, not where other steps' work lies.
+        let scratch = match step
+            .sandbox
+            .as_ref()
+            .and_then(|policy| policy.write.as_ref())
+        {
+            None => None,
+            Some(_) => {
+                let scratch = Scratch::new(self.store.root())?;
+                metrics_path = scratch.path.join("metrics.json");
+                env.insert(
+                    "FLOT_METRICS".into(),
+                    metrics_path.to_string_lossy().into_owned(),
+                );
+                env.insert(
+                    "TMPDIR".into(),
+                    scratch.path.join("tmp").to_string_lossy().into_owned(),
+                );
+                Some(scratch)
+            }
+        };
+        // A step that asked to be confined runs confined or not at all.
+        let confined = match &step.sandbox {
+            None => None,
+            Some(policy) => {
+                let own: Vec<PathBuf> =
+                    scratch.iter().map(|scratch| scratch.path.clone()).collect();
+                let prepared = policy
+                    .write
+                    .as_deref()
+                    .map(|write| sandbox::resolve(&self.root, write))
+                    .transpose()
+                    .and_then(|write| sandbox::prepare(policy.network, write.as_deref(), &own));
+                match prepared {
+                    Ok(prepared) => Some((policy, prepared)),
+                    Err(error) => {
+                        limitations.push(format!(
+                            "could not run: its sandbox cannot be enforced here: {error:#}"
+                        ));
+                        return self.unrun_receipt(
+                            StepStatus::Failed,
+                            "step could not run in its sandbox",
+                            step,
+                            step_key,
+                            facts,
+                            deps,
+                            limitations,
+                        );
+                    }
+                }
+            }
+        };
         let scoped = !step.may_change.is_empty();
         // A poisoned lock guards nothing: the data is `()`.
         let (_shared, _alone) = if scoped {
@@ -1405,15 +1460,36 @@ impl<'a> Runner<'a> {
             (Some(shared), None)
         };
         let before = scoped.then(|| keying::snapshot(&self.root));
-        let outcome = exec::run_command(
+        let outcome = match exec::run_confined(
             &step.run,
             &self.root,
             &env,
             timeout,
             budget.max_output_bytes,
             stop,
-        )
-        .with_context(|| format!("step `{}` could not start", step.id))?;
+            confined.as_ref().map(|(_, prepared)| prepared),
+        ) {
+            Ok(outcome) => outcome,
+            // Confinement is applied as the step starts, so a kernel that
+            // refuses it shows here.
+            Err(error) if confined.is_some() => {
+                limitations.push(format!(
+                    "could not run: its sandbox cannot be enforced here: {error:#}"
+                ));
+                return self.unrun_receipt(
+                    StepStatus::Failed,
+                    "step could not run in its sandbox",
+                    step,
+                    step_key,
+                    facts,
+                    deps,
+                    limitations,
+                );
+            }
+            Err(error) => {
+                return Err(error).with_context(|| format!("step `{}` could not start", step.id));
+            }
+        };
         let strayed = before.map(|before| {
             let after = keying::snapshot(&self.root);
             limitations.extend(before.problems);
@@ -1593,6 +1669,11 @@ impl<'a> Runner<'a> {
                 limitations,
                 tool: ToolIdentity::default(),
                 candidate: self.candidate.clone(),
+                sandbox: confined.map(|(policy, prepared)| SandboxRecord {
+                    network: policy.network,
+                    write: policy.write.clone(),
+                    mechanism: prepared.mechanism,
+                }),
             },
             Observed {
                 started_at_ms: outcome.started_at_ms,
@@ -1769,6 +1850,33 @@ fn read_metrics(path: &Path) -> (Option<Metrics>, Vec<String>) {
                 "metrics file ignored: {error:#}; this step's spend is unknown"
             )],
         ),
+    }
+}
+
+static SCRATCH_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+/// A directory in the store's `tmp` for one confined execution, removed when
+/// the execution is done with it.
+struct Scratch {
+    path: PathBuf,
+}
+
+impl Scratch {
+    fn new(store_root: &Path) -> Result<Self> {
+        let path = store_root.join("tmp").join(format!(
+            "sandbox-{}-{}",
+            std::process::id(),
+            SCRATCH_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::create_dir_all(path.join("tmp"))
+            .with_context(|| format!("cannot create {}", path.display()))?;
+        Ok(Scratch { path })
+    }
+}
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.path);
     }
 }
 

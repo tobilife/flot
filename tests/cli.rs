@@ -3357,3 +3357,92 @@ verify = "grep -q flot artifact.txt"
     let both = project.flot(&["--json", "verify", "--markdown"]);
     assert_eq!(both.code, 3, "{}", both.stderr);
 }
+
+const CONFINED: &str = r#"
+[flow]
+name = "confined"
+
+[[step]]
+id = "inside"
+run = "echo a > src/a.txt; echo t > \"$TMPDIR/t\"; echo n > /dev/null"
+sandbox = { write = ["src"] }
+claims = ["src/a.txt was written"]
+verify = "grep -q a src/a.txt"
+
+[[step]]
+id = "outside"
+run = "echo b > b.txt"
+sandbox = { write = ["src"] }
+
+[[step]]
+id = "offline"
+run = "if grep ':' /proc/net/dev | grep -qv 'lo:'; then echo online; exit 1; fi"
+sandbox = { network = false }
+"#;
+
+/// Whether this host lets an unprivileged process have a network namespace;
+/// where it does not, a step that asks for one must not run at all.
+fn host_isolates_network() -> bool {
+    std::process::Command::new("unshare")
+        .args(["-Urn", "true"])
+        .status()
+        .is_ok_and(|status| status.success())
+}
+
+#[test]
+fn a_confined_step_writes_only_where_it_may() {
+    let project = Project::new(CONFINED);
+    project.write("src/.keep", "");
+    let run = project.flot(&["run"]);
+    if cfg!(target_os = "linux") {
+        assert_eq!(run.code, 1, "{}", run.stdout);
+        run.has("ran      inside               ok")
+            .has("ran      outside              failed")
+            .has("b.txt: Permission denied");
+        assert!(!project.path().join("b.txt").exists());
+        let inside = project.flot(&["--json", "show"]).json()["steps"][0]["receipt_id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let receipt = project.flot(&["receipt", &inside]).json();
+        assert_eq!(receipt["identity"]["sandbox"]["write"][0], "src");
+        assert!(receipt["identity"]["sandbox"]["mechanism"]
+            .as_str()
+            .unwrap()
+            .contains("landlock abi"));
+        if host_isolates_network() {
+            run.has("ran      offline              ok");
+        } else {
+            run.has("offline: could not run: its sandbox cannot be enforced here");
+        }
+        // The scratch directory a confined step wrote in is gone.
+        let leftovers: Vec<_> = std::fs::read_dir(project.path().join(".flot/tmp"))
+            .unwrap()
+            .flatten()
+            .filter(|entry| entry.file_name().to_string_lossy().starts_with("sandbox-"))
+            .collect();
+        assert!(leftovers.is_empty(), "{leftovers:?}");
+    } else {
+        assert_eq!(run.code, 1, "{}", run.stdout);
+        run.has(
+            "could not run: its sandbox cannot be enforced here: flot confines steps on Linux only",
+        );
+        assert!(!project.path().join("src/a.txt").exists());
+    }
+
+    // A path to write beneath must exist, or the step does not run.
+    project.write(
+        "flot.toml",
+        &CONFINED.replace("write = [\"src\"]", "write = [\"gone\"]"),
+    );
+    project
+        .flot(&["run", "--only", "outside"])
+        .has("could not run: its sandbox cannot be enforced here");
+    project.write(
+        "flot.toml",
+        &CONFINED.replace("network = false", "network = true"),
+    );
+    project
+        .flot(&["plan"])
+        .has("has a sandbox that restricts nothing");
+}

@@ -405,6 +405,9 @@ pub fn step_key(flow_name: &str, step: &Step, facts: &Facts, deps: &[DepRef]) ->
     if !step.may_change.is_empty() {
         key["may_change"] = serde_json::json!(step.may_change);
     }
+    if let Some(sandbox) = &step.sandbox {
+        key["sandbox"] = serde_json::json!(sandbox);
+    }
     digest::canonical(&key)
 }
 

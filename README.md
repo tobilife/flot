@@ -87,8 +87,9 @@ It pays off when:
 It is not the tool when:
 
 - you run a command once and need no record of it;
-- you need to contain untrusted code: flot records and judges steps, it does
-  not sandbox them;
+- you need to contain untrusted code: a step runs with your permissions
+  unless it asks for a `sandbox` (Linux: no network, writes only beneath named
+  paths), and even then it can read what you can;
 - you want a CI service: flot runs inside your CI or your terminal, it does not
   replace them.
 
@@ -224,7 +225,7 @@ digest of what happened, so an edited receipt stops authenticating. The run's
 verdict is `failed`, `unverified` or `passed`, in that order of precedence.
 
 [Writing flows](docs/flows.md) covers every field: keys, receipts, claims,
-budgets, concurrency, outputs, guarded proofs and scope.
+budgets, concurrency, outputs, guarded proofs, scope and sandbox.
 
 ## What flot guarantees
 
@@ -238,7 +239,8 @@ budgets, concurrency, outputs, guarded proofs and scope.
   holds a recorded run to the same revision. The Claude Code plugin also
   refuses edits to those files before they happen.
 - **Changes kept in scope.** A step with `may_change = ["src/**"]` fails if
-  it creates, edits or deletes any other file that git does not ignore.
+  it creates, edits or deletes any other file that git does not ignore. On
+  Linux, `sandbox` makes the kernel refuse those writes and the network.
 - **Receipts you can check.** Every receipt re-hashes to its own id, and a run's
   verdict and root digest are recomputed from its receipts, never read.
   `flot verify` re-reads every stored byte.
@@ -297,9 +299,12 @@ Codex is shown above; see [MCP server](docs/mcp.md) for the protocol details.
 <details>
 <summary><strong>Does flot sandbox the steps it runs?</strong></summary>
 
-No. A step runs with your user's permissions and environment. flot records and
-judges what steps did; it does not confine them. Run flows you have read, and
-an agent with the permissions you would give it anyway.
+Not by default. A step runs with your user's permissions and environment. A
+step with `sandbox = { write = ["src"] }` runs, on Linux, with no network and
+writes only beneath `src`, both enforced by the kernel (a network namespace
+and Landlock); where that cannot be enforced the step is not run. Reads are
+never restricted, so it is not a container. Run flows you have read, and an
+agent with the permissions you would give it anyway.
 
 </details>
 
@@ -348,7 +353,7 @@ with `flot --version`, the flow file, the command you ran and its output.
 
 ## Documentation
 
-- [Writing flows](docs/flows.md): steps, keys, receipts, claims, attempts, candidates, budgets, concurrency, outputs, guarded proofs and scope.
+- [Writing flows](docs/flows.md): steps, keys, receipts, claims, attempts, candidates, budgets, concurrency, outputs, guarded proofs, scope and sandbox.
 - [In CI](docs/ci.md): the GitHub action, the pull request report, and reusing a developer's signed run.
 - [CLI reference](docs/cli.md): commands, selecting runs and flows, `--json` and exit codes.
 - [MCP server](docs/mcp.md): registration, tools, replies, errors and cancellation.

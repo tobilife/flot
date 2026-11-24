@@ -5,7 +5,7 @@ core      digest · receipt · flow · metrics · compare
           attest · fault                                 pure model, no IO
 store     content-addressed objects, receipts, runs
 engine    keying · claims · scheduler · exec · runner   flow -> receipts
-          git · baseline
+          git · baseline · sandbox
 service   Workspace: plan run show verify diff receipt
           read_object runs gc sign bundle import key    the one contract
           trust search push pull guard
@@ -34,11 +34,11 @@ the content store with host-sealed cache and trust, the CLI with typed exit
 codes, an MCP stdio server over the same functions, authenticated receipt
 bundles, spend accounting with a run cost ceiling, signed attestations with a
 local trust list and key handovers, guarded proofs, produced files kept and restored, an enforced
-layer architecture, attempts with feedback, candidates, run search, sharing through git, a Claude Code plugin, and 321 tests including end-to-end runs through the real
+layer architecture, attempts with feedback, candidates, run search, sharing through git, a Claude Code plugin, and 322 tests including end-to-end runs through the real
 binary, a real MCP handshake and a cross-store bundle import.
 
-Not there yet: sandboxing steps (they run with your permissions; see
-[Execution](flows.md#execution)).
+Not there yet: confining steps outside Linux, and confining reads (a step
+with a [sandbox](flows.md#sandbox) still reads what you can).
 
 Steps run in `sh` everywhere. On Linux and macOS a step leads its own process
 group and is stopped with signals; on Windows, where Git for Windows provides

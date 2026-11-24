@@ -39,5 +39,5 @@ exited 0. Report what the receipts prove, not what you expect.
   newest first: use it to find when an error first appeared.
 - `flot_verify` re-authenticates a run from the store alone.
 
-`flot_run` executes the flow's commands, which are not sandboxed; the user
-approves it. Every other flot tool only reads.
+`flot_run` executes the flow's commands, which are not sandboxed unless a
+step asks to be; the user approves it. Every other flot tool only reads.

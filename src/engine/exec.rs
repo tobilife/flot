@@ -185,6 +185,19 @@ pub fn run_command(
     max_output_bytes: usize,
     stop: &StopSignal,
 ) -> Result<Outcome> {
+    run_confined(command, cwd, env, timeout, max_output_bytes, stop, None)
+}
+
+/// [`run_command`], confined by `sandbox` when there is one.
+pub fn run_confined(
+    command: &str,
+    cwd: &Path,
+    env: &BTreeMap<String, String>,
+    timeout: Duration,
+    max_output_bytes: usize,
+    stop: &StopSignal,
+    sandbox: Option<&crate::engine::sandbox::Prepared>,
+) -> Result<Outcome> {
     let started_at_ms = now_ms();
     let started = Instant::now();
 
@@ -210,6 +223,9 @@ pub fn run_command(
     {
         use std::os::windows::process::CommandExt;
         builder.creation_flags(job::SPAWN_FLAGS);
+    }
+    if let Some(sandbox) = sandbox {
+        sandbox.apply(&mut builder);
     }
 
     let mut child = builder

@@ -148,6 +148,21 @@ pub struct ReceiptIdentity {
     /// candidates.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub candidate: Option<String>,
+    /// The confinement the step ran in, when its flow asked for one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sandbox: Option<SandboxRecord>,
+}
+
+/// What a step asked to be confined to, and how that was enforced.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SandboxRecord {
+    pub network: bool,
+    /// Paths relative to the flow root the step could write beneath; `None`
+    /// when writes were not restricted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub write: Option<Vec<String>>,
+    /// How the policy was enforced, such as `landlock abi 7, network namespace`.
+    pub mechanism: String,
 }
 
 impl Observed {
@@ -805,6 +820,7 @@ mod tests {
             limitations: vec![],
             tool: ToolIdentity::default(),
             candidate: None,
+            sandbox: None,
         }
     }
 

@@ -56,6 +56,11 @@
   summary and in one pull request comment, and fails the job unless
   `flot verify` exits 0. With `signers`, it trusts the keys a file on the base
   branch lists and pulls their signed runs first. See `docs/ci.md`.
+- `sandbox = { network = false, write = [...] }` on a step, on Linux: the
+  step runs in a new user and network namespace and under a Landlock ruleset
+  that denies every write outside the named paths (and its own scratch
+  `$TMPDIR`). Where that cannot be enforced, the step is not run. The receipt
+  records the policy and the mechanism.
 - A metrics report without `cost_usd` is an unknown cost, not $0: `flot run`
   counts such steps as "without cost", and the cost ceiling names them.
 - `examples/slugify/compare.toml`: Claude Code and Codex implement the spec as

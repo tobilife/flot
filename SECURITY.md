@@ -27,9 +27,11 @@ vulnerabilities:
 
 ## Out of scope
 
-- **Steps are not sandboxed.** A step runs with your user's permissions and can
-  do anything you can, including editing the `.flot` store. Running a flow you
-  have not read is the same as running a script you have not read.
+- **Steps are not sandboxed by default.** A step runs with your user's
+  permissions and can do anything you can, including editing the `.flot`
+  store. Running a flow you have not read is the same as running a script you
+  have not read. A step with a `sandbox` is confined on Linux (no network,
+  writes only beneath named paths), but still reads what you can.
 - On Linux and macOS, a process a step starts that leaves its process group
   (`setsid`, a daemon) keeps running after the step; flot reports the step's
   output as possibly incomplete but does not stop that process. (On Windows the

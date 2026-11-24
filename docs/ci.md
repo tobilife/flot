@@ -104,7 +104,7 @@ by its id.
 ## Limits
 
 - A step runs CI's own commands on the pull request's code, as any CI job
-  does; flot does not sandbox it.
+  does; flot confines it only if the step has a `sandbox`.
 - The comment needs `pull-requests: write`. A pull request from a fork gets a
   read-only token, so the action leaves a warning and the report stays in the
   job summary.

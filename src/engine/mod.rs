@@ -7,4 +7,5 @@ pub mod exec;
 pub mod git;
 pub mod keying;
 pub mod runner;
+pub mod sandbox;
 pub mod scheduler;

@@ -902,6 +902,7 @@ mod tests {
                 limitations: vec![],
                 tool: ToolIdentity::default(),
                 candidate: None,
+                sandbox: None,
             },
             Observed::default(),
         )

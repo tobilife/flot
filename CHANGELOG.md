@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- `flot guard --command CMD` reads a shell command line for the files it
+  writes (redirections, `rm`, `mv`, `cp`, `tee`, `sed -i`, `git checkout`, ...)
+  and refuses `curl … | sh`. The Claude Code hook now also runs before `Bash`.
+  `flot guard --json` prints `{protected, refused}`.
 - `flot guard`, and so the Claude Code hook, also protects what decides
   whether proofs are checked: `.claude/settings.json` and
   `settings.local.json`, `.github/workflows/`, `.git/hooks/`, `.git/config`

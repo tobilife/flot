@@ -119,9 +119,9 @@ codex mcp add flot -- flot mcp      # Codex CLI
 
 In Claude Code you can install the plugin instead: it registers the same
 server, adds a skill that runs the flow before Claude says a change works, and
-adds a hook that refuses edits to the flow file, the files its proofs read,
-CI workflows, git hooks and Claude Code's own settings. flot must be on your
-`PATH`.
+adds a hook that refuses edits, and shell commands that name the file, to the
+flow file, the files its proofs read, CI workflows, git hooks and Claude
+Code's own settings, as well as `curl … | sh`. flot must be on your `PATH`.
 
 ```text
 /plugin install flot --marketplace tobilife/flot

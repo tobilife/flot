@@ -1,9 +1,9 @@
 {
-  "description": "Block edits to the files that prove the work: the flow file, files a step's verify reads, and the flot store.",
+  "description": "Block edits to what proves the work (the flow file, files a step's verify reads, the flot store) and to what decides whether it is checked (CI workflows, git hooks, Claude Code settings), whether by an edit tool or a shell command that names the file; and block downloaded code piped into an interpreter.",
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Edit|Write|MultiEdit|NotebookEdit",
+        "matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash",
         "hooks": [
           {
             "type": "command",

@@ -16,10 +16,12 @@ use crate::core::attest::{self, Authorship, SignerCheck};
 use crate::core::compare::RunDiff;
 use crate::core::digest;
 use crate::core::receipt::{ClaimStatus, RunManifest, StepStatus, Verdict};
+use crate::core::shell;
 use crate::service::audit::Audit;
 use crate::service::bundle::ImportPolicy;
 use crate::service::{
-    fault_kind, FaultKind, Plan, RunDetail, RunOptions, RunReport, Sharing, SignReport, Workspace,
+    fault_kind, FaultKind, Guarded, Plan, RunDetail, RunOptions, RunReport, Sharing, SignReport,
+    Workspace,
 };
 
 const INVALID_REQUEST: u8 = 3;
@@ -101,6 +103,10 @@ pub enum Command {
     /// and answers with a denial on stdout.
     Guard {
         paths: Vec<PathBuf>,
+        /// Also read a shell command line for the files it writes and for
+        /// downloaded code piped into an interpreter.
+        #[arg(long)]
+        command: Option<String>,
         #[arg(long)]
         hook: bool,
     },
@@ -342,6 +348,19 @@ pub fn main(serve_mcp: fn(&Workspace) -> Result<()>) -> ExitCode {
     }
 }
 
+/// `~/path` from the user's home directory, as a shell would expand it.
+fn home_relative(path: &str) -> PathBuf {
+    match path.strip_prefix("~/") {
+        Some(rest) => std::env::var_os("HOME")
+            .or_else(|| std::env::var_os("USERPROFILE"))
+            .map_or_else(
+                || PathBuf::from(path),
+                |home| PathBuf::from(home).join(rest),
+            ),
+        None => PathBuf::from(path),
+    }
+}
+
 fn dispatch(
     cli: &Cli,
     workspace: &Workspace,
@@ -354,9 +373,17 @@ fn dispatch(
             say!("next: flot plan");
             Ok(ExitCode::SUCCESS)
         }
-        Command::Guard { paths, hook } => {
+        Command::Guard {
+            paths,
+            command,
+            hook,
+        } => {
             let cwd = std::env::current_dir().context("cannot read the current directory")?;
             let mut targets: Vec<PathBuf> = paths.iter().map(|path| cwd.join(path)).collect();
+            let mut commands: Vec<(PathBuf, String)> = command
+                .iter()
+                .map(|command| (cwd.clone(), command.clone()))
+                .collect();
             if *hook {
                 let mut payload = String::new();
                 std::io::Read::read_to_string(&mut std::io::stdin(), &mut payload)
@@ -369,6 +396,20 @@ fn dispatch(
                         targets.push(base.join(path));
                     }
                 }
+                if let Some(command) = payload["tool_input"]["command"].as_str() {
+                    commands.push((base, command.to_string()));
+                }
+            }
+            let mut remote = Vec::new();
+            for (dir, command) in &commands {
+                let reading = shell::read(command);
+                targets.extend(
+                    reading
+                        .writes
+                        .iter()
+                        .map(|path| dir.join(home_relative(path))),
+                );
+                remote.extend(reading.remote_code);
             }
             // This directory's flow, and the flow nearest each file: an edit
             // in a subproject touches that subproject's proofs.
@@ -397,35 +438,63 @@ fn dispatch(
                         .find_map(|flow| flow.guard(std::slice::from_ref(target)).pop())
                 })
                 .collect();
+            // Downloaded code is refused where a flow is, as files are.
+            if !flows.iter().any(|flow| flow.flow_path().is_file()) {
+                remote.clear();
+            }
+            const REMOTE: &str =
+                "it runs code fetched from the network, which no step or receipt records";
             if *hook {
                 // Claude Code reads a denial on stdout; the exit stays 0 so
                 // the hook's `|| true` keeps a failure to run from blocking.
+                let mut reasons: Vec<String> = Vec::new();
                 if !guarded.is_empty() {
-                    let reasons: Vec<String> = guarded
+                    let protected: Vec<String> = guarded
                         .iter()
                         .map(|found| format!("{} is protected: {}", found.path, found.reason))
                         .collect();
+                    reasons.push(format!(
+                        "{}. Changing it would void the evidence; fix the work under test instead, or ask the user to change the check",
+                        protected.join("; ")
+                    ));
+                }
+                for shape in &remote {
+                    reasons.push(format!(
+                        "`{shape}` is refused: {REMOTE}. Download the file, read it, and run it as its own command, or ask the user"
+                    ));
+                }
+                if !reasons.is_empty() {
                     print_json(&serde_json::json!({
                         "hookSpecificOutput": {
                             "hookEventName": "PreToolUse",
                             "permissionDecision": "deny",
-                            "permissionDecisionReason": format!(
-                                "flot: {}. Changing it would void the evidence; fix the work under test instead, or ask the user to change the check.",
-                                reasons.join("; ")
-                            ),
+                            "permissionDecisionReason": format!("flot: {}.", reasons.join(". ")),
                         }
                     }))?;
                 }
                 return Ok(ExitCode::SUCCESS);
             }
+            let refused: Vec<Guarded> = remote
+                .into_iter()
+                .map(|shape| Guarded {
+                    path: shape,
+                    reason: REMOTE.to_string(),
+                })
+                .collect();
             if cli.json {
-                print_json(&guarded)?;
+                print_json(&serde_json::json!({
+                    "protected": guarded,
+                    "refused": refused,
+                }))?;
             } else {
                 for found in &guarded {
                     say!("protected  {}: {}", found.path, found.reason);
                 }
+                for found in &refused {
+                    say!("refused    {}: {}", found.path, found.reason);
+                }
             }
-            Ok(if guarded.is_empty() {
+            Ok(if guarded.is_empty() && refused.is_empty() {
                 ExitCode::SUCCESS
             } else {
                 ExitCode::from(2)

@@ -109,7 +109,8 @@ codex mcp add flot -- flot mcp      # Codex CLI
 
 Claude Code에서는 대신 플러그인을 설치할 수 있습니다. 같은 서버를 등록하고, Claude가
 변경이 동작한다고 말하기 전에 플로우를 실행하게 하는 스킬과, 플로우 파일, 증명이 읽는
-파일, CI 워크플로, git 훅, Claude Code 자신의 설정 편집을 거부하는 훅을 더합니다. `flot`은 `PATH`에 있어야 합니다.
+파일, CI 워크플로, git 훅, Claude Code 자신의 설정을 편집하거나 셸 명령으로 건드리는 것과
+`curl … | sh`를 거부하는 훅을 더합니다. `flot`은 `PATH`에 있어야 합니다.
 
 ```text
 /plugin install flot --marketplace tobilife/flot

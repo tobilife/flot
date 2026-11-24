@@ -24,9 +24,11 @@ same server (its tools are named `mcp__plugin_flot_flot__…`) and adds one
 skill, [`flot`](../plugins/claude-code/skills/flot/SKILL.md), which tells
 Claude to call `flot_run` before it says a change works, to report `failed`
 and `unverified` as they are, and not to edit a proof to make it pass. Its
-`PreToolUse` hook runs `flot guard --hook` before `Edit`, `Write`, `MultiEdit`
-and `NotebookEdit`, and denies an edit to the flow file, a file a step's
-`verify_inputs` matches, or the store ([refusing the edit](flows.md#refusing-the-edit)).
+`PreToolUse` hook runs `flot guard --hook` before `Edit`, `Write`, `MultiEdit`,
+`NotebookEdit` and `Bash`, and denies an edit or a command line that names
+the flow file, a file a step's `verify_inputs` matches, the store, a CI
+workflow, a git hook or Claude Code's settings, and downloaded code piped
+into an interpreter ([refusing the edit](flows.md#refusing-the-edit)).
 The hook is `flot guard --hook || true`: when flot is missing or older than
 `guard`, edits go through rather than all being blocked. This repository is
 its marketplace:

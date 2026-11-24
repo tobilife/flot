@@ -99,8 +99,8 @@ codex mcp add flot -- flot mcp      # Codex CLI
 ```
 
 在 Claude Code 中也可以改为安装插件：它注册同一个服务器，并加入一个技能，让 Claude 在说
-改动可用之前先运行流程，并加入一个钩子，拒绝编辑流程文件、证明读取的文件、CI 工作流、
-git 钩子以及 Claude Code 自身的设置。`flot` 需要在
+改动可用之前先运行流程，并加入一个钩子，拒绝通过编辑或点名该文件的 shell 命令修改流程
+文件、证明读取的文件、CI 工作流、git 钩子以及 Claude Code 自身的设置，也拒绝 `curl … | sh`。`flot` 需要在
 `PATH` 中。
 
 ```text

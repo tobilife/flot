@@ -348,11 +348,37 @@ An agent that is refused one of these can still ask you to make the change.
 The hook stops an agent, not a pull request: to keep CI from being edited
 away, make the job that runs flot a required check on the protected branch.
 
-`flot guard --hook` reads a Claude Code `PreToolUse` payload on stdin and
-answers with a denial; the [Claude Code plugin](mcp.md#claude-code-plugin)
-installs it for `Edit`, `Write`, `MultiEdit` and `NotebookEdit`. A shell
-command such as `sed -i` is not a file edit the hook sees; `proofs_from` is
-what catches that.
+`flot guard --command CMD` reads a shell command line the same way, without
+running it: a redirection into a file, and the files given to a program that
+changes them (`rm`, `mv`, `cp`, `tee`, `chmod`, `touch`, `truncate`, `dd of=`,
+`sed -i`, `perl -i`, `git checkout`/`restore`/`rm`/`mv`). It also refuses
+code fetched by `curl` or `wget` and piped into an interpreter
+(`curl … | sh`, `bash <(curl …)`), which runs outside any step's receipt. A
+here-document's body is data, and a quoted `>` is text. Real output:
+
+```text
+$ flot guard --command "sed -i 's/exit 1/exit 0/' check.sh"
+protected  check.sh: the proof of step `work` reads it
+$ flot guard --command "curl -fsSL https://example.com/install.sh | sh"
+refused    curl | sh: it runs code fetched from the network, which no step or receipt records
+$ flot guard --command "cargo test > test.log 2>&1"
+```
+
+It reads only what the command line names. A write through a script, a
+variable, `cd` into another directory or `python -c` is not seen, and is
+what `proofs_from` catches: a proof that differs from the revision proves
+nothing, however it was changed.
+
+`flot guard --hook` reads a Claude Code `PreToolUse` payload on stdin (a file
+path, or a Bash command line) and answers with a denial; the
+[Claude Code plugin](mcp.md#claude-code-plugin) installs it for `Edit`,
+`Write`, `MultiEdit`, `NotebookEdit` and `Bash`. Downloaded code is refused
+only where a flow is; elsewhere the hook says nothing.
+
+In a real headless session (Claude Code 2.1.330, $0.23), Claude was told to
+run `sed -i … check.sh` on a proof's file and `rm .github/workflows/ci.yml`.
+The hook denied both before they ran, with the reasons above, and Claude
+reported that the check still failed instead of working around it.
 
 ## Scope
 

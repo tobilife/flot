@@ -1,12 +1,14 @@
 # Changelog
 
-## Unreleased
+## 0.2.0
 
 - `flot sign [RUN]` and `flot run --sign` sign a run executed here without
   exporting it; the attestation is kept in the store, so `flot verify` reports
   it and every later bundle carries it. A run that was imported, or whose
   evidence no longer authenticates, is never signed; `flot bundle --sign` now
   refuses the latter too. `run --sign` checks for the key before anything runs.
+- Releases ship prebuilt binaries for Linux (x86_64, aarch64; static) and macOS
+  (x86_64, arm64) with checksums, built and published by CI.
 
 ## 0.1.1
 

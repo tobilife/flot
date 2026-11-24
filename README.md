@@ -51,8 +51,10 @@ With [Rust](https://rustup.rs) 1.88 or later:
 cargo install flot-cli
 ```
 
-The crate is `flot-cli`; the command it installs is `flot`. For the latest
-`main` instead of the latest release, use
+The crate is `flot-cli`; the command it installs is `flot`. Prebuilt binaries
+for Linux (x86_64, aarch64) and macOS (x86_64, arm64) are on the
+[releases page](https://github.com/tobilife/flot/releases/latest). For the
+latest `main` instead of the latest release, use
 `cargo install --git https://github.com/tobilife/flot`.
 
 ### Connect your agent (MCP)

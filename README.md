@@ -16,7 +16,7 @@
 [![Linux | macOS](https://img.shields.io/badge/Linux%20%7C%20macOS-4493F8?style=flat-square)](docs/architecture.md#current-scope)
 [![MCP](https://img.shields.io/badge/MCP-stdio-8A2BE2?style=flat-square)](docs/mcp.md)
 
-[Quick start](#quick-start) · [How flot works](#how-flot-works) · [What flot guarantees](#what-flot-guarantees) · [Example flows](#example-flows) · [FAQ](#faq) · [Documentation](#documentation)
+[Why and when](#why-and-when-to-use-flot) · [Quick start](#quick-start) · [How flot works](#how-flot-works) · [What flot guarantees](#what-flot-guarantees) · [Example flows](#example-flows) · [FAQ](#faq) · [Documentation](#documentation)
 
 <code>cargo install flot-cli</code>
 
@@ -42,6 +42,42 @@ nothing. They can be bundled, signed and handed to a reviewer on another
 machine, who can check them without trusting the agent or its host. flot is one
 binary with one `flot.toml` and one `.flot/` directory, usable from your
 terminal and from any agent that speaks MCP.
+
+## Why and when to use flot
+
+An agent's "done" is a claim about your code, and checking it by hand every
+time does not scale: you rerun the tests, scroll through its log, and still
+cannot show anyone else what passed. flot makes that check part of the work.
+The agent runs the flow, the flow proves each claim, and what passed is
+recorded where you, your CI and your reviewers can check it again.
+
+It pays off when:
+
+- **An agent fixes or builds something and says it works.** The verdict comes
+  from commands the agent did not write. In a real session, Claude Code was
+  given a failing flow in a fresh clone of `itoa`, found the failing tests in
+  the recorded output, fixed the one wrong digit and got `passed` from
+  `flot_run`, for $0.42.
+- **An agent loops: change, check, change again.** Steps whose inputs did not
+  change are reused, so the check is cheap to repeat: this repository's gate
+  takes 16 s cold and 0.41 s when nothing changed.
+- **Several agents work on one change.** Reviewers run concurrently under a
+  cost ceiling, and each one's spend is recorded: isolating the three
+  reviewers in `parallel-review` cut a run from $3.25 to $0.42.
+- **Someone else has to trust the result.** `flot bundle` gives a reviewer or
+  another machine one file to import and verify; signatures and their own
+  trust list decide whose receipts count.
+- **You want to know what changed between two runs.** `flot diff` names each
+  step whose receipt or status changed.
+
+It is not the tool when:
+
+- you run a command once and need no record of it;
+- you need to contain untrusted code: flot records and judges steps, it does
+  not sandbox them;
+- you are on Windows, which is untested;
+- you want a CI service: flot runs inside your CI or your terminal, it does not
+  replace them.
 
 ## Quick start
 

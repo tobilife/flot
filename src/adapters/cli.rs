@@ -713,7 +713,7 @@ fn render_run(report: &RunReport) {
         manifest.duration_ms
     );
     render_spend(manifest);
-    render_limitations(&manifest.limitations);
+    render_limitations(manifest);
 }
 
 fn render_spend(manifest: &RunManifest) {
@@ -750,13 +750,37 @@ fn render_spend(manifest: &RunManifest) {
     say!("{line}");
 }
 
-fn render_limitations(limitations: &[String]) {
-    if limitations.is_empty() {
+/// The run's limitations, with one line for a message several steps share
+/// ("a, b: step declares no inputs; …") rather than one line per step.
+fn render_limitations(manifest: &RunManifest) {
+    if manifest.limitations.is_empty() {
         return;
     }
+    let mut lines: Vec<(Vec<&str>, &str)> = Vec::new();
+    for limitation in &manifest.limitations {
+        let by_step = limitation
+            .split_once(": ")
+            .filter(|(step, _)| manifest.steps.iter().any(|entry| entry.step_id == *step));
+        match by_step {
+            Some((step, message)) => {
+                match lines
+                    .iter_mut()
+                    .find(|(steps, seen)| !steps.is_empty() && *seen == message)
+                {
+                    Some((steps, _)) => steps.push(step),
+                    None => lines.push((vec![step], message)),
+                }
+            }
+            None => lines.push((Vec::new(), limitation)),
+        }
+    }
     say!("limitations:");
-    for limitation in limitations {
-        say!("  - {limitation}");
+    for (steps, message) in lines {
+        if steps.is_empty() {
+            say!("  - {message}");
+        } else {
+            say!("  - {}: {message}", steps.join(", "));
+        }
     }
 }
 
@@ -807,7 +831,7 @@ fn render_detail(detail: &RunDetail) {
         manifest.max_parallel
     );
     render_spend(manifest);
-    render_limitations(&manifest.limitations);
+    render_limitations(manifest);
 }
 
 fn render_audit(audit: &Audit) {

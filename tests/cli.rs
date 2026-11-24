@@ -2343,3 +2343,24 @@ fn a_new_store_keeps_itself_out_of_git() {
     let ignore = std::fs::read_to_string(project.path().join(".flot/.gitignore")).unwrap();
     assert!(ignore.lines().any(|line| line == "*"), "{ignore}");
 }
+
+#[test]
+fn a_limitation_shared_by_several_steps_is_one_line() {
+    let project = Project::new(TWO_STEPS);
+    let run = project.flot(&["run"]);
+    run.ok().has("  - a, b: step declares no inputs");
+    assert_eq!(run.stdout.matches("step declares no inputs").count(), 1);
+    project
+        .flot(&["show"])
+        .ok()
+        .has("  - a, b: step declares no inputs");
+    // The structured reply keeps one entry per step.
+    let manifest = project.flot(&["show", "--json"]).json();
+    let per_step = manifest["limitations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|entry| entry.as_str().unwrap().contains("declares no inputs"))
+        .count();
+    assert_eq!(per_step, 2);
+}

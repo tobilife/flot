@@ -7,6 +7,7 @@ budget = { timeout_secs = 1200, max_inline_bytes = 2048 }
 # lock, so overlapping them would queue inside cargo instead of saving time.
 max_parallel = 1
 
+# Test PR: a change that leaves every proof as it is on main.
 [[step]]
 id = "format"
 run = "cargo fmt"

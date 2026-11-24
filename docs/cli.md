@@ -17,6 +17,8 @@
 | `flot gc [--dry-run]` | drop evidence no recorded run references |
 | `flot bundle [RUN] [-o FILE] [--sign]` | one portable file: run, receipts, every object they name (streams, produced files, proofs), signatures |
 | `flot import FILE [--require-trusted]` | authenticate a bundle and absorb it into this store |
+| `flot push [RUN] [--remote R] [--sign]` | put a run's bundle on a git remote (default `origin`) in the ref `refs/flot/runs`, beside the runs already there |
+| `flot pull [--remote R] [--require-trusted]` | import this flow's runs from a git remote's `refs/flot/runs` that this store does not hold |
 | `flot key init` / `flot key show` | create or print the host signing key |
 | `flot key rotate [-o FILE]` | replace the host key, keep the old secret beside it, write a handover both keys sign |
 | `flot trust add NAME KEY` / `remove` / `list` | decide which signers this host believes for this store |

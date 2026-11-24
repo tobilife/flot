@@ -430,7 +430,7 @@ pub fn read(path: &Path) -> Result<Bundle> {
 
 /// Reads the schema before the body, so a bundle from another flot version is
 /// named as such instead of failing on whichever field changed shape.
-fn parse(text: &str) -> Result<Bundle> {
+pub fn parse(text: &str) -> Result<Bundle> {
     #[derive(Deserialize)]
     struct Header {
         schema: u32,

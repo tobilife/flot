@@ -6,6 +6,7 @@ pub mod audit;
 pub mod bundle;
 pub mod keys;
 pub mod search;
+pub mod share;
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -486,6 +487,25 @@ impl Workspace {
         }
         let bundle = bundle::export(&store, &manifest, None)?;
         bundle::write(&bundle, &path)
+    }
+
+    /// Put a run on a git remote under [`share::RUNS_REF`]. `sign` attests
+    /// the run first, as `sign` does.
+    pub fn push(&self, run: &str, remote: &str, sign: bool) -> Result<share::PushReport> {
+        let store = self.store()?;
+        let manifest = store.resolve_run(run)?;
+        if sign {
+            sign_recorded(&store, &manifest, &keys::load(&keys::default_path()?)?)?;
+        }
+        let bundle = bundle::export(&store, &manifest, None)?;
+        share::push(&self.root, remote, &manifest, &bundle)
+    }
+
+    /// Import the runs of this flow that a git remote holds and this store
+    /// does not.
+    pub fn pull(&self, remote: &str, policy: ImportPolicy) -> Result<share::PullReport> {
+        let flow = self.flow()?;
+        share::pull(&self.root, &self.store()?, remote, &flow.meta.name, policy)
     }
 
     pub fn import(&self, path: &Path, policy: ImportPolicy) -> Result<ImportReport> {

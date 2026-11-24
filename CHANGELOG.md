@@ -25,6 +25,11 @@
   output, its proofs' output, its claims and their reasons and limitations,
   including attempts and candidates not kept. Each hit names its run, step,
   candidate, attempt, source and line.
+- `flot push [RUN] [--remote R] [--sign]` and `flot pull [--remote R]
+  [--require-trusted]` share runs through a git remote, as bundles in the ref
+  `refs/flot/runs`; flot runs `git` and has no network code of its own. A
+  pulled run is imported like `flot import`, so only a trusted signer's
+  receipts stand in for local work.
 - A metrics report without `cost_usd` is an unknown cost, not $0: `flot run`
   counts such steps as "without cost", and the cost ceiling names them.
 - `examples/slugify/compare.toml`: Claude Code and Codex implement the spec as

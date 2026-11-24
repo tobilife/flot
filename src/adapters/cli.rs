@@ -147,6 +147,28 @@ pub enum Command {
         #[arg(long)]
         require_trusted: bool,
     },
+    /// Put a run on a git remote, in the ref refs/flot/runs, beside the runs
+    /// already there. Branches and the working tree are not touched.
+    Push {
+        #[arg(default_value = "latest")]
+        run: String,
+        /// The git remote: a name such as origin, or a URL.
+        #[arg(long, default_value = "origin")]
+        remote: String,
+        /// Sign the run with the host key first.
+        #[arg(long)]
+        sign: bool,
+    },
+    /// Import this flow's runs from a git remote's refs/flot/runs that this
+    /// store does not hold yet.
+    Pull {
+        /// The git remote: a name such as origin, or a URL.
+        #[arg(long, default_value = "origin")]
+        remote: String,
+        /// Refuse every bundle a signer on the trust list did not sign.
+        #[arg(long)]
+        require_trusted: bool,
+    },
     /// Manage the host signing key.
     Key {
         #[command(subcommand)]
@@ -438,6 +460,77 @@ fn dispatch(
                 }
             }
             Ok(ExitCode::SUCCESS)
+        }
+        Command::Push { run, remote, sign } => {
+            let report = workspace.push(run, remote, *sign)?;
+            if cli.json {
+                print_json(&report)?;
+            } else if report.unchanged {
+                say!(
+                    "run {} is already on {} as {}",
+                    report.run_id,
+                    report.remote,
+                    report.path
+                );
+            } else {
+                say!(
+                    "pushed run {} to {} {}  {}  commit {}",
+                    report.run_id,
+                    report.remote,
+                    crate::service::share::RUNS_REF,
+                    report.path,
+                    &report.commit[..report.commit.len().min(12)]
+                );
+                if report.signed_by.is_empty() {
+                    say!("unsigned: others can inspect it, but only a signed run can stand in for their work");
+                }
+            }
+            Ok(ExitCode::SUCCESS)
+        }
+        Command::Pull {
+            remote,
+            require_trusted,
+        } => {
+            let report = workspace.pull(
+                remote,
+                ImportPolicy {
+                    require_trusted: *require_trusted,
+                },
+            )?;
+            if cli.json {
+                print_json(&report)?;
+            } else if report.empty {
+                say!(
+                    "{} has no shared runs ({})",
+                    report.remote,
+                    crate::service::share::RUNS_REF
+                );
+            } else {
+                for imported in &report.imported {
+                    say!(
+                        "imported run {}  root {}  {}{}",
+                        imported.run_id,
+                        digest::short(&imported.root_digest),
+                        imported.authorship.label(),
+                        if imported.reusable { "  reusable" } else { "" }
+                    );
+                }
+                for refused in &report.refused {
+                    say!("refused  {}: {}", refused.path, refused.reason);
+                }
+                say!(
+                    "{} of flow {}: {} imported, {} already here, {} refused",
+                    report.remote,
+                    report.flow,
+                    report.imported.len(),
+                    report.present.len(),
+                    report.refused.len()
+                );
+            }
+            Ok(match report.refused.first() {
+                None => ExitCode::SUCCESS,
+                Some(refused) => exit_for_fault(refused.kind),
+            })
         }
         Command::Import {
             path,

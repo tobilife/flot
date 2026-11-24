@@ -20,6 +20,35 @@ refused before it can reach a path.
 A reviewer can audit a claimed result from the bundle alone, without trusting
 the agent or the host that produced it.
 
+## Sharing through a git remote
+
+`flot push` puts a run's bundle on a git remote, and `flot pull` imports the
+runs a remote holds, so a CI job can publish signed runs and every clone can
+fetch them without a server of its own:
+
+```
+flot push --sign            # put the latest run on origin, signed
+flot pull                   # import this flow's runs from origin
+flot pull --remote URL --require-trusted
+```
+
+flot has no network code: both commands run `git`, which reaches the remote
+with the URL, credentials and transport it already uses (and fails rather
+than prompt for a password). Runs are kept in a ref of their own,
+`refs/flot/runs`, one file per run under the flow's name
+(`<flow>/<run-id>.flotbundle.json`); it is never checked out and touches no
+branch, index or working tree. A push builds on what the remote holds, so two
+machines' runs both stay; when another push lands first, flot fetches it and
+tries again. A run the remote already holds byte for byte is not pushed again.
+A host with no git identity commits the ref as `flot <flot@localhost>`.
+
+`pull` imports each run of this flow the store does not hold, exactly as
+`flot import` would: authenticated in full, refused when its file name and
+the run it carries disagree, and reusable only when a signer on this host's
+trust list signed it. A run already here is not imported again, so a
+signature added to a remote run after it was pulled is not picked up.
+Refused bundles are named, and the command then exits non-zero.
+
 ## Evidence is not cache
 
 Anyone can seal an authentic receipt claiming any

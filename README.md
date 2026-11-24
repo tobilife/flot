@@ -73,8 +73,9 @@ It pays off when:
   run Claude Code and Codex both passed, and Claude was kept at $0.10 because
   Codex reported tokens but no cost.
 - **Someone else has to trust the result.** `flot bundle` gives a reviewer or
-  another machine one file to import and verify; signatures and their own
-  trust list decide whose receipts count.
+  another machine one file to import and verify, and `flot push` and
+  `flot pull` share runs through a git remote you already use; signatures and
+  the reader's own trust list decide whose receipts count.
 - **You want to know what changed between two runs.** `flot diff` names each
   step whose receipt or status changed, and `flot search` finds the runs whose
   output, claims or limitations mention a message, newest first.
@@ -290,8 +291,10 @@ run anything.
 <details>
 <summary><strong>Does flot send my code anywhere?</strong></summary>
 
-No. flot runs locally and has no network code. Agents you run as steps talk to
-their own providers under their own data policies.
+No. flot runs locally and has no network code. `flot push` and `flot pull`
+run `git` to share runs with a remote you name, and only when you run them.
+Agents you run as steps talk to their own providers under their own data
+policies.
 
 </details>
 
@@ -323,7 +326,7 @@ with `flot --version`, the flow file, the command you ran and its output.
 - [CLI reference](docs/cli.md): commands, selecting runs and flows, `--json` and exit codes.
 - [MCP server](docs/mcp.md): registration, tools, replies, errors and cancellation.
 - [Running coding agents](docs/agents.md): an end-to-end agent run, attempts with feedback, two agents compared, spend and the cost ceiling.
-- [Evidence, bundles and trust](docs/evidence.md): bundles, signing, key rotation, the trust list and the `.flot` store.
+- [Evidence, bundles and trust](docs/evidence.md): bundles, sharing through a git remote, signing, key rotation, the trust list and the `.flot` store.
 - [Architecture](docs/architecture.md): layers, enforced dependency rules and current scope.
 
 Report vulnerabilities through [SECURITY.md](SECURITY.md).

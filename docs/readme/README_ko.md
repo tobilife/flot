@@ -18,7 +18,7 @@
 
 [빠른 시작](#빠른-시작) · [flot의 동작 방식](#flot의-동작-방식) · [flot이 보장하는 것](#flot이-보장하는-것) · [예제 플로우](#예제-플로우) · [FAQ](#faq) · [문서](#문서)
 
-<code>cargo install --git https://github.com/tobilife/flot</code>
+<code>cargo install flot-cli</code>
 
 </div>
 
@@ -47,8 +47,11 @@
 [Rust](https://rustup.rs) 1.88 이상이 필요합니다.
 
 ```bash
-cargo install --git https://github.com/tobilife/flot
+cargo install flot-cli
 ```
+
+크레이트 이름은 `flot-cli`이고, 설치되는 명령은 `flot`입니다. 릴리스가 아닌 최신
+`main`을 쓰려면 `cargo install --git https://github.com/tobilife/flot`을 사용하세요.
 
 ### 에이전트에 연결 (MCP)
 
@@ -232,8 +235,7 @@ macOS에서 실행됩니다.
 <details>
 <summary><strong>버그를 만나면 어떻게 하나요?</strong></summary>
 
-`cargo install --git https://github.com/tobilife/flot --force`로 업데이트한 뒤 다시
-시도하세요. 그래도 재현되면 `flot --version`, 플로우 파일, 실행한 명령과 출력을 담아
+`cargo install flot-cli`로 업데이트한 뒤 다시 시도하세요. 그래도 재현되면 `flot --version`, 플로우 파일, 실행한 명령과 출력을 담아
 [이슈를 열어 주세요](https://github.com/tobilife/flot/issues).
 
 </details>

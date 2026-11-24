@@ -18,7 +18,7 @@
 
 [Quick start](#quick-start) · [How flot works](#how-flot-works) · [What flot guarantees](#what-flot-guarantees) · [Example flows](#example-flows) · [FAQ](#faq) · [Documentation](#documentation)
 
-<code>cargo install --git https://github.com/tobilife/flot</code>
+<code>cargo install flot-cli</code>
 
 </div>
 
@@ -48,8 +48,12 @@ terminal and from any agent that speaks MCP.
 With [Rust](https://rustup.rs) 1.88 or later:
 
 ```bash
-cargo install --git https://github.com/tobilife/flot
+cargo install flot-cli
 ```
+
+The crate is `flot-cli`; the command it installs is `flot`. For the latest
+`main` instead of the latest release, use
+`cargo install --git https://github.com/tobilife/flot`.
 
 ### Connect your agent (MCP)
 
@@ -239,8 +243,7 @@ and macOS.
 <details>
 <summary><strong>What should I do if I hit a bug?</strong></summary>
 
-Update with `cargo install --git https://github.com/tobilife/flot --force` and
-retry. If it persists, [open an issue](https://github.com/tobilife/flot/issues)
+Update with `cargo install flot-cli` and retry. If it persists, [open an issue](https://github.com/tobilife/flot/issues)
 with `flot --version`, the flow file, the command you ran and its output.
 
 </details>

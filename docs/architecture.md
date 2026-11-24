@@ -38,5 +38,7 @@ binary, a real MCP handshake and a cross-store bundle import.
 Not there yet: sandboxing steps (they run with your permissions; see
 [Execution](flows.md#execution)).
 
-Process-group cancellation uses POSIX signals, so timeouts behave correctly on
-Linux and macOS; Windows support is untested.
+Steps run in `sh` everywhere. On Linux and macOS a step leads its own process
+group and is stopped with signals; on Windows, where Git for Windows provides
+`sh`, a job object holds the step and everything it starts, and the store lock
+uses `LockFileEx`. CI runs the suite on all three.

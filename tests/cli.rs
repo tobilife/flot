@@ -3,6 +3,33 @@
 use std::path::Path;
 use std::process::Command;
 
+/// The flot binary under test. Cargo names it by an absolute path of the
+/// host that built it; a suite built in WSL and run as a Windows program
+/// cannot follow that path, and finds the binary beside its own `deps`.
+fn copy_tree(from: &std::path::Path, to: &std::path::Path) {
+    std::fs::create_dir_all(to).unwrap();
+    for entry in std::fs::read_dir(from).unwrap().flatten() {
+        let target = to.join(entry.file_name());
+        if entry.file_type().unwrap().is_dir() {
+            copy_tree(&entry.path(), &target);
+        } else {
+            std::fs::copy(entry.path(), target).unwrap();
+        }
+    }
+}
+
+fn flot_bin() -> std::path::PathBuf {
+    let declared = std::path::PathBuf::from(env!("CARGO_BIN_EXE_flot"));
+    if declared.exists() {
+        return declared;
+    }
+    let exe = std::env::current_exe().expect("the test binary has a path");
+    exe.parent()
+        .and_then(std::path::Path::parent)
+        .expect("test binaries live in target/<profile>/deps")
+        .join(declared.file_name().expect("the binary has a name"))
+}
+
 struct Project {
     dir: tempfile::TempDir,
 }
@@ -83,7 +110,7 @@ impl Project {
     }
 
     fn flot(&self, args: &[&str]) -> Output {
-        let output = Command::new(env!("CARGO_BIN_EXE_flot"))
+        let output = Command::new(flot_bin())
             .args(args)
             .current_dir(self.path())
             .env("FLOT_SIGNING_KEY", self.key_path())
@@ -601,7 +628,7 @@ fn the_mcp_server_handshakes_and_runs_the_flow_over_stdio() {
     let project = Project::new(PROVEN);
     project.write("seed.txt", "one");
 
-    let mut child = Command::new(env!("CARGO_BIN_EXE_flot"))
+    let mut child = Command::new(flot_bin())
         .arg("mcp")
         .current_dir(project.path())
         .env("FLOT_SIGNING_KEY", project.key_path())
@@ -1141,7 +1168,7 @@ fn the_flow_file_is_found_from_a_subdirectory() {
     let project = Project::new(PROVEN);
     project.write("seed.txt", "one");
     std::fs::create_dir_all(project.path().join("nested/deep")).unwrap();
-    let output = Command::new(env!("CARGO_BIN_EXE_flot"))
+    let output = Command::new(flot_bin())
         .arg("run")
         .current_dir(project.path().join("nested/deep"))
         .env("FLOT_SIGNING_KEY", project.key_path())
@@ -1613,6 +1640,9 @@ fn a_proof_that_changes_what_it_judges_verifies_nothing() {
     output.has("files the proof judged changed while it ran (out.txt)");
 }
 
+// Windows has no signals: a killed proof reports whatever exit code its
+// killer chose, and is judged by it.
+#[cfg(unix)]
 #[test]
 fn a_proof_killed_by_a_signal_is_unverified_not_refuted() {
     let project = Project::new(&step_flow(
@@ -1697,7 +1727,7 @@ fn the_store_is_never_a_step_input_and_the_root_is_not_a_pattern() {
     )
     .unwrap();
     let flot = |args: &[&str]| {
-        let output = Command::new(env!("CARGO_BIN_EXE_flot"))
+        let output = Command::new(flot_bin())
             .args(args)
             .current_dir(&root)
             .env("FLOT_SIGNING_KEY", parent.path().join("key"))
@@ -1717,8 +1747,15 @@ fn the_store_is_never_a_step_input_and_the_root_is_not_a_pattern() {
 
 #[test]
 fn hostile_metrics_never_crash_or_hang_a_run() {
+    // A FIFO would block a reader forever; Windows has none, and a directory
+    // is not a regular file either.
+    #[cfg(unix)]
+    const NOT_A_FILE: &str = "mkfifo";
+    #[cfg(not(unix))]
+    const NOT_A_FILE: &str = "mkdir";
     let project = Project::new(
-        "[flow]\nname = \"m\"\n\n[[step]]\nid = \"a\"\nrun = \"echo '{\\\"input_tokens\\\": 18446744073709551615}' > \\\"$FLOT_METRICS\\\"\"\n\n[[step]]\nid = \"b\"\nrun = \"echo '{\\\"input_tokens\\\": 18446744073709551615}' > \\\"$FLOT_METRICS\\\"\"\n\n[[step]]\nid = \"c\"\nrun = \"mkfifo \\\"$FLOT_METRICS\\\"\"\n",
+        &"[flow]\nname = \"m\"\n\n[[step]]\nid = \"a\"\nrun = \"echo '{\\\"input_tokens\\\": 18446744073709551615}' > \\\"$FLOT_METRICS\\\"\"\n\n[[step]]\nid = \"b\"\nrun = \"echo '{\\\"input_tokens\\\": 18446744073709551615}' > \\\"$FLOT_METRICS\\\"\"\n\n[[step]]\nid = \"c\"\nrun = \"{SPECIAL} \\\"$FLOT_METRICS\\\"\"\n"
+            .replace("{SPECIAL}", NOT_A_FILE),
     );
     project
         .flot(&["run"])
@@ -1732,7 +1769,7 @@ fn stopping_flot_stops_the_step_and_still_records_the_run() {
     let project = Project::new(
         "[flow]\nname = \"sig\"\n\n[[step]]\nid = \"s\"\nrun = \"sleep 30; touch survived\"\n\n[[step]]\nid = \"t\"\nneeds = [\"s\"]\nrun = \"echo after\"\n",
     );
-    let child = Command::new(env!("CARGO_BIN_EXE_flot"))
+    let child = Command::new(flot_bin())
         .arg("run")
         .current_dir(project.path())
         .env("FLOT_SIGNING_KEY", project.key_path())
@@ -1838,13 +1875,7 @@ fn a_copied_store_brings_evidence_but_not_decisions() {
     // trust list included, the way a committed `.flot` would arrive.
     let target = Project::new(PROVEN);
     target.write("seed.txt", "one");
-    let copied = std::process::Command::new("cp")
-        .args(["-r"])
-        .arg(source.path().join(".flot"))
-        .arg(target.path())
-        .status()
-        .unwrap();
-    assert!(copied.success());
+    copy_tree(&source.path().join(".flot"), &target.path().join(".flot"));
 
     // The trust list is refused, not believed, by everything that would
     // judge authorship with it.
@@ -1986,7 +2017,7 @@ fn a_named_flow_file_is_found_the_same_way_however_it_is_written() {
 fn init_in_a_subdirectory_leaves_the_parent_project_alone() {
     let project = Project::new(TWO_STEPS);
     std::fs::create_dir_all(project.path().join("sub")).unwrap();
-    let output = Command::new(env!("CARGO_BIN_EXE_flot"))
+    let output = Command::new(flot_bin())
         .args(["init", "--force"])
         .current_dir(project.path().join("sub"))
         .env("FLOT_SIGNING_KEY", project.key_path())
@@ -1997,6 +2028,8 @@ fn init_in_a_subdirectory_leaves_the_parent_project_alone() {
     assert!(project.path().join("sub/flot.toml").exists());
 }
 
+// Windows has no mode bits to make a directory unwritable this way.
+#[cfg(unix)]
 #[test]
 fn an_environment_fault_exits_4_not_as_a_bad_request() {
     use std::os::unix::fs::PermissionsExt;

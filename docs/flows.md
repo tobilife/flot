@@ -106,17 +106,21 @@ wall-clock never enters a receipt.
 
 ## Execution
 
-`run` and `verify` go through `sh -e -c` from the flow root, so
+`run` and `verify` go through `sh -e -c` from the flow root on every platform
+(on Windows, the `sh` of Git for Windows: on `PATH`, else beside `git.exe`), so
 the first failing line of a multi-line command fails the step; without `-e` an
 agent call that failed, followed by a line that succeeded, would be recorded as
 success. Write `|| true` where a failure is expected. A step is one unit of
 work: anything it left running in its process group when it exits is stopped,
 and reported. A process that escapes the group (`setsid`, a daemon) cannot hold
 the run open either; flot stops reading its output after a short grace period
-and says the captured output may be incomplete, but it keeps running. Files the
+and says the captured output may be incomplete, but it keeps running. On
+Windows the step runs in a job object, which nothing it starts can leave, so
+everything left behind is stopped. Files the
 proof judges are re-read after the proof, so such a process cannot change them
-unnoticed. Ctrl-C (or SIGTERM, SIGHUP) stops the running steps with their
-process groups and still records the run; a second one exits at once.
+unnoticed. Ctrl-C (or SIGTERM, SIGHUP; on Windows, Ctrl-C or closing the
+console) stops the running steps with their process groups and still records
+the run; a second one exits at once.
 
 Steps are not sandboxed. A step runs with your user's permissions and
 environment and can read or write anything you can, the `.flot` store included.

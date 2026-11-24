@@ -186,7 +186,41 @@ impl Store {
                 return Err(error).context("cannot lock the store");
             }
         }
-        #[cfg(not(unix))]
+        #[cfg(windows)]
+        {
+            use std::os::windows::io::AsRawHandle;
+            use windows_sys::Win32::Foundation::{ERROR_LOCK_VIOLATION, HANDLE};
+            use windows_sys::Win32::Storage::FileSystem::{
+                LockFileEx, LOCKFILE_EXCLUSIVE_LOCK, LOCKFILE_FAIL_IMMEDIATELY,
+            };
+            let flags = if exclusive {
+                LOCKFILE_EXCLUSIVE_LOCK | LOCKFILE_FAIL_IMMEDIATELY
+            } else {
+                0
+            };
+            let mut overlapped = unsafe { std::mem::zeroed() };
+            // The whole file; the lock goes when the handle closes.
+            let locked = unsafe {
+                LockFileEx(
+                    file.as_raw_handle() as HANDLE,
+                    flags,
+                    0,
+                    u32::MAX,
+                    u32::MAX,
+                    &mut overlapped,
+                )
+            };
+            if locked == 0 {
+                let error = std::io::Error::last_os_error();
+                if error.raw_os_error() == Some(ERROR_LOCK_VIOLATION as i32) {
+                    return Err(fault::environment(
+                        "the store is in use by a running flot; try again when it finishes",
+                    ));
+                }
+                return Err(error).context("cannot lock the store");
+            }
+        }
+        #[cfg(not(any(unix, windows)))]
         let _ = exclusive;
         Ok(StoreLock { _file: file })
     }

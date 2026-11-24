@@ -6,7 +6,11 @@ code is written.
 
 ## Development setup
 
-You need Rust 1.88 or later and a POSIX shell. Linux and macOS are supported.
+You need Rust 1.88 or later and a POSIX shell: Linux, macOS, or Windows with
+[Git for Windows](https://gitforwindows.org). From WSL, the suite also runs as
+real Windows programs: install `mingw-w64`, `rustup target add
+x86_64-pc-windows-gnu`, then `cargo test --target x86_64-pc-windows-gnu` from a
+checkout on a Windows drive.
 
 ```bash
 git clone https://github.com/tobilife/flot

@@ -96,8 +96,10 @@ host B $ flot import --require-trusted demo.json
   reuse of their receipts.
 - Weak (small-order) keys are refused; verification uses `verify_strict`.
 - The key lives at `$FLOT_SIGNING_KEY`, else `$XDG_CONFIG_HOME/flot/signing.key`,
-  else `~/.config/flot/signing.key`, created owner-only. flot refuses a key file
-  other users can read and replaces one only through `flot key rotate`.
+  else `%APPDATA%\flot\signing.key` on Windows and `~/.config/flot/signing.key`
+  elsewhere, created owner-only. On Linux and macOS flot refuses a key file
+  other users can read (on Windows it relies on the profile directory's
+  permissions) and replaces one only through `flot key rotate`.
 - The trust list is per host as well as per store: it is sealed with this
   host's secret (see [the store](#the-flot-store)), so a `trust.json` that arrives with a copied or
   committed store is refused, not believed.

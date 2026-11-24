@@ -96,6 +96,20 @@ impl StopSignal {
 /// this, flot would die and leave the step running, unrecorded. A second
 /// signal exits at once, for a user who does not want to wait.
 pub fn install_interrupt_handlers() {
+    // Windows: Ctrl-C and closing the console. Steps start in their own
+    // process group, which a console Ctrl-C does not reach.
+    #[cfg(windows)]
+    {
+        unsafe extern "system" fn on_ctrl(_: u32) -> windows_sys::core::BOOL {
+            if INTERRUPTED.swap(true, Ordering::SeqCst) {
+                unsafe { windows_sys::Win32::System::Threading::ExitProcess(130) };
+            }
+            1
+        }
+        unsafe {
+            windows_sys::Win32::System::Console::SetConsoleCtrlHandler(Some(on_ctrl), 1);
+        }
+    }
     #[cfg(unix)]
     {
         extern "C" fn on_signal(_: libc::c_int) {
@@ -111,6 +125,47 @@ pub fn install_interrupt_handlers() {
             }
         }
     }
+}
+
+/// The POSIX shell steps run in. Flows are written for `sh` on every
+/// platform, so one flow file means the same commands everywhere; Windows has
+/// none of its own, and Git for Windows ships the one flot uses there.
+#[cfg(not(windows))]
+fn shell() -> Result<std::path::PathBuf> {
+    Ok("sh".into())
+}
+
+#[cfg(windows)]
+fn shell() -> Result<std::path::PathBuf> {
+    let path = std::env::var_os("PATH").unwrap_or_default();
+    let dirs: Vec<std::path::PathBuf> = std::env::split_paths(&path).collect();
+    if let Some(sh) = dirs
+        .iter()
+        .map(|dir| dir.join("sh.exe"))
+        .find(|sh| sh.is_file())
+    {
+        return Ok(sh);
+    }
+    // Git for Windows puts only `cmd\git.exe` on PATH; its shell is beside it
+    // in `bin`, which also sets up the POSIX tools a step expects.
+    let beside_git = dirs
+        .iter()
+        .filter(|dir| dir.join("git.exe").is_file())
+        .filter_map(|dir| dir.parent().map(|git| git.join("bin").join("sh.exe")));
+    let installed = ["ProgramFiles", "ProgramW6432", "LOCALAPPDATA"]
+        .into_iter()
+        .filter_map(std::env::var_os)
+        .flat_map(|base| {
+            let base = std::path::PathBuf::from(base);
+            [
+                base.join("Git").join("bin").join("sh.exe"),
+                base.join("Programs").join("Git").join("bin").join("sh.exe"),
+            ]
+        });
+    beside_git
+        .chain(installed)
+        .find(|sh| sh.is_file())
+        .context("flot runs steps with a POSIX `sh`, and none was found; install Git for Windows, which provides one, or put sh.exe on PATH")
 }
 
 /// Execute `command` through `sh -e -c` from `cwd`.
@@ -133,7 +188,7 @@ pub fn run_command(
     let started_at_ms = now_ms();
     let started = Instant::now();
 
-    let mut builder = Command::new("sh");
+    let mut builder = Command::new(shell()?);
     builder
         .arg("-e")
         .arg("-c")
@@ -151,10 +206,26 @@ pub fn run_command(
         // Lead a new process group so a timeout can stop descendants too.
         builder.process_group(0);
     }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        builder.creation_flags(job::SPAWN_FLAGS);
+    }
 
     let mut child = builder
         .spawn()
         .with_context(|| format!("cannot start `{command}`"))?;
+    // Windows has no process groups to signal; a job object holds the step
+    // and everything it starts instead.
+    #[cfg(windows)]
+    let step_job = match job::Job::adopt(&child) {
+        Ok(step_job) => step_job,
+        Err(error) => {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(error).context("cannot hold the step in a job object");
+        }
+    };
 
     let overflow = Arc::new(AtomicBool::new(false));
     let stdout_reader = drain(child.stdout.take(), max_output_bytes, Arc::clone(&overflow));
@@ -187,7 +258,15 @@ pub fn run_command(
     // group is stopped: background processes the command left behind would
     // keep running and, holding the output pipes, keep this call from
     // returning at all.
+    #[cfg(not(windows))]
     let stopped_others = stop_group(&child);
+    #[cfg(windows)]
+    let stopped_others = {
+        let leader_running = matches!(child.try_wait(), Ok(None));
+        let others = step_job.active() > u32::from(leader_running);
+        step_job.stop();
+        others
+    };
     let _ = child.kill();
     let status = child.wait().ok();
     let ended_on_its_own = !(timed_out || was_interrupted || overflowed);
@@ -309,6 +388,7 @@ fn drain<R: Read + Send + 'static>(
 /// besides the leader's zombie was there to stop. Call it before the leader
 /// is reaped: until then its pid pins the group id, so this cannot reach an
 /// unrelated group.
+#[cfg(not(windows))]
 fn stop_group(child: &std::process::Child) -> bool {
     #[cfg(target_os = "linux")]
     {
@@ -329,6 +409,125 @@ fn stop_group(child: &std::process::Child) -> bool {
     {
         let _ = child;
         false
+    }
+}
+
+/// A Windows job object holding one step and every process it starts.
+#[cfg(windows)]
+mod job {
+    use std::os::windows::io::AsRawHandle;
+
+    use windows_sys::Win32::Foundation::{CloseHandle, HANDLE, INVALID_HANDLE_VALUE};
+    use windows_sys::Win32::System::Diagnostics::ToolHelp::{
+        CreateToolhelp32Snapshot, Thread32First, Thread32Next, TH32CS_SNAPTHREAD, THREADENTRY32,
+    };
+    use windows_sys::Win32::System::JobObjects::{
+        AssignProcessToJobObject, CreateJobObjectW, JobObjectBasicAccountingInformation,
+        JobObjectExtendedLimitInformation, QueryInformationJobObject, SetInformationJobObject,
+        TerminateJobObject, JOBOBJECT_BASIC_ACCOUNTING_INFORMATION,
+        JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+    };
+    use windows_sys::Win32::System::Threading::{
+        OpenThread, ResumeThread, CREATE_NEW_PROCESS_GROUP, CREATE_SUSPENDED, THREAD_SUSPEND_RESUME,
+    };
+
+    /// The step starts suspended, so it is in its job before it can start
+    /// anything, and in its own process group, so a console Ctrl-C reaches
+    /// flot and not the step.
+    pub const SPAWN_FLAGS: u32 = CREATE_SUSPENDED | CREATE_NEW_PROCESS_GROUP;
+
+    pub struct Job(HANDLE);
+
+    impl Drop for Job {
+        // Closing the last handle kills whatever is still in the job, so a
+        // step cannot outlive the flot that ran it.
+        fn drop(&mut self) {
+            unsafe { CloseHandle(self.0) };
+        }
+    }
+
+    fn last_error() -> std::io::Error {
+        std::io::Error::last_os_error()
+    }
+
+    impl Job {
+        /// Put a suspended child in a new job, then let it run.
+        pub fn adopt(child: &std::process::Child) -> std::io::Result<Job> {
+            let handle = unsafe { CreateJobObjectW(std::ptr::null(), std::ptr::null()) };
+            if handle.is_null() {
+                return Err(last_error());
+            }
+            let job = Job(handle);
+            let mut limits: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = unsafe { std::mem::zeroed() };
+            limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+            let set = unsafe {
+                SetInformationJobObject(
+                    handle,
+                    JobObjectExtendedLimitInformation,
+                    (&raw const limits).cast(),
+                    std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+                )
+            };
+            if set == 0 {
+                return Err(last_error());
+            }
+            if unsafe { AssignProcessToJobObject(handle, child.as_raw_handle() as HANDLE) } == 0 {
+                return Err(last_error());
+            }
+            resume(child.id())?;
+            Ok(job)
+        }
+
+        /// Processes in the job that have not exited.
+        pub fn active(&self) -> u32 {
+            let mut info: JOBOBJECT_BASIC_ACCOUNTING_INFORMATION = unsafe { std::mem::zeroed() };
+            let ok = unsafe {
+                QueryInformationJobObject(
+                    self.0,
+                    JobObjectBasicAccountingInformation,
+                    (&raw mut info).cast(),
+                    std::mem::size_of::<JOBOBJECT_BASIC_ACCOUNTING_INFORMATION>() as u32,
+                    std::ptr::null_mut(),
+                )
+            };
+            if ok == 0 {
+                0
+            } else {
+                info.ActiveProcesses
+            }
+        }
+
+        pub fn stop(&self) {
+            unsafe { TerminateJobObject(self.0, 1) };
+        }
+    }
+
+    /// Resume the threads of a process created suspended: its one main thread.
+    fn resume(pid: u32) -> std::io::Result<()> {
+        let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0) };
+        if snapshot == INVALID_HANDLE_VALUE {
+            return Err(last_error());
+        }
+        let mut entry: THREADENTRY32 = unsafe { std::mem::zeroed() };
+        entry.dwSize = std::mem::size_of::<THREADENTRY32>() as u32;
+        let mut resumed = false;
+        let mut more = unsafe { Thread32First(snapshot, &mut entry) } != 0;
+        while more {
+            if entry.th32OwnerProcessID == pid {
+                let thread = unsafe { OpenThread(THREAD_SUSPEND_RESUME, 0, entry.th32ThreadID) };
+                if !thread.is_null() {
+                    resumed |= unsafe { ResumeThread(thread) } != u32::MAX;
+                    unsafe { CloseHandle(thread) };
+                }
+            }
+            more = unsafe { Thread32Next(snapshot, &mut entry) } != 0;
+        }
+        unsafe { CloseHandle(snapshot) };
+        if resumed {
+            Ok(())
+        } else {
+            Err(last_error())
+        }
     }
 }
 
@@ -545,7 +744,13 @@ mod tests {
             "\"$d/left\" sleep 30 & ",
             "while [ ! -e \"$d/left\" ]; do sleep 0.01; done; rm -r \"$d\"; echo early",
         ));
+        // A new session leaves a POSIX process group, so nothing can stop
+        // the escapee and flot only stops waiting for it. A Windows job
+        // cannot be left: the escapee is stopped with the rest.
+        #[cfg(unix)]
         assert!(outcome.output_detached);
+        #[cfg(windows)]
+        assert!(!outcome.output_detached && outcome.strays_stopped);
         assert_eq!(outcome.stdout, b"early\n");
         assert!(
             started.elapsed() < Duration::from_secs(8),
@@ -572,6 +777,9 @@ mod tests {
         assert!(started.elapsed() < Duration::from_secs(10));
     }
 
+    // Windows has no signals: a killed process exits with whatever code its
+    // killer chose.
+    #[cfg(unix)]
     #[test]
     fn a_signal_death_is_reported_as_a_signal() {
         let outcome = run("kill -9 $$");

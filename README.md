@@ -13,7 +13,7 @@
 [![CI](https://img.shields.io/github/actions/workflow/status/tobilife/flot/ci.yml?branch=main&style=flat-square&logo=github&label=ci)](https://github.com/tobilife/flot/actions/workflows/ci.yml)
 [![MIT license](https://img.shields.io/badge/license-MIT-f4c430?style=flat-square)](LICENSE)
 [![Rust 1.88+](https://img.shields.io/badge/rust-1.88%2B-dea584?style=flat-square&logo=rust)](Cargo.toml)
-[![Linux | macOS](https://img.shields.io/badge/Linux%20%7C%20macOS-4493F8?style=flat-square)](docs/architecture.md#current-scope)
+[![Linux | macOS | Windows](https://img.shields.io/badge/Linux%20%7C%20macOS%20%7C%20Windows-4493F8?style=flat-square)](docs/architecture.md#current-scope)
 [![MCP](https://img.shields.io/badge/MCP-stdio-8A2BE2?style=flat-square)](docs/mcp.md)
 
 [Why and when](#why-and-when-to-use-flot) · [Quick start](#quick-start) · [How flot works](#how-flot-works) · [What flot guarantees](#what-flot-guarantees) · [Example flows](#example-flows) · [FAQ](#faq) · [Documentation](#documentation)
@@ -75,7 +75,6 @@ It is not the tool when:
 - you run a command once and need no record of it;
 - you need to contain untrusted code: flot records and judges steps, it does
   not sandbox them;
-- you are on Windows, which is untested;
 - you want a CI service: flot runs inside your CI or your terminal, it does not
   replace them.
 
@@ -289,8 +288,14 @@ their own providers under their own data policies.
 <details>
 <summary><strong>Does it work on Windows?</strong></summary>
 
-Not yet tested. Process-group cancellation uses POSIX signals; CI runs on Linux
-and macOS.
+Yes, with [Git for Windows](https://gitforwindows.org) installed: flows are
+written for `sh` on every platform, and flot runs steps in the one Git for
+Windows provides. A step and everything it starts are held in a Windows job
+object, so a timeout or Ctrl-C stops all of them. The test suite runs on
+Windows. Install with `cargo install flot-cli`. Windows has no signals and no
+executable bit: a killed proof is judged by the exit code it was given, and a
+file that is executable on Linux or macOS keys differently there, so such
+receipts are not reused across the two.
 
 </details>
 

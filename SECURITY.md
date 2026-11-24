@@ -30,7 +30,10 @@ vulnerabilities:
 - **Steps are not sandboxed.** A step runs with your user's permissions and can
   do anything you can, including editing the `.flot` store. Running a flow you
   have not read is the same as running a script you have not read.
-- A process a step starts that leaves its process group (`setsid`, a daemon)
-  keeps running after the step; flot reports the step's output as possibly
-  incomplete but does not stop that process.
+- On Linux and macOS, a process a step starts that leaves its process group
+  (`setsid`, a daemon) keeps running after the step; flot reports the step's
+  output as possibly incomplete but does not stop that process. (On Windows the
+  step's job object cannot be left.)
+- On Windows, flot does not check who can read the signing key; it relies on
+  the permissions of the user profile it lives in.
 - What agents you run as steps send to their providers.

@@ -13,7 +13,7 @@
 [![CI](https://img.shields.io/github/actions/workflow/status/tobilife/flot/ci.yml?branch=main&style=flat-square&logo=github&label=ci)](https://github.com/tobilife/flot/actions/workflows/ci.yml)
 [![MIT license](https://img.shields.io/badge/license-MIT-f4c430?style=flat-square)](../../LICENSE)
 [![Rust 1.88+](https://img.shields.io/badge/rust-1.88%2B-dea584?style=flat-square&logo=rust)](../../Cargo.toml)
-[![Linux | macOS](https://img.shields.io/badge/Linux%20%7C%20macOS-4493F8?style=flat-square)](../architecture.md#current-scope)
+[![Linux | macOS | Windows](https://img.shields.io/badge/Linux%20%7C%20macOS%20%7C%20Windows-4493F8?style=flat-square)](../architecture.md#current-scope)
 [![MCP](https://img.shields.io/badge/MCP-stdio-8A2BE2?style=flat-square)](../mcp.md)
 
 [왜, 언제](#왜-쓰고-언제-쓰나) · [빠른 시작](#빠른-시작) · [flot의 동작 방식](#flot의-동작-방식) · [flot이 보장하는 것](#flot이-보장하는-것) · [예제 플로우](#예제-플로우) · [FAQ](#faq) · [문서](#문서)
@@ -71,7 +71,6 @@
 - 명령을 한 번 돌리고 기록이 필요 없을 때
 - 믿을 수 없는 코드를 격리해야 할 때: flot은 단계를 기록하고 판정할 뿐 샌드박스에 가두지
   않습니다.
-- Windows 환경일 때: 아직 테스트하지 않았습니다.
 - CI 서비스가 필요할 때: flot은 CI나 터미널 안에서 돌아가며 그것들을 대체하지 않습니다.
 
 ## 빠른 시작
@@ -274,8 +273,13 @@ CLI가 있는 모든 에이전트입니다. Claude Code와 Codex 등록 방법�
 <details>
 <summary><strong>Windows에서 동작하나요?</strong></summary>
 
-아직 테스트하지 않았습니다. 프로세스 그룹 취소에 POSIX 시그널을 쓰며, CI는 Linux와
-macOS에서 실행됩니다.
+네. [Git for Windows](https://gitforwindows.org)가 설치되어 있어야 합니다. 플로우는 모든
+플랫폼에서 `sh` 기준으로 작성하며, flot은 Git for Windows에 들어 있는 `sh`로 단계를 실행합니다.
+단계와 그 단계가 시작한 모든 프로세스는 Windows 작업 개체(job object)에 묶이므로, 시간 초과나
+Ctrl-C가 전부를 멈춥니다. 테스트 스위트를 Windows에서도 실행합니다. 설치는
+`cargo install flot-cli`로 합니다. Windows에는 시그널과 실행 권한 비트가 없어서, 강제 종료된
+증명은 받은 종료 코드로 판정되고, Linux나 macOS에서 실행 권한이 있는 파일은 키가 달라져
+그런 영수증은 두 환경 사이에서 재사용되지 않습니다.
 
 </details>
 

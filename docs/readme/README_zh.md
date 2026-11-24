@@ -13,7 +13,7 @@
 [![CI](https://img.shields.io/github/actions/workflow/status/tobilife/flot/ci.yml?branch=main&style=flat-square&logo=github&label=ci)](https://github.com/tobilife/flot/actions/workflows/ci.yml)
 [![MIT license](https://img.shields.io/badge/license-MIT-f4c430?style=flat-square)](../../LICENSE)
 [![Rust 1.88+](https://img.shields.io/badge/rust-1.88%2B-dea584?style=flat-square&logo=rust)](../../Cargo.toml)
-[![Linux | macOS](https://img.shields.io/badge/Linux%20%7C%20macOS-4493F8?style=flat-square)](../architecture.md#current-scope)
+[![Linux | macOS | Windows](https://img.shields.io/badge/Linux%20%7C%20macOS%20%7C%20Windows-4493F8?style=flat-square)](../architecture.md#current-scope)
 [![MCP](https://img.shields.io/badge/MCP-stdio-8A2BE2?style=flat-square)](../mcp.md)
 
 [为什么与何时](#为什么以及何时使用-flot) · [快速开始](#快速开始) · [工作原理](#工作原理) · [flot 的保证](#flot-的保证) · [示例流程](#示例流程) · [常见问题](#常见问题) · [文档](#文档)
@@ -64,7 +64,6 @@
 
 - 只运行一次命令、不需要任何记录；
 - 需要隔离不可信的代码：flot 记录并评判步骤，但不对它们做沙箱隔离；
-- 在 Windows 上使用：尚未测试；
 - 需要一个 CI 服务：flot 运行在你的 CI 或终端里，并不取代它们。
 
 ## 快速开始
@@ -254,7 +253,12 @@ flot 根据命令、每个输入的内容、证明命令以及上游步骤的收
 <details>
 <summary><strong>能在 Windows 上使用吗？</strong></summary>
 
-尚未测试。进程组取消使用 POSIX 信号；CI 在 Linux 和 macOS 上运行。
+可以，需要安装 [Git for Windows](https://gitforwindows.org)：流程在所有平台上都按 `sh`
+编写，flot 用 Git for Windows 自带的 `sh` 运行步骤。步骤及其启动的所有进程都被放进一个
+Windows 作业对象（job object），所以超时或 Ctrl-C 会把它们全部停止。测试套件也在 Windows 上
+运行。用 `cargo install flot-cli` 安装。Windows 没有信号，也没有可执行位：被强制终止的证明按
+它得到的退出码判定；在 Linux 或 macOS 上带可执行位的文件在两边的键不同，这样的收据不会在两者
+之间复用。
 
 </details>
 

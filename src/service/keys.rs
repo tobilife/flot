@@ -37,7 +37,8 @@ impl SigningKeyFile {
 }
 
 /// Where the key lives: `$FLOT_SIGNING_KEY`, else
-/// `$XDG_CONFIG_HOME/flot/signing.key`, else `~/.config/flot/signing.key`.
+/// `$XDG_CONFIG_HOME/flot/signing.key`, else `%APPDATA%\flot\signing.key` on
+/// Windows and `~/.config/flot/signing.key` elsewhere.
 pub fn default_path() -> Result<PathBuf> {
     if let Some(path) = std::env::var_os(KEY_ENV) {
         return Ok(PathBuf::from(path));
@@ -47,13 +48,18 @@ pub fn default_path() -> Result<PathBuf> {
 
 #[cfg(not(test))]
 fn config_dir() -> Result<PathBuf> {
-    Ok(match std::env::var_os("XDG_CONFIG_HOME") {
-        Some(dir) if !dir.is_empty() => PathBuf::from(dir),
-        _ => PathBuf::from(
-            std::env::var_os("HOME").context("neither $FLOT_SIGNING_KEY nor $HOME is set")?,
-        )
-        .join(".config"),
-    })
+    let set = |name: &str| std::env::var_os(name).filter(|value| !value.is_empty());
+    if let Some(dir) = set("XDG_CONFIG_HOME") {
+        return Ok(PathBuf::from(dir));
+    }
+    #[cfg(windows)]
+    if let Some(dir) = set("APPDATA") {
+        return Ok(PathBuf::from(dir));
+    }
+    Ok(
+        PathBuf::from(set("HOME").context("neither $FLOT_SIGNING_KEY nor $HOME is set")?)
+            .join(".config"),
+    )
 }
 
 /// Unit tests never read or create secrets in the real home directory.

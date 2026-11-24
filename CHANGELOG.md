@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+- Windows support; the whole suite runs on Windows (build 26300, and
+  `windows-latest` in CI):
+  - steps run in the `sh` of Git for Windows (on `PATH`, else beside
+    `git.exe`); a missing shell is named;
+  - a step and everything it starts are held in a job object, so a timeout,
+    Ctrl-C or a step that leaves work running stops all of it, including what
+    would escape a POSIX process group;
+  - the store lock uses `LockFileEx`, so `gc` cannot run under a writer;
+  - the signing key defaults to `%APPDATA%\flot\signing.key`.
+- A receipt recorded on Linux is reused on Windows and the other way round,
+  with its produced files restored, when the inputs' executable bits agree
+  (Windows records none).
+
 ## 0.2.2
 
 - A reused step prints one line in `flot run`; its output was shown when it

@@ -226,6 +226,43 @@ pub fn scan_globs<E>(
     Ok(scan)
 }
 
+/// Copy the project into `dest` for one candidate of `step`: every file a
+/// wildcard would reach (so not what git ignores, and never `.git` or the
+/// store), and every file the step names as an input, proof input or output,
+/// ignored or not. Files are copied with their modes; links are followed.
+pub fn copy_workspace(root: &Path, dest: &Path, step: &Step) -> Result<()> {
+    let mut files: std::collections::BTreeSet<PathBuf> = candidates(root, "**/*", Reach::Tracked)
+        .map_err(|error| anyhow::anyhow!("cannot list the project's files: {error}"))?
+        .into_iter()
+        .collect();
+    for (patterns, reach) in [
+        (&step.inputs, Reach::Tracked),
+        (&step.verify_inputs, Reach::Tracked),
+        (&step.outputs, Reach::Everything),
+    ] {
+        for pattern in patterns {
+            // An invalid pattern is reported where the step's facts are read.
+            if let Ok(found) = candidates(root, pattern, reach) {
+                files.extend(found);
+            }
+        }
+    }
+    std::fs::create_dir_all(dest).with_context(|| format!("cannot create {}", dest.display()))?;
+    for path in files {
+        let relative = path
+            .strip_prefix(root)
+            .with_context(|| format!("{} is outside the project", path.display()))?;
+        let target = dest.join(relative);
+        if let Some(parent) = target.parent() {
+            std::fs::create_dir_all(parent)
+                .with_context(|| format!("cannot create {}", parent.display()))?;
+        }
+        std::fs::copy(&path, &target)
+            .with_context(|| format!("cannot copy {}", relative.display()))?;
+    }
+    Ok(())
+}
+
 /// Whether anyone may execute the file.
 pub fn is_executable(path: &Path) -> bool {
     #[cfg(unix)]

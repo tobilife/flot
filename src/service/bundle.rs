@@ -972,7 +972,7 @@ verify = "grep -q flot artifact.txt"
             observed.metrics = Some(crate::core::metrics::Metrics {
                 input_tokens: 1,
                 output_tokens: 1,
-                cost_micro_usd: 1,
+                cost_micro_usd: Some(1),
             })
         });
         for (bundle, expected) in [

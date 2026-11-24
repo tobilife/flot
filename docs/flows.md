@@ -105,6 +105,64 @@ could not start at all. Like a budget, `attempts` is not part of the step key:
 work that held is the same work whichever attempt it took, and is reused on
 the next run.
 
+## Candidates
+
+`candidates = [...]` runs one step several ways and keeps the best that holds.
+Each candidate is the same step with `$FLOT_CANDIDATE` set to its name, so the
+command chooses the agent, the model or the prompt:
+
+```toml
+[[step]]
+id = "implement"
+candidates = ["claude", "codex"]
+run = """
+case "$FLOT_CANDIDATE" in
+claude) claude -p "Implement SPEC.md as slug.py." ... ;;
+codex)  codex exec "Implement SPEC.md as slug.py." ... ;;
+esac
+"""
+outputs = ["slug.py"]
+claims = ["slug.py satisfies the acceptance check"]
+verify = "python3 check_slug.py"
+```
+
+Candidates run one after another, each in its own copy of the project inside
+the store (`.flot/tmp`): every file git does not ignore, plus every file the
+step names as an input, proof input or output. The copy has no `.git`, and git
+is told not to look above it (`GIT_CEILING_DIRECTORIES`), so what a candidate
+writes and the git commands it runs stay in its copy; like every step, it is
+not sandboxed, and a command that names a path outside the copy reaches it.
+The copy holds the project as it is, outputs included, so a command that must
+start without an earlier output removes it first. Each candidate gets its own receipt, and its own attempts when the
+step has `attempts`.
+
+The kept candidate is the first one in this order: one that held before one
+that did not; among those that held, a known cost before an unknown one, and a
+lower cost before a higher one; then the order the step names them in. A cost
+is known only when every execution of the candidate reported `cost_usd`
+through `$FLOT_METRICS`; a report of tokens alone, or an attempt that reported
+nothing, makes it unknown, not free.
+The kept candidate's outputs are written into the project, and its receipt is
+the step's, so later steps see what was proven. Files a candidate deleted, or
+wrote without declaring them as outputs, stay in its copy.
+
+The run says how each candidate did and which one it kept:
+
+```
+  - implement: candidates claude held ($0.098488), codex held (cost unknown); kept claude
+```
+
+The manifest lists the candidates not kept, `flot show` names them,
+`flot log STEP --candidate NAME` prints what one printed, and `verify`,
+`bundle`, `import` and `gc` treat their receipts like any other evidence.
+`verify` also checks that the kept candidate ranks first by this rule. What
+every candidate spent counts toward the run, and no candidate starts once the
+cost ceiling is reached. On the next run the best candidate whose receipt
+still holds is reused, and none runs again; that includes a candidate added
+since, so `flot run --force` runs them all. A candidate's name is part of its
+step key; the list of candidates is not, so editing the list keeps every
+candidate's receipt.
+
 ## Budgets
 
 A budget is set in `[flow]` for every step, or per step, and a step's own

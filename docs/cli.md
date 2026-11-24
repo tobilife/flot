@@ -10,7 +10,7 @@
 | `flot verify [RUN]` | re-authenticate a run from the store alone |
 | `flot diff [LEFT] [RIGHT]` | step-by-step comparison by receipt identity; by default `latest~1` against `latest` |
 | `flot receipt ID` | one receipt as JSON (id prefix accepted) |
-| `flot log STEP [RUN] [--stderr]` | complete output one step of a run printed |
+| `flot log STEP [RUN] [--stderr] [--candidate NAME] [--attempt N]` | complete output one step of a run printed; by default the receipt the run kept, else another candidate it ran or an earlier attempt |
 | `flot cat DIGEST` | one stored object, byte-exact |
 | `flot runs [--limit N]` | recorded runs, newest first; imported ones are marked |
 | `flot gc [--dry-run]` | drop evidence no recorded run references |

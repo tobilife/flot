@@ -144,6 +144,10 @@ pub struct ReceiptIdentity {
     /// Known gaps in this receipt's evidence, stated rather than implied.
     pub limitations: Vec<String>,
     pub tool: ToolIdentity,
+    /// The candidate of the step that did this work, when the step names
+    /// candidates.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub candidate: Option<String>,
 }
 
 impl Observed {
@@ -356,6 +360,10 @@ pub struct RunStep {
     /// which did not hold. The step's receipt is the last attempt's.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub attempts: Vec<RunAttempt>,
+    /// The step's other candidates this run executed, when it names
+    /// candidates. The step's receipt is the kept candidate's.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub candidates: Vec<RunCandidate>,
 }
 
 /// An attempt at a step that did not hold, kept as evidence of what it took.
@@ -363,6 +371,28 @@ pub struct RunStep {
 pub struct RunAttempt {
     pub receipt_id: String,
     pub observed_digest: String,
+}
+
+/// A candidate of a step that this run executed and did not keep: its last
+/// receipt, that receipt's observation, and its earlier attempts.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RunCandidate {
+    pub name: String,
+    pub receipt_id: String,
+    pub observed_digest: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attempts: Vec<RunAttempt>,
+}
+
+/// How a step's candidates are ranked, best first: one whose last receipt
+/// held, and among those lower reported cost over all its attempts, an
+/// unknown cost after every known one. Candidates that did not hold rank
+/// equal. Equal ranks keep the earlier candidate.
+pub fn candidate_rank(last: &Receipt, cost_micro_usd: Option<u64>) -> (bool, bool, u64) {
+    if !last.is_reusable() {
+        return (true, false, 0);
+    }
+    (false, cost_micro_usd.is_none(), cost_micro_usd.unwrap_or(0))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -447,40 +477,85 @@ impl RunManifest {
                 continue;
             };
             self.belongs(&step.step_id, receipt, &mut found);
-            if step.cached && !step.attempts.is_empty() {
+            if step.cached && !(step.attempts.is_empty() && step.candidates.is_empty()) {
                 found.push(format!(
                     "{}: a reused receipt lists attempts this run made",
                     step.step_id
                 ));
             }
-            for (number, attempt) in step.attempts.iter().enumerate() {
-                let label = format!("{} attempt {}", step.step_id, number + 1);
-                let Some(earlier) = receipts.get(attempt.receipt_id.as_str()) else {
+            let kept_cost = self.attempts_judged(
+                &step.step_id,
+                &step.step_id,
+                &step.attempts,
+                receipts,
+                observations,
+                &mut spend,
+                &mut found,
+            );
+            let kept_cost = sum_costs(
+                kept_cost,
+                observations
+                    .get(step.observed_digest.as_str())
+                    .and_then(|observed| observed.metrics)
+                    .and_then(|metrics| metrics.cost_micro_usd),
+            );
+            if !step.candidates.is_empty() && receipt.identity.candidate.is_none() {
+                found.push(format!(
+                    "{}: the run lists other candidates but the receipt names none",
+                    step.step_id
+                ));
+            }
+            let mut names = std::collections::BTreeSet::new();
+            names.extend(receipt.identity.candidate.as_deref());
+            for candidate in &step.candidates {
+                let label = format!("{} candidate {}", step.step_id, candidate.name);
+                if !names.insert(candidate.name.as_str()) {
+                    found.push(format!("{label}: the candidate appears more than once"));
+                }
+                let earlier_cost = self.attempts_judged(
+                    &step.step_id,
+                    &label,
+                    &candidate.attempts,
+                    receipts,
+                    observations,
+                    &mut spend,
+                    &mut found,
+                );
+                let Some(last) = receipts.get(candidate.receipt_id.as_str()) else {
                     found.push(format!(
                         "{label}: receipt {} is not available",
-                        digest::short(&attempt.receipt_id)
+                        digest::short(&candidate.receipt_id)
                     ));
                     continue;
                 };
-                self.belongs(&label, earlier, &mut found);
-                if earlier.identity.step_id != step.step_id {
+                self.belongs(&label, last, &mut found);
+                if last.identity.step_id != step.step_id {
                     found.push(format!(
                         "{label}: receipt belongs to step `{}`",
-                        earlier.identity.step_id
+                        last.identity.step_id
                     ));
                 }
-                // The step is only tried again when an attempt did not hold.
-                if earlier.is_reusable() {
+                if last.identity.candidate.as_deref() != Some(candidate.name.as_str()) {
+                    found.push(format!("{label}: receipt is not that candidate's"));
+                }
+                let Some(observed) = observations.get(candidate.observed_digest.as_str()) else {
                     found.push(format!(
-                        "{label}: it held, so the step would not have been tried again"
-                    ));
-                }
-                match observations.get(attempt.observed_digest.as_str()) {
-                    Some(observed) => spend.add_executed(observed.metrics),
-                    None => found.push(format!(
                         "{label}: observation {} is not available",
-                        digest::short(&attempt.observed_digest)
-                    )),
+                        digest::short(&candidate.observed_digest)
+                    ));
+                    continue;
+                };
+                spend.add_executed(observed.metrics);
+                let cost = sum_costs(
+                    earlier_cost,
+                    observed.metrics.and_then(|metrics| metrics.cost_micro_usd),
+                );
+                // The kept candidate must rank at least as well as each
+                // other one, by the rule that chose it.
+                if candidate_rank(last, cost) < candidate_rank(receipt, kept_cost) {
+                    found.push(format!(
+                        "{label}: it ranks above the candidate the run kept"
+                    ));
                 }
             }
             if receipt.identity.step_id != step.step_id {
@@ -563,6 +638,59 @@ impl RunManifest {
         found
     }
 
+    /// Judge a list of earlier attempts at a step and add what they spent.
+    /// Returns their total reported cost, `None` when any of them is unknown.
+    #[allow(clippy::too_many_arguments)]
+    fn attempts_judged(
+        &self,
+        step_id: &str,
+        label: &str,
+        attempts: &[RunAttempt],
+        receipts: &BTreeMap<&str, &Receipt>,
+        observations: &BTreeMap<&str, Observed>,
+        spend: &mut Spend,
+        found: &mut Vec<String>,
+    ) -> Option<u64> {
+        let mut cost = Some(0);
+        for (number, attempt) in attempts.iter().enumerate() {
+            let label = format!("{label} attempt {}", number + 1);
+            let Some(earlier) = receipts.get(attempt.receipt_id.as_str()) else {
+                found.push(format!(
+                    "{label}: receipt {} is not available",
+                    digest::short(&attempt.receipt_id)
+                ));
+                continue;
+            };
+            self.belongs(&label, earlier, found);
+            if earlier.identity.step_id != step_id {
+                found.push(format!(
+                    "{label}: receipt belongs to step `{}`",
+                    earlier.identity.step_id
+                ));
+            }
+            // The step is only tried again when an attempt did not hold.
+            if earlier.is_reusable() {
+                found.push(format!(
+                    "{label}: it held, so the step would not have been tried again"
+                ));
+            }
+            match observations.get(attempt.observed_digest.as_str()) {
+                Some(observed) => {
+                    spend.add_executed(observed.metrics);
+                    cost = sum_costs(cost, observed.metrics.and_then(|m| m.cost_micro_usd));
+                }
+                None => {
+                    cost = None;
+                    found.push(format!(
+                        "{label}: observation {} is not available",
+                        digest::short(&attempt.observed_digest)
+                    ))
+                }
+            }
+        }
+        cost
+    }
+
     /// What every receipt a run names must be: authentic, of this flow, with
     /// proof behind each verified claim, built on the receipts this run
     /// recorded for its dependencies.
@@ -606,6 +734,20 @@ impl RunManifest {
     pub fn evidence(&self) -> Vec<(&str, &str, &str)> {
         let mut named = Vec::new();
         for step in &self.steps {
+            for candidate in &step.candidates {
+                for attempt in &candidate.attempts {
+                    named.push((
+                        step.step_id.as_str(),
+                        attempt.receipt_id.as_str(),
+                        attempt.observed_digest.as_str(),
+                    ));
+                }
+                named.push((
+                    step.step_id.as_str(),
+                    candidate.receipt_id.as_str(),
+                    candidate.observed_digest.as_str(),
+                ));
+            }
             for attempt in &step.attempts {
                 named.push((
                     step.step_id.as_str(),
@@ -621,6 +763,12 @@ impl RunManifest {
         }
         named
     }
+}
+
+/// Two costs together; unknown when either is, since an execution that
+/// reported no cost may have cost anything.
+pub fn sum_costs(a: Option<u64>, b: Option<u64>) -> Option<u64> {
+    Some(a?.saturating_add(b?))
 }
 
 /// The verdict rule, in one place: failures dominate, then refuted claims, then
@@ -656,6 +804,7 @@ mod tests {
             claims: vec![],
             limitations: vec![],
             tool: ToolIdentity::default(),
+            candidate: None,
         }
     }
 
@@ -663,6 +812,7 @@ mod tests {
         RunStep {
             observed_digest: String::new(),
             attempts: Vec::new(),
+            candidates: Vec::new(),
             step_id: step.into(),
             receipt_id: "sha256:x".into(),
             status,
@@ -863,6 +1013,7 @@ mod tests {
             cached: false,
             claims: receipt.claim_counts(),
             attempts: Vec::new(),
+            candidates: Vec::new(),
         }];
         let root_digest =
             RunManifest::root_of(&[(steps[0].step_id.clone(), steps[0].receipt_id.clone())]);
@@ -948,7 +1099,7 @@ mod tests {
         let mut manifest = coherent(held);
         let paid = Observed {
             metrics: Some(Metrics {
-                cost_micro_usd: 7,
+                cost_micro_usd: Some(7),
                 ..Metrics::default()
             }),
             ..Observed::default()
@@ -1037,5 +1188,95 @@ mod tests {
             found[0].contains("receipt belongs to step `b`"),
             "{found:?}"
         );
+    }
+
+    fn candidate(name: &str, stdout: &str, status: StepStatus) -> Receipt {
+        let mut body = identity("a", stdout);
+        body.status = status;
+        body.candidate = Some(name.into());
+        Receipt::seal(body, Observed::default())
+    }
+
+    /// A run that kept `kept` over `other`, each having reported a cost.
+    fn contest(
+        kept: &Receipt,
+        kept_cost: u64,
+        other: &Receipt,
+        other_cost: u64,
+    ) -> (RunManifest, BTreeMap<String, Observed>) {
+        let mut manifest = coherent(kept);
+        let costing = |cost| Observed {
+            metrics: Some(Metrics {
+                cost_micro_usd: Some(cost),
+                ..Metrics::default()
+            }),
+            ..Observed::default()
+        };
+        let other_digest = digest::bytes(b"other");
+        manifest.steps[0].candidates = vec![RunCandidate {
+            name: other.identity.candidate.clone().unwrap(),
+            receipt_id: other.receipt_id.clone(),
+            observed_digest: other_digest.clone(),
+            attempts: Vec::new(),
+        }];
+        manifest.spend = Spend::default();
+        manifest.spend.add_executed(costing(kept_cost).metrics);
+        manifest.spend.add_executed(costing(other_cost).metrics);
+        let observations = BTreeMap::from([
+            (
+                manifest.steps[0].observed_digest.clone(),
+                costing(kept_cost),
+            ),
+            (other_digest, costing(other_cost)),
+        ]);
+        (manifest, observations)
+    }
+
+    #[test]
+    fn the_kept_candidate_must_follow_from_the_others() {
+        let cheap = candidate("cheap", "42", StepStatus::Ok);
+        let pricey = candidate("pricey", "42 too", StepStatus::Ok);
+        let wrong = candidate("wrong", "41", StepStatus::Failed);
+
+        let (manifest, observations) = contest(&cheap, 1, &pricey, 5);
+        assert_eq!(
+            judge_all(&manifest, &[&cheap, &pricey], &observations),
+            Vec::<String>::new()
+        );
+        // Keeping the dearer of two that held, or one that failed over one
+        // that held, is not what the rule chooses.
+        let (manifest, observations) = contest(&pricey, 5, &cheap, 1);
+        let found = judge_all(&manifest, &[&cheap, &pricey], &observations);
+        assert!(
+            found[0].contains("candidate cheap: it ranks above"),
+            "{found:?}"
+        );
+        let (manifest, observations) = contest(&wrong, 0, &cheap, 1);
+        let found = judge_all(&manifest, &[&cheap, &wrong], &observations);
+        assert!(
+            found[0].contains("candidate cheap: it ranks above"),
+            "{found:?}"
+        );
+
+        // A loser's receipt must be that candidate's.
+        let (mut manifest, observations) = contest(&cheap, 1, &pricey, 5);
+        manifest.steps[0].candidates[0].name = "other".into();
+        let found = judge_all(&manifest, &[&cheap, &pricey], &observations);
+        assert!(
+            found[0].contains("receipt is not that candidate's"),
+            "{found:?}"
+        );
+
+        // A kept receipt that names no candidate cannot have rivals.
+        let plain = Receipt::seal(identity("a", "plain"), Observed::default());
+        let (manifest, observations) = contest(&plain, 1, &pricey, 5);
+        let found = judge_all(&manifest, &[&plain, &pricey], &observations);
+        assert!(found[0].contains("receipt names none"), "{found:?}");
+
+        // Nor can two entries be the same candidate.
+        let again = candidate("cheap", "42 again", StepStatus::Ok);
+        let (manifest, observations) = contest(&cheap, 1, &again, 5);
+        let found = judge_all(&manifest, &[&cheap, &again], &observations);
+        assert!(found[0].contains("appears more than once"), "{found:?}");
     }
 }

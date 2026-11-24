@@ -14,6 +14,10 @@ use serde::{Deserialize, Serialize};
 pub const SCHEMA_VERSION: u32 = 5;
 
 pub const DEFAULT_TIMEOUT_SECS: u64 = 900;
+
+/// The variable that names the candidate a step runs as. It is part of the
+/// candidate's declared environment, so each candidate has its own key.
+pub const CANDIDATE_ENV: &str = "FLOT_CANDIDATE";
 pub const DEFAULT_MAX_INLINE_BYTES: usize = 4096;
 pub const DEFAULT_MAX_OUTPUT_BYTES: usize = 256 * 1024 * 1024;
 
@@ -105,9 +109,23 @@ pub struct Step {
     /// whichever attempt it took.
     #[serde(default)]
     pub attempts: Option<u32>,
+    /// Names of interchangeable ways to do the step, such as different agents
+    /// or models. Each runs in its own copy of the workspace with
+    /// `$FLOT_CANDIDATE` naming it, and is proved there; of those that hold,
+    /// the one that reported the lowest cost is kept and its outputs are
+    /// written back. The others stay as evidence.
+    #[serde(default)]
+    pub candidates: Vec<String>,
 }
 
 impl Step {
+    /// The step as it runs for one candidate: its environment names it.
+    pub fn as_candidate(&self, name: &str) -> Step {
+        let mut step = self.clone();
+        step.env.insert(CANDIDATE_ENV.into(), name.into());
+        step
+    }
+
     /// How many attempts one run may make at this step.
     pub fn attempts(&self) -> u32 {
         self.attempts.unwrap_or(1)
@@ -223,6 +241,33 @@ impl Flow {
             }
             if step.attempts == Some(0) {
                 bail!("step `{}` attempts must be at least 1", step.id);
+            }
+            if !step.candidates.is_empty() {
+                if step.candidates.len() < 2 {
+                    bail!(
+                        "step `{}` names one candidate; candidates compare two or more",
+                        step.id
+                    );
+                }
+                let mut names = BTreeSet::new();
+                for name in &step.candidates {
+                    if !is_valid_step_id(name) {
+                        bail!(
+                            "step `{}` candidate `{}` must use only ASCII letters, digits, `-` or `_`",
+                            step.id,
+                            name
+                        );
+                    }
+                    if !names.insert(name) {
+                        bail!("step `{}` names candidate `{}` twice", step.id, name);
+                    }
+                }
+                if step.env.contains_key(CANDIDATE_ENV) {
+                    bail!(
+                        "step `{}` sets {CANDIDATE_ENV}, which flot sets to name each candidate",
+                        step.id
+                    );
+                }
             }
             if !step.verify_inputs.is_empty() && step.verify.is_none() {
                 bail!(

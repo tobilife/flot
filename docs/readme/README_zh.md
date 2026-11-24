@@ -58,6 +58,9 @@
   找到了规格里没有写明的规则，第二次尝试通过，花费 $0.25。
 - **多个智能体处理同一个变更。** 审阅者在成本上限之下并发运行，并记录每一个的花费：在
   `parallel-review` 中隔离三个审阅者后，一次运行的花费从 $3.25 降到 $0.42。
+- **想知道哪个智能体最擅长某项任务。** 设置了 `candidates` 的步骤会让每个智能体或模型在各自的
+  项目副本中运行，用同一个检查分别证明，并保留成立者中最便宜的一个：在一次真实运行中，
+  Claude Code 和 Codex 都通过了，Codex 只报告了 token 而没有报告花费，所以保留了 $0.10 的 Claude。
 - **需要别人信任这个结果。** `flot bundle` 给审阅者或另一台机器一个可以导入并验证的文件；
   认可谁的收据，由签名和对方自己的信任列表决定。
 - **想知道两次运行之间变了什么。** `flot diff` 会逐一指出收据或状态发生变化的步骤。
@@ -201,6 +204,7 @@ flot 根据命令、每个输入的内容、证明命令以及上游步骤的收
 | 流程 | 展示内容 |
 |---|---|
 | [`examples/slugify`](../../examples/slugify/flot.toml) | 一个智能体按规格实现，一个不是智能体写的检查来证明，第二个智能体审阅。已用 Claude Code 端到端运行；[完整经过](../agents.md#a-real-run-end-to-end)包括它在 flot 自身中发现的一个缺陷。智能体步骤隔离后，一次全新运行花费 $0.48。 |
+| [`examples/slugify/compare.toml`](../../examples/slugify/compare.toml) | Claude Code 和 Codex 作为两个候选实现同一份规格；同一个检查分别证明它们，保留成立者中最便宜的一个。[一次真实运行](../agents.md#two-agents-on-the-same-spec)以及它发现的两个缺陷。 |
 | [`examples/agent-review.toml`](../../examples/agent-review.toml) | 规格、实现和审阅三个智能体步骤；由项目自身的测试证明实现。 |
 | [`examples/parallel-review.toml`](../../examples/parallel-review.toml) | 三个独立的智能体审阅者（安全、性能、约定）并发审阅当前 diff，然后经过测试把关。[一次真实运行](../agents.md#three-reviewers-in-parallel)发现了一个未写入文档的默认值；隔离智能体步骤后，一次运行的花费从 $3.25 降到 $0.42。 |
 | [`flot.toml`](../../flot.toml) | 本仓库自身的把关：格式、构建、lint 和测试，每一项都有证明。 |
@@ -276,10 +280,10 @@ Windows 作业对象（job object），所以超时或 Ctrl-C 会把它们全部
 
 文档为英文。
 
-- [编写流程](../flows.md)：步骤、键、收据、声明、重试（attempts）、预算、并发、输出和受保护的证明。
+- [编写流程](../flows.md)：步骤、键、收据、声明、重试（attempts）、候选比较（candidates）、预算、并发、输出和受保护的证明。
 - [CLI 参考](../cli.md)：命令、选择运行和流程、`--json` 与退出码。
 - [MCP 服务器](../mcp.md)：注册、工具、回复、错误和取消。
-- [运行编码智能体](../agents.md)：一次端到端的智能体运行、带反馈的重试、花费与成本上限。
+- [运行编码智能体](../agents.md)：一次端到端的智能体运行、带反馈的重试、两个智能体的比较、花费与成本上限。
 - [证据、打包与信任](../evidence.md)：打包、签名、密钥更换、信任列表和 `.flot` 存储。
 - [架构](../architecture.md)：分层、强制的依赖规则和当前范围。
 

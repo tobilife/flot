@@ -10,6 +10,20 @@
   any other receipt; their spend counts toward the run and its ceiling.
 - `examples/slugify`: the implementer has two attempts with feedback, and can
   no longer read the acceptance check, which a real run showed it did.
+- `candidates = [...]` on a step: one run executes it once per candidate
+  (`$FLOT_CANDIDATE` names it), each in its own copy of the project inside the
+  store, proves each, and keeps the first that held, by known and then lower
+  cost, then by order; its outputs are written back. The manifest lists the
+  candidates not kept, `flot show` names them, `verify` checks the choice
+  again from the recorded spend, and `bundle`, `import` and `gc` keep their
+  receipts.
+- `flot log STEP --candidate NAME --attempt N`, and the same arguments on
+  `flot_step_output`, read a candidate not kept or an attempt that did not
+  hold.
+- A metrics report without `cost_usd` is an unknown cost, not $0: `flot run`
+  counts such steps as "without cost", and the cost ceiling names them.
+- `examples/slugify/compare.toml`: Claude Code and Codex implement the spec as
+  two candidates.
 - Windows support; the whole suite runs on Windows (build 26300, and
   `windows-latest` in CI):
   - steps run in the `sh` of Git for Windows (on `PATH`, else beside

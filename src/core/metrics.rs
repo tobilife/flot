@@ -9,8 +9,9 @@
 //! { "input_tokens": 1200, "output_tokens": 340, "cost_usd": 0.0123 }
 //! ```
 //!
-//! Every key is optional. A step that writes nothing is *silent*: its cost is
-//! unknown, which flot reports as unknown rather than as zero.
+//! Every key is optional. A step that writes nothing is *silent*, and one that
+//! writes no `cost_usd` is *unpriced*: either way its cost is unknown, which
+//! flot reports as unknown rather than as zero.
 //!
 //! Spend is an observation, never part of a receipt's identity — two honest
 //! runs of the same work can bill differently.
@@ -25,7 +26,9 @@ use serde_json::Value;
 pub struct Metrics {
     pub input_tokens: u64,
     pub output_tokens: u64,
-    pub cost_micro_usd: u64,
+    /// `None` when the report gave tokens but no cost, as an agent on a
+    /// subscription does: unknown, not free.
+    pub cost_micro_usd: Option<u64>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -38,6 +41,10 @@ pub struct Spend {
     pub reporting_steps: usize,
     /// Executed steps that reported nothing. Their cost is unknown, not zero.
     pub silent_steps: usize,
+    /// Executed steps that reported metrics without a cost. Their cost is
+    /// unknown too.
+    #[serde(default)]
+    pub unpriced_steps: usize,
     /// Recorded by receipts this run reused, so not spent again.
     pub reused_cost_micro_usd: u64,
 }
@@ -48,7 +55,10 @@ impl Metrics {
         Metrics {
             input_tokens: self.input_tokens.saturating_add(other.input_tokens),
             output_tokens: self.output_tokens.saturating_add(other.output_tokens),
-            cost_micro_usd: self.cost_micro_usd.saturating_add(other.cost_micro_usd),
+            cost_micro_usd: match (self.cost_micro_usd, other.cost_micro_usd) {
+                (Some(a), Some(b)) => Some(a.saturating_add(b)),
+                (a, b) => a.or(b),
+            },
         }
     }
 }
@@ -61,7 +71,10 @@ impl Spend {
                 // than wrap, so a total can be too high but never too low.
                 self.input_tokens = self.input_tokens.saturating_add(metrics.input_tokens);
                 self.output_tokens = self.output_tokens.saturating_add(metrics.output_tokens);
-                self.cost_micro_usd = self.cost_micro_usd.saturating_add(metrics.cost_micro_usd);
+                match metrics.cost_micro_usd {
+                    Some(cost) => self.cost_micro_usd = self.cost_micro_usd.saturating_add(cost),
+                    None => self.unpriced_steps += 1,
+                }
                 self.reporting_steps += 1;
             }
             None => self.silent_steps += 1,
@@ -69,10 +82,8 @@ impl Spend {
     }
 
     pub fn add_reused(&mut self, metrics: Option<Metrics>) {
-        if let Some(metrics) = metrics {
-            self.reused_cost_micro_usd = self
-                .reused_cost_micro_usd
-                .saturating_add(metrics.cost_micro_usd);
+        if let Some(cost) = metrics.and_then(|metrics| metrics.cost_micro_usd) {
+            self.reused_cost_micro_usd = self.reused_cost_micro_usd.saturating_add(cost);
         }
     }
 }
@@ -109,12 +120,12 @@ pub fn parse(text: &str) -> Result<(Metrics, Vec<String>)> {
         }
     };
     let cost_micro_usd = match map.get("cost_usd") {
-        None => 0,
+        None => None,
         Some(value) => {
             let dollars = value
                 .as_f64()
                 .with_context(|| format!("`cost_usd` must be a number, got {value}"))?;
-            usd_to_micro(dollars).context("`cost_usd` is out of range")?
+            Some(usd_to_micro(dollars).context("`cost_usd` is out of range")?)
         }
     };
 
@@ -159,7 +170,7 @@ mod tests {
             Metrics {
                 input_tokens: 1200,
                 output_tokens: 340,
-                cost_micro_usd: 12_300,
+                cost_micro_usd: Some(12_300),
             }
         );
         assert!(notes.is_empty());
@@ -168,7 +179,7 @@ mod tests {
     #[test]
     fn missing_keys_read_as_zero_for_that_key_only() {
         let (metrics, _) = parse(r#"{"cost_usd": 1.5}"#).unwrap();
-        assert_eq!(metrics.cost_micro_usd, 1_500_000);
+        assert_eq!(metrics.cost_micro_usd, Some(1_500_000));
         assert_eq!(metrics.input_tokens, 0);
     }
 
@@ -205,18 +216,23 @@ mod tests {
         spend.add_executed(Some(Metrics {
             input_tokens: 10,
             output_tokens: 5,
-            cost_micro_usd: 300,
+            cost_micro_usd: Some(300),
         }));
         spend.add_executed(None);
+        spend.add_executed(Some(Metrics {
+            input_tokens: 4,
+            ..Metrics::default()
+        }));
         spend.add_reused(Some(Metrics {
-            cost_micro_usd: 700,
+            cost_micro_usd: Some(700),
             ..Metrics::default()
         }));
         assert_eq!(spend.cost_micro_usd, 300);
-        assert_eq!(spend.reporting_steps, 1);
+        assert_eq!(spend.reporting_steps, 2);
         assert_eq!(spend.silent_steps, 1);
+        assert_eq!(spend.unpriced_steps, 1);
         assert_eq!(spend.reused_cost_micro_usd, 700);
-        assert_eq!(spend.input_tokens, 10);
+        assert_eq!(spend.input_tokens, 14);
     }
 
     #[test]

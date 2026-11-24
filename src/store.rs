@@ -739,7 +739,12 @@ impl Store {
         if !dry_run {
             if let Ok(entries) = fs::read_dir(self.root.join("tmp")) {
                 for entry in entries.flatten() {
-                    let _ = fs::remove_file(entry.path());
+                    let path = entry.path();
+                    let _ = if path.is_dir() {
+                        fs::remove_dir_all(&path)
+                    } else {
+                        fs::remove_file(&path)
+                    };
                 }
             }
         }
@@ -896,6 +901,7 @@ mod tests {
                 claims: vec![],
                 limitations: vec![],
                 tool: ToolIdentity::default(),
+                candidate: None,
             },
             Observed::default(),
         )

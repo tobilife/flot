@@ -231,7 +231,15 @@ impl Server {
                 count("max_bytes").unwrap_or(DEFAULT_OBJECT_BYTES),
             )?)?,
             "flot_step_output" => serde_json::to_value(workspace.read_object(
-                &workspace.step_output(&run_selector(), &required("step")?, flag("stderr"))?,
+                &workspace.step_output(
+                    &run_selector(),
+                    &required("step")?,
+                    &crate::service::OutputOf {
+                        candidate: text("candidate"),
+                        attempt: count("attempt"),
+                    },
+                    flag("stderr"),
+                )?,
                 count("max_bytes").unwrap_or(DEFAULT_OBJECT_BYTES),
             )?)?,
             "flot_runs" => serde_json::to_value(workspace.runs(count("limit").unwrap_or(20))?)?,
@@ -555,9 +563,11 @@ fn tool_catalog() -> Vec<Value> {
         tool(
             "flot_step_output",
             Effect::Reads,
-            "Read the complete output one step of a run printed, such as the failing test log behind a trimmed preview.",
+            "Read the complete output one step of a run printed, such as the failing test log behind a trimmed preview. By default the receipt the run kept; `candidate` and `attempt` read a candidate it did not keep or an attempt that did not hold.",
             json!({
                 "step": { "type": "string", "description": "Step id." },
+                "candidate": { "type": "string", "description": "Another candidate the run executed; defaults to the kept one." },
+                "attempt": { "type": "integer", "minimum": 1, "description": "Attempt number from 1; defaults to the last." },
                 "run": { "type": "string", "description": "Run selector; defaults to latest." },
                 "stderr": { "type": "boolean", "description": "Read stderr instead of stdout." },
                 "max_bytes": { "type": "integer", "minimum": 1, "description": "Inline byte ceiling; the complete object stays retrievable." }

@@ -80,7 +80,7 @@ from the shell.
 | `flot_verify` | re-authenticate a run from the store |
 | `flot_diff` | compare two runs by receipt identity; `left` defaults to `latest~1`, `right` to `latest` |
 | `flot_receipt` | one receipt, by id or hex prefix |
-| `flot_step_output` | complete output of one step of a run, by step id (`step`, `run`, `stderr`, `max_bytes`) |
+| `flot_step_output` | complete output of one step of a run, by step id (`step`, `run`, `candidate`, `attempt`, `stderr`, `max_bytes`) |
 | `flot_read_object` | one stored object by digest, with `max_bytes` |
 | `flot_runs` | recorded runs with verdicts and roots, and any that cannot be read |
 

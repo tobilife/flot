@@ -103,6 +103,7 @@ mod tests {
         RunStep {
             observed_digest: String::new(),
             attempts: Vec::new(),
+            candidates: Vec::new(),
             step_id: id.into(),
             receipt_id: receipt.into(),
             status,

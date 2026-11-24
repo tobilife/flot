@@ -109,6 +109,15 @@ pub struct RunSummary {
     pub imported: bool,
 }
 
+/// Which execution of a step [`Workspace::step_output`] reads.
+#[derive(Debug, Clone, Default)]
+pub struct OutputOf {
+    /// A candidate by name; by default, the one the run kept.
+    pub candidate: Option<String>,
+    /// An attempt, numbered from 1; by default, the last.
+    pub attempt: Option<usize>,
+}
+
 /// A stored object under a delivery budget. The complete object stays
 /// retrievable; `recovery` says how when the view is cut.
 #[derive(Debug, Clone, Serialize)]
@@ -318,8 +327,16 @@ impl Workspace {
 
     /// The digest of the complete output one step of a run printed: stdout,
     /// or stderr when `stderr`. Read it with [`Workspace::object`] or
-    /// [`Workspace::read_object`].
-    pub fn step_output(&self, run: &str, step: &str, stderr: bool) -> Result<String> {
+    /// [`Workspace::read_object`]. By default that is the receipt the run
+    /// kept; `which` can name another candidate the run executed, an earlier
+    /// attempt, or both.
+    pub fn step_output(
+        &self,
+        run: &str,
+        step: &str,
+        which: &OutputOf,
+        stderr: bool,
+    ) -> Result<String> {
         let manifest = self.store()?.resolve_run(run)?;
         let Some(entry) = manifest.steps.iter().find(|entry| entry.step_id == step) else {
             let steps: Vec<&str> = manifest
@@ -333,7 +350,61 @@ impl Workspace {
                 steps.join(", ")
             );
         };
-        let identity = self.receipt(&entry.receipt_id)?.identity;
+        // The receipts one candidate's attempts left, oldest first.
+        let mut tries: Vec<&str> = Vec::new();
+        let kept = self.receipt(&entry.receipt_id)?;
+        let other = match which.candidate.as_deref() {
+            Some(name) if kept.identity.candidate.as_deref() != Some(name) => {
+                let Some(other) = entry.candidates.iter().find(|c| c.name == name) else {
+                    let ran: Vec<&str> = kept
+                        .identity
+                        .candidate
+                        .as_deref()
+                        .into_iter()
+                        .chain(entry.candidates.iter().map(|c| c.name.as_str()))
+                        .collect();
+                    if ran.is_empty() {
+                        bail!("step `{step}` of run {} has no candidates", manifest.run_id);
+                    }
+                    bail!(
+                        "step `{step}` of run {} ran no candidate `{name}`; it ran {}",
+                        manifest.run_id,
+                        ran.join(", ")
+                    );
+                };
+                Some(other)
+            }
+            _ => None,
+        };
+        match other {
+            Some(other) => {
+                tries.extend(other.attempts.iter().map(|a| a.receipt_id.as_str()));
+                tries.push(&other.receipt_id);
+            }
+            None => {
+                tries.extend(entry.attempts.iter().map(|a| a.receipt_id.as_str()));
+                tries.push(&entry.receipt_id);
+            }
+        }
+        let receipt_id = match which.attempt {
+            None => tries[tries.len() - 1],
+            Some(number) if (1..=tries.len()).contains(&number) => tries[number - 1],
+            Some(number) => bail!(
+                "attempt {number} is not recorded: step `{step}`{} of run {} took {} attempt(s)",
+                which
+                    .candidate
+                    .as_deref()
+                    .map(|name| format!(" candidate {name}"))
+                    .unwrap_or_default(),
+                manifest.run_id,
+                tries.len()
+            ),
+        };
+        let identity = if receipt_id == kept.receipt_id {
+            kept.identity
+        } else {
+            self.receipt(receipt_id)?.identity
+        };
         Ok(if stderr {
             identity.stderr_digest
         } else {

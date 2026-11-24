@@ -122,6 +122,12 @@ pub enum Command {
         /// The step's stderr instead of its stdout.
         #[arg(long)]
         stderr: bool,
+        /// Another candidate the run executed, instead of the one it kept.
+        #[arg(long, value_name = "NAME")]
+        candidate: Option<String>,
+        /// An earlier attempt, numbered from 1, instead of the last.
+        #[arg(long, value_name = "N", value_parser = clap::value_parser!(u32).range(1..))]
+        attempt: Option<u32>,
     },
     /// Write a run's receipts and output objects to one portable file.
     Bundle {
@@ -384,9 +390,19 @@ fn dispatch(
             std::io::stdout().write_all(&workspace.object(object)?)?;
             Ok(ExitCode::SUCCESS)
         }
-        Command::Log { step, run, stderr } => {
+        Command::Log {
+            step,
+            run,
+            stderr,
+            candidate,
+            attempt,
+        } => {
             use std::io::Write;
-            let digest = workspace.step_output(run, step, *stderr)?;
+            let which = crate::service::OutputOf {
+                candidate: candidate.clone(),
+                attempt: attempt.map(|number| number as usize),
+            };
+            let digest = workspace.step_output(run, step, &which, *stderr)?;
             std::io::stdout().write_all(&workspace.object(&digest)?)?;
             Ok(ExitCode::SUCCESS)
         }
@@ -662,7 +678,7 @@ fn render_run(report: &RunReport) {
             "ran"
         };
         say!(
-            "{:<8} {:<20} {:<9} {}ms  claims {}v/{}u/{}r  receipt {}{}",
+            "{:<8} {:<20} {:<9} {}ms  claims {}v/{}u/{}r  receipt {}{}{}",
             mode,
             step.step_id,
             step.status.label(),
@@ -671,6 +687,10 @@ fn render_run(report: &RunReport) {
             step.claims.unverified,
             step.claims.refuted,
             digest::short(&step.receipt_id),
+            step.candidate
+                .as_ref()
+                .map(|name| format!("  candidate {name}"))
+                .unwrap_or_default(),
             if step.attempts > 1 {
                 format!("  attempt {}", step.attempts)
             } else {
@@ -738,6 +758,9 @@ fn render_spend(manifest: &RunManifest) {
     );
     if spend.silent_steps > 0 {
         line.push_str(&format!(", {} silent", spend.silent_steps));
+    }
+    if spend.unpriced_steps > 0 {
+        line.push_str(&format!(", {} without cost", spend.unpriced_steps));
     }
     line.push(')');
     if spend.reused_cost_micro_usd > 0 {
@@ -811,6 +834,13 @@ fn render_detail(detail: &RunDetail) {
                 "      attempt {}  receipt {}  did not hold",
                 number + 1,
                 digest::short(&attempt.receipt_id)
+            );
+        }
+        for candidate in &step.candidates {
+            say!(
+                "      candidate {}  receipt {}  not kept",
+                candidate.name,
+                digest::short(&candidate.receipt_id)
             );
         }
         if let Some(claims) = detail.step_claims.get(&step.step_id) {

@@ -67,6 +67,11 @@ It pays off when:
 - **Several agents work on one change.** Reviewers run concurrently under a
   cost ceiling, and each one's spend is recorded: isolating the three
   reviewers in `parallel-review` cut a run from $3.25 to $0.42.
+- **You want to know which agent does a task best.** A step with
+  `candidates` runs each agent or model in its own copy of the project, proves
+  each one with the same check, and keeps the cheapest that held: in a real
+  run Claude Code and Codex both passed, and Claude was kept at $0.10 because
+  Codex reported tokens but no cost.
 - **Someone else has to trust the result.** `flot bundle` gives a reviewer or
   another machine one file to import and verify; signatures and their own
   trust list decide whose receipts count.
@@ -231,6 +236,7 @@ list and the `.flot` store.
 | Flow | What it shows |
 |---|---|
 | [`examples/slugify`](examples/slugify/flot.toml) | One agent implements a spec, a check no agent wrote proves it, a second agent reviews. Run end to end against Claude Code; [the full story](docs/agents.md#a-real-run-end-to-end) includes the bug it caught in flot itself. With isolated agent steps a fresh run costs $0.48. |
+| [`examples/slugify/compare.toml`](examples/slugify/compare.toml) | Claude Code and Codex implement the same spec as two candidates; the same check proves each, and the cheapest that held is kept. [One real run](docs/agents.md#two-agents-on-the-same-spec) and the two bugs it found. |
 | [`examples/agent-review.toml`](examples/agent-review.toml) | A spec, an implementation and a review as three agent steps; the project's tests prove the implementation. |
 | [`examples/parallel-review.toml`](examples/parallel-review.toml) | Three independent agent reviewers (security, performance, contracts) of the current diff, run concurrently, then a test gate. [One real run](docs/agents.md#three-reviewers-in-parallel) found an undocumented default; isolating the agent steps cut a run from $3.25 to $0.42. |
 | [`flot.toml`](flot.toml) | This repository's own gate: format, build, lint and test, each with a proof. |
@@ -312,10 +318,10 @@ with `flot --version`, the flow file, the command you ran and its output.
 
 ## Documentation
 
-- [Writing flows](docs/flows.md): steps, keys, receipts, claims, attempts, budgets, concurrency, outputs and guarded proofs.
+- [Writing flows](docs/flows.md): steps, keys, receipts, claims, attempts, candidates, budgets, concurrency, outputs and guarded proofs.
 - [CLI reference](docs/cli.md): commands, selecting runs and flows, `--json` and exit codes.
 - [MCP server](docs/mcp.md): registration, tools, replies, errors and cancellation.
-- [Running coding agents](docs/agents.md): an end-to-end agent run, attempts with feedback, spend and the cost ceiling.
+- [Running coding agents](docs/agents.md): an end-to-end agent run, attempts with feedback, two agents compared, spend and the cost ceiling.
 - [Evidence, bundles and trust](docs/evidence.md): bundles, signing, key rotation, the trust list and the `.flot` store.
 - [Architecture](docs/architecture.md): layers, enforced dependency rules and current scope.
 

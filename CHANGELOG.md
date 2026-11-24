@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.3
 
 - `attempts = N` on a step: one run executes it up to N times until it holds,
   and each later attempt gets `$FLOT_FEEDBACK`, a file saying why the previous

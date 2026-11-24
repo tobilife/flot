@@ -7,8 +7,8 @@ branding:
 
 inputs:
   version:
-    description: flot release to install, such as 0.2.2; `path` uses the flot already on PATH.
-    default: "0.2.2"
+    description: flot release to install, such as 0.2.3; `path` uses the flot already on PATH.
+    default: "0.2.3"
   working-directory:
     description: Directory of the flow; flot finds the nearest flot.toml at or above it.
     default: "."

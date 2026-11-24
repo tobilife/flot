@@ -439,6 +439,11 @@ exist) the step is not run: it fails with "could not run: its sandbox cannot
 be enforced here" and the reason. The policy is part of the step key. The
 proof runs unconfined, like any proof, and so does the rest of the flow.
 
+Tested where both are enforced: WSL2 with kernel 6.18 (Landlock ABI 7), and
+GitHub's `ubuntu-latest` runners, which refuse `unshare -Urn` (it maps root)
+but let flot create the namespaces it needs. The suite runs the same test on
+macOS and Windows, where the step is not run.
+
 Landlock needs stable inodes: on file systems without them, such as WSL's
 `/mnt` drives (9p), writes beneath an allowed path are denied too, so a
 confined step fails there rather than escaping.

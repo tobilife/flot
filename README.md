@@ -20,7 +20,7 @@
 
 <code>cargo install flot-cli</code>
 
-Latest release **0.2.2**: long step output shows its first and last lines, `flot log` prints all of it, `flot diff` compares the last two runs, and wildcard inputs skip what git ignores · [changelog](CHANGELOG.md)
+Latest release **0.2.3**: proofs held to a git revision, scope and sandbox for steps, attempts and candidates, run search, sharing through git, a GitHub action, a Claude Code plugin, and Windows · [changelog](CHANGELOG.md)
 
 </div>
 
@@ -104,7 +104,8 @@ cargo install flot-cli
 ```
 
 The crate is `flot-cli`; the command it installs is `flot`. Prebuilt binaries
-for Linux (x86_64, aarch64) and macOS (x86_64, arm64) are on the
+for Linux (x86_64, aarch64), macOS (x86_64, arm64) and Windows (x86_64, zip)
+are on the
 [releases page](https://github.com/tobilife/flot/releases/latest). For the
 latest `main` instead of the latest release, use
 `cargo install --git https://github.com/tobilife/flot`.

@@ -22,7 +22,7 @@ jobs:
       pull-requests: write   # for the comment
     steps:
       - uses: actions/checkout@v4
-      - uses: tobilife/flot@v0.2.2
+      - uses: tobilife/flot@v0.2.3
 ```
 
 The report goes to the job summary and, on a pull request, into one comment

@@ -20,7 +20,7 @@
 
 <code>cargo install flot-cli</code>
 
-최신 릴리스 **0.2.2**: 긴 단계 출력은 앞과 끝을 함께 보여 주고, `flot log`로 전체를 보며, `flot diff`는 최근 두 실행을 비교하고, 와일드카드 입력은 git이 무시하는 파일을 건너뜁니다 · [변경 기록](../../CHANGELOG.md)
+최신 릴리스 **0.2.3**: git 리비전에 고정된 증명, 단계의 변경 범위와 샌드박스, 재시도와 후보 비교, 실행 검색, git을 통한 공유, GitHub 액션, Claude Code 플러그인, Windows 지원 · [변경 기록](../../CHANGELOG.md)
 
 </div>
 
@@ -95,8 +95,8 @@
 cargo install flot-cli
 ```
 
-크레이트 이름은 `flot-cli`이고, 설치되는 명령은 `flot`입니다. Linux(x86_64, aarch64)와
-macOS(x86_64, arm64)용 실행 파일은 [릴리스 페이지](https://github.com/tobilife/flot/releases/latest)에
+크레이트 이름은 `flot-cli`이고, 설치되는 명령은 `flot`입니다. Linux(x86_64, aarch64),
+macOS(x86_64, arm64), Windows(x86_64, zip)용 실행 파일은 [릴리스 페이지](https://github.com/tobilife/flot/releases/latest)에
 있습니다. 릴리스가 아닌 최신 `main`을 쓰려면
 `cargo install --git https://github.com/tobilife/flot`을 사용하세요.
 

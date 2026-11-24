@@ -20,7 +20,7 @@
 
 <code>cargo install flot-cli</code>
 
-最新版本 **0.2.2**：较长的步骤输出同时显示开头和结尾，`flot log` 打印完整输出，`flot diff` 比较最近两次运行，通配输入会跳过 git 忽略的文件 · [更新日志](../../CHANGELOG.md)
+最新版本 **0.2.3**：固定到 git 修订的证明、步骤的变更范围与沙箱、重试与候选比较、运行搜索、通过 git 共享、GitHub Action、Claude Code 插件，以及 Windows 支持 · [更新日志](../../CHANGELOG.md)
 
 </div>
 
@@ -86,8 +86,8 @@
 cargo install flot-cli
 ```
 
-crate 名为 `flot-cli`，安装的命令是 `flot`。Linux（x86_64、aarch64）和
-macOS（x86_64、arm64）的预编译二进制文件见[发布页面](https://github.com/tobilife/flot/releases/latest)。
+crate 名为 `flot-cli`，安装的命令是 `flot`。Linux（x86_64、aarch64）、
+macOS（x86_64、arm64）和 Windows（x86_64，zip）的预编译二进制文件见[发布页面](https://github.com/tobilife/flot/releases/latest)。
 如需最新的 `main` 而不是最新发布版，请使用
 `cargo install --git https://github.com/tobilife/flot`。
 

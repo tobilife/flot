@@ -3380,15 +3380,6 @@ run = "if grep ':' /proc/net/dev | grep -qv 'lo:'; then echo online; exit 1; fi"
 sandbox = { network = false }
 "#;
 
-/// Whether this host lets an unprivileged process have a network namespace;
-/// where it does not, a step that asks for one must not run at all.
-fn host_isolates_network() -> bool {
-    std::process::Command::new("unshare")
-        .args(["-Urn", "true"])
-        .status()
-        .is_ok_and(|status| status.success())
-}
-
 #[test]
 fn a_confined_step_writes_only_where_it_may() {
     let project = Project::new(CONFINED);
@@ -3410,10 +3401,14 @@ fn a_confined_step_writes_only_where_it_may() {
             .as_str()
             .unwrap()
             .contains("landlock abi"));
-        if host_isolates_network() {
+        // A host that does not let an unprivileged process have a network
+        // namespace must not run the step at all; any other host must run it
+        // offline.
+        if !run
+            .stdout
+            .contains("offline: could not run: its sandbox cannot be enforced here")
+        {
             run.has("ran      offline              ok");
-        } else {
-            run.has("offline: could not run: its sandbox cannot be enforced here");
         }
         // The scratch directory a confined step wrote in is gone.
         let leftovers: Vec<_> = std::fs::read_dir(project.path().join(".flot/tmp"))

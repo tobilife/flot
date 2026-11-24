@@ -386,7 +386,7 @@ pub fn digest_globs(
 }
 
 pub fn step_key(flow_name: &str, step: &Step, facts: &Facts, deps: &[DepRef]) -> String {
-    digest::canonical(&serde_json::json!({
+    let mut key = serde_json::json!({
         "schema": SCHEMA_VERSION,
         "flow": flow_name,
         "step_id": step.id,
@@ -400,7 +400,58 @@ pub fn step_key(flow_name: &str, step: &Step, facts: &Facts, deps: &[DepRef]) ->
         "outputs": step.outputs,
         "deps": deps,
         "tool": ToolIdentity::default(),
-    }))
+    });
+    // Only when set, so steps without it keep the keys they had.
+    if !step.may_change.is_empty() {
+        key["may_change"] = serde_json::json!(step.may_change);
+    }
+    digest::canonical(&key)
+}
+
+/// Every file a wildcard reaches under `root` (so not what git ignores, and
+/// never `.git` or the store), with the digest of its content.
+pub fn snapshot(root: &Path) -> Scan {
+    scan_globs(
+        root,
+        &["**/*".to_string()],
+        "project file",
+        Reach::Tracked,
+        |bytes| Ok::<_, std::convert::Infallible>(digest::bytes(bytes)),
+    )
+    .unwrap_or_else(|never| match never {})
+}
+
+/// Files created, edited or deleted between two snapshots that `step` may not
+/// change: not matched by its `may_change` or its `outputs`.
+pub fn out_of_scope(step: &Step, before: &[FileDigest], after: &[FileDigest]) -> Vec<String> {
+    let allowed: Vec<glob::Pattern> = step
+        .may_change
+        .iter()
+        .chain(&step.outputs)
+        .filter_map(|pattern| glob::Pattern::new(pattern).ok())
+        .collect();
+    let before: BTreeMap<&str, &str> = before
+        .iter()
+        .map(|file| (file.path.as_str(), file.digest.as_str()))
+        .collect();
+    let after: BTreeMap<&str, &str> = after
+        .iter()
+        .map(|file| (file.path.as_str(), file.digest.as_str()))
+        .collect();
+    let mut changed: Vec<String> = before
+        .keys()
+        .chain(after.keys())
+        .filter(|path| before.get(*path) != after.get(*path))
+        .filter(|path| {
+            !allowed
+                .iter()
+                .any(|pattern| pattern.matches_with(path, match_options()))
+        })
+        .map(|path| path.to_string())
+        .collect();
+    changed.sort();
+    changed.dedup();
+    changed
 }
 
 /// Upstream receipt references in need-name order, or `None` when a dependency

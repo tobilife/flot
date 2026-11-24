@@ -3266,3 +3266,61 @@ fn guard_names_the_files_that_prove_the_work() {
     let allowed = project.flot_stdin(&["guard", "--hook"], &payload(absolute.to_str().unwrap()));
     assert_eq!(allowed.ok().stdout.trim(), "");
 }
+
+const SCOPED: &str = r#"
+[flow]
+name = "scoped"
+max_parallel = 2
+
+[[step]]
+id = "edit"
+run = "sleep 0.3; echo new > src/lib.txt; mkdir -p out; echo built > out/report.txt"
+may_change = ["src/**"]
+outputs = ["out/report.txt"]
+claims = ["src/lib.txt was rewritten"]
+verify = "grep -q new src/lib.txt"
+
+[[step]]
+id = "busy"
+run = "for i in 1 2 3 4 5 6 7 8 9 10; do echo $i > busy.txt; sleep 0.1; done"
+"#;
+
+#[test]
+fn a_step_that_changes_files_outside_may_change_fails() {
+    let project = Project::new(SCOPED);
+    project.write("src/lib.txt", "old\n");
+    project.write("notes.txt", "keep\n");
+    project.write(".gitignore", "ignored/\n");
+    // A step beside it writes all the while; the scoped step runs alone, so
+    // none of that is laid to it, and its own output is in scope.
+    project.flot(&["run"]).ok().has("claims 1v/0u/0r");
+    project
+        .flot(&["run", "--only", "edit"])
+        .ok()
+        .has("cached   edit");
+    // A narrower scope did not judge the work, so it does not reuse it.
+    project.write("flot.toml", &SCOPED.replace("src/**", "src/lib.txt"));
+    project
+        .flot(&["run", "--only", "edit"])
+        .ok()
+        .has("ran      edit");
+
+    // Outside its scope: a new file, an edit and a deletion are all named; a
+    // file git ignores is not.
+    let strayed = SCOPED.replace(
+        "echo built > out/report.txt",
+        "echo built > out/report.txt; echo x > stray.txt; echo y >> notes.txt; rm busy.txt; mkdir -p ignored; echo z > ignored/cache",
+    );
+    project.write("flot.toml", &strayed);
+    let run = project.flot(&["run", "--only", "edit"]);
+    assert_eq!(run.code, 1, "{}", run.stdout);
+    run.has("changed files outside may_change: busy.txt, notes.txt, stray.txt")
+        .lacks("ignored/cache");
+
+    let invalid = project.flot(&["plan"]);
+    invalid.ok();
+    project.write("flot.toml", &SCOPED.replace("src/**", "../src/**"));
+    project
+        .flot(&["plan"])
+        .has("must be a relative path inside the flow root");
+}

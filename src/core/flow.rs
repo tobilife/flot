@@ -116,6 +116,12 @@ pub struct Step {
     /// written back. The others stay as evidence.
     #[serde(default)]
     pub candidates: Vec<String>,
+    /// The files the step may change, as globs relative to the flow root. When
+    /// set, a step that creates, edits or deletes any other file (outside its
+    /// `outputs`, what git ignores and the store) fails, and the step runs
+    /// with no other step beside it so that what changed is its own doing.
+    #[serde(default)]
+    pub may_change: Vec<String>,
 }
 
 impl Step {
@@ -287,6 +293,21 @@ impl Flow {
                     "step `{}` declares verify_inputs without a verify command that reads them",
                     step.id
                 );
+            }
+            for pattern in &step.may_change {
+                if !is_contained(pattern) {
+                    bail!(
+                        "step `{}` may_change `{}` must be a relative path inside the flow root",
+                        step.id,
+                        pattern
+                    );
+                }
+                glob::Pattern::new(pattern).with_context(|| {
+                    format!(
+                        "step `{}` may_change `{}` is not a valid glob",
+                        step.id, pattern
+                    )
+                })?;
             }
             for pattern in &step.outputs {
                 if !is_contained(pattern) {

@@ -12,6 +12,7 @@
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::RwLock;
 use std::time::Duration;
 
 use anyhow::{bail, Context, Result};
@@ -182,6 +183,9 @@ pub struct Runner<'a> {
     candidate: Option<String>,
     /// The revision proofs must match, when the run checks them against one.
     baseline: Option<&'a Baseline>,
+    /// Held shared while a step runs, and alone by a step with `may_change`,
+    /// so the files that changed while it ran are its own doing.
+    scope: RwLock<()>,
 }
 
 impl<'a> Runner<'a> {
@@ -192,6 +196,7 @@ impl<'a> Runner<'a> {
             store,
             candidate: None,
             baseline: None,
+            scope: RwLock::new(()),
         }
     }
 
@@ -991,6 +996,7 @@ impl<'a> Runner<'a> {
                 store: self.store,
                 candidate: Some(name.clone()),
                 baseline: self.baseline,
+                scope: RwLock::new(()),
             };
             let mut said = Vec::new();
             let (receipt, attempts) = match keying::copy_workspace(&self.root, &place, &candidate) {
@@ -1383,6 +1389,22 @@ impl<'a> Runner<'a> {
         let (mut env, metrics_path) = self.metered_env(step)?;
         env.extend(extra.clone());
         let timeout = Duration::from_secs(budget.timeout_secs);
+        let scoped = !step.may_change.is_empty();
+        // A poisoned lock guards nothing: the data is `()`.
+        let (_shared, _alone) = if scoped {
+            let alone = self
+                .scope
+                .write()
+                .unwrap_or_else(|poison| poison.into_inner());
+            (None, Some(alone))
+        } else {
+            let shared = self
+                .scope
+                .read()
+                .unwrap_or_else(|poison| poison.into_inner());
+            (Some(shared), None)
+        };
+        let before = scoped.then(|| keying::snapshot(&self.root));
         let outcome = exec::run_command(
             &step.run,
             &self.root,
@@ -1392,6 +1414,13 @@ impl<'a> Runner<'a> {
             stop,
         )
         .with_context(|| format!("step `{}` could not start", step.id))?;
+        let strayed = before.map(|before| {
+            let after = keying::snapshot(&self.root);
+            limitations.extend(before.problems);
+            limitations.extend(after.problems);
+            keying::out_of_scope(step, &before.files, &after.files)
+        });
+        drop((_shared, _alone));
         let (mut step_metrics, mut metrics_notes) = read_metrics(&metrics_path);
         if outcome.strays_stopped {
             limitations.push(
@@ -1469,6 +1498,26 @@ impl<'a> Runner<'a> {
             }
         } else {
             status
+        };
+        let status = match strayed {
+            Some(strayed) if !strayed.is_empty() => {
+                let list = strayed.join(", ");
+                if step.allow_failure {
+                    tolerated = tolerated || status.is_ok();
+                    limitations.push(format!(
+                        "changed files outside may_change ({list}), but the step is declared allow_failure"
+                    ));
+                    status
+                } else {
+                    limitations.push(format!("changed files outside may_change: {list}"));
+                    if status.is_ok() {
+                        StepStatus::Failed
+                    } else {
+                        status
+                    }
+                }
+            }
+            _ => status,
         };
 
         // Re-read what the step declared it reads. A step that edits its own

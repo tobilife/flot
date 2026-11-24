@@ -336,6 +336,45 @@ installs it for `Edit`, `Write`, `MultiEdit` and `NotebookEdit`. A shell
 command such as `sed -i` is not a file edit the hook sees; `proofs_from` is
 what catches that.
 
+## Scope
+
+`may_change` lists, as globs, the files a step may create, edit or delete. A
+step that changes any other file fails and the limitation names each one.
+Its `outputs` are in scope too. What git ignores, `.git` and the store are
+not looked at, so build trees and caches do not count, and a write there is
+not caught.
+
+```toml
+[[step]]
+id = "fix"
+run = "sh agent.sh"
+inputs = ["agent.sh"]
+may_change = ["src/**"]
+claims = ["the slug function is fixed"]
+verify = "sh check.sh"
+verify_inputs = ["check.sh"]
+```
+
+Here `agent.sh` fixes `src/slug.txt` and also rewrites the check (real
+output):
+
+```text
+$ flot run
+ran      fix                  failed    12ms  claims 0v/1u/0r  receipt 67a4796ebf56
+
+FAILED 1795531811505-1a507846ea6c  root 1a507846ea6c  29ms
+limitations:
+  - fix: changed files outside may_change: check.sh
+  - fix: claims are unverified because the step did not succeed
+```
+
+Every file the scan reaches is hashed before and after the step, so the check
+costs a read of the project per execution. A step with `may_change` runs
+alone: no other step of the run runs beside it, so what changed is its own
+doing (its proof, and candidates in their own copies, are not held back). The
+scope is part of the step key, so narrowing it runs the step again. A change
+of mode alone is not a change of content and is not reported.
+
 ## Outputs
 
 `outputs` names the files a step produces. When the step finishes

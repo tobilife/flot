@@ -44,6 +44,10 @@
 - `flot guard PATH...` names the paths whose change would touch the proofs (the
   flow file, files `verify_inputs` matches, the store); `--hook` answers a
   Claude Code `PreToolUse` payload, and the plugin installs it for file edits.
+- `may_change = [...]` on a step: a step that creates, edits or deletes a file
+  outside those globs and its `outputs` (and not ignored by git) fails, naming
+  each file. Such a step runs with no other step beside it, and the scope is
+  part of its key.
 - A metrics report without `cost_usd` is an unknown cost, not $0: `flot run`
   counts such steps as "without cost", and the cost ceiling names them.
 - `examples/slugify/compare.toml`: Claude Code and Codex implement the spec as

@@ -220,7 +220,7 @@ digest of what happened, so an edited receipt stops authenticating. The run's
 verdict is `failed`, `unverified` or `passed`, in that order of precedence.
 
 [Writing flows](docs/flows.md) covers every field: keys, receipts, claims,
-budgets, concurrency, outputs and guarded proofs.
+budgets, concurrency, outputs, guarded proofs and scope.
 
 ## What flot guarantees
 
@@ -233,6 +233,8 @@ budgets, concurrency, outputs and guarded proofs.
   it reads) leaves its claims unverified, and `flot verify --proofs-from`
   holds a recorded run to the same revision. The Claude Code plugin also
   refuses edits to those files before they happen.
+- **Changes kept in scope.** A step with `may_change = ["src/**"]` fails if
+  it creates, edits or deletes any other file that git does not ignore.
 - **Receipts you can check.** Every receipt re-hashes to its own id, and a run's
   verdict and root digest are recomputed from its receipts, never read.
   `flot verify` re-reads every stored byte.
@@ -342,7 +344,7 @@ with `flot --version`, the flow file, the command you ran and its output.
 
 ## Documentation
 
-- [Writing flows](docs/flows.md): steps, keys, receipts, claims, attempts, candidates, budgets, concurrency, outputs and guarded proofs.
+- [Writing flows](docs/flows.md): steps, keys, receipts, claims, attempts, candidates, budgets, concurrency, outputs, guarded proofs and scope.
 - [CLI reference](docs/cli.md): commands, selecting runs and flows, `--json` and exit codes.
 - [MCP server](docs/mcp.md): registration, tools, replies, errors and cancellation.
 - [Running coding agents](docs/agents.md): an end-to-end agent run, attempts with feedback, two agents compared, spend and the cost ceiling.

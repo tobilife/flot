@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- The action no longer takes `signers`: it was never run in CI, and whom CI
+  trusts is better written out in the workflow; `docs/ci.md` shows how.
+
 ## 0.2.3
 
 - `attempts = N` on a step: one run executes it up to N times until it holds,

@@ -15,9 +15,6 @@ inputs:
   run:
     description: Run the flow before checking it. With `false`, an earlier step ran it, and the latest run executed on this runner is checked.
     default: "true"
-  signers:
-    description: A file of `NAME KEY` lines, relative to the repository root, read from the base branch of a pull request (else from the commit checked out). Its keys are trusted, and runs they signed are pulled from `refs/flot/runs` first, so steps whose inputs match are reused instead of executed.
-    default: ""
   proofs-from:
     description: Git revision every proof must match. Empty means the base branch of a pull request, and none otherwise; `none` turns it off.
     default: ""
@@ -73,25 +70,6 @@ runs:
       env:
         BASE: ${{ github.base_ref }}
       run: git fetch --no-tags --depth=1 origin "+refs/heads/${BASE}:refs/remotes/origin/${BASE}"
-
-    - name: Trust signers and pull their runs
-      if: inputs.signers != ''
-      shell: bash
-      working-directory: ${{ inputs.working-directory }}
-      env:
-        SIGNERS: ${{ inputs.signers }}
-        BASE: ${{ github.base_ref }}
-      run: |
-        set -euo pipefail
-        # From the base branch: a pull request must not choose whom CI trusts.
-        rev=HEAD
-        if [ -n "$BASE" ]; then rev="origin/$BASE"; fi
-        git show "$rev:$SIGNERS" | while read -r name key; do
-          case "$name" in ''|'#'*) continue ;; esac
-          flot trust add "$name" "$key"
-        done
-        # Untrusted bundles are refused, which is not a failure of this job.
-        flot pull --require-trusted || echo "::notice::flot pull refused some runs; their steps run here instead"
 
     - name: Run the flow
       if: inputs.run == 'true'

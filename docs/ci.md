@@ -37,7 +37,6 @@ and a pull request cannot merge on a claim that a weakened check proved.
 | `working-directory` | `.` | where to look for `flot.toml` |
 | `run` | `true` | run the flow first; `false` checks the latest run an earlier step executed |
 | `proofs-from` | the base branch on a pull request | a revision every proof must match; `none` turns it off |
-| `signers` | | a file of trusted signers, see below |
 | `comment` | `true` | comment on the pull request |
 | `token` | `github.token` | token for the comment |
 
@@ -76,16 +75,15 @@ here.)
 ## Reusing a developer's signed run
 
 A run the developer signed and shared with `flot push --sign` need not be
-executed again in CI. With `signers: .github/flot-signers`, the action reads
-that file (`NAME KEY` per line, as `flot trust add` takes them; `#` starts a
-comment) **from the base branch**, trusts those keys, and runs
-`flot pull --require-trusted` before the flow. Steps whose key matches a
-trusted receipt are then reused; anything else runs in CI. The file is read
-from the base branch because a pull request that could add its own key could
-vouch for itself; protect the file on that branch too, for example with a
-`CODEOWNERS` entry.
+executed again in CI. Before the action, a step can trust the developers'
+keys and pull their runs; steps whose key matches a trusted receipt are then
+reused, and anything else runs in CI. Read the keys **from the base branch**
+(here a file of `NAME KEY` lines, as `flot trust add` takes them): a pull
+request that could add its own key could vouch for itself. Protect the file
+on that branch too, for example with a `CODEOWNERS` entry. The action does not
+do this itself; it has not been run in this repository's CI.
 
-By hand, in a clone with a fresh host key (real output):
+In a clone with a fresh host key (real output):
 
 ```text
 $ git show origin/main:.github/flot-signers | while read -r name key; do flot trust add "$name" "$key"; done

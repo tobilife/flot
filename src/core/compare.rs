@@ -96,6 +96,7 @@ mod tests {
             started_at_ms: 0,
             duration_ms: 0,
             flot_version: "test".into(),
+            refusals: Vec::new(),
         }
     }
 

@@ -697,6 +697,17 @@ impl<'a> Runner<'a> {
             .collect();
         let root_digest = RunManifest::root_of(&pairs);
         let verdict = verdict_for(&manifest_steps, totals);
+        let duration_ms = exec::millis(started.elapsed());
+        // What the guard refused since the run before this one finished,
+        // agents this run started included.
+        let previous_end = self
+            .store
+            .resolve_run("latest")
+            .map(|previous| previous.started_at_ms + previous.duration_ms)
+            .unwrap_or(0);
+        let refusals = self
+            .store
+            .refusals(previous_end, started_at_ms + duration_ms)?;
         let manifest = RunManifest {
             run_id: RunManifest::id_for(started_at_ms, &root_digest),
             flow: self.flow.meta.name.clone(),
@@ -710,8 +721,9 @@ impl<'a> Runner<'a> {
             spend,
             max_cost_micro_usd: ceiling_micro_usd,
             started_at_ms,
-            duration_ms: exec::millis(started.elapsed()),
+            duration_ms,
             flot_version: FLOT_VERSION.to_string(),
+            refusals,
         };
         self.store.save_run(&manifest)?;
         Ok(RunReport {

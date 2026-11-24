@@ -448,6 +448,20 @@ pub struct RunManifest {
     pub started_at_ms: u64,
     pub duration_ms: u64,
     pub flot_version: String,
+    /// Edits and commands the guard refused after the run before this one
+    /// executed here finished, up to the end of this one.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub refusals: Vec<Refusal>,
+}
+
+/// An edit or a shell command the guard refused an agent.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Refusal {
+    pub at_ms: u64,
+    /// The agent's tool, such as `Edit` or `Bash`.
+    pub tool: String,
+    /// What it would have touched, and why that is refused.
+    pub reasons: Vec<String>,
 }
 
 impl RunManifest {
@@ -1083,6 +1097,7 @@ mod tests {
             started_at_ms: 1,
             duration_ms: 0,
             flot_version: String::new(),
+            refusals: Vec::new(),
         }
     }
 

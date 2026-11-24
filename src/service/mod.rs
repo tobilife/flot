@@ -18,7 +18,7 @@ use serde::Serialize;
 
 use crate::core::compare::{self, RunDiff};
 use crate::core::flow::Flow;
-use crate::core::receipt::{ClaimCounts, ClaimRecord, Receipt, RunManifest, Verdict};
+use crate::core::receipt::{ClaimCounts, ClaimRecord, Receipt, Refusal, RunManifest, Verdict};
 use crate::engine::baseline::Baseline;
 use crate::engine::exec;
 use crate::engine::git::Git;
@@ -352,6 +352,24 @@ impl Workspace {
 
     fn store(&self) -> Result<Store> {
         Store::open(&self.root, keys::host_secret()?)
+    }
+
+    /// Note that the guard refused `tool` for `reasons`, for this flow's next
+    /// run to record. Only where the store already is.
+    pub fn note_refusal(&self, tool: &str, reasons: &[String]) -> Result<()> {
+        if !self
+            .root
+            .join(crate::store::STORE_DIR)
+            .join("FORMAT")
+            .is_file()
+        {
+            return Ok(());
+        }
+        self.store()?.note_refusal(&Refusal {
+            at_ms: crate::engine::exec::now_ms(),
+            tool: tool.to_string(),
+            reasons: reasons.to_vec(),
+        })
     }
 
     /// Which of `paths` (absolute) changing would touch this flow's proofs:

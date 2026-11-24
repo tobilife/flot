@@ -5,7 +5,7 @@
 //! completed with unverified claims, `3` the request itself was invalid, `4`
 //! the environment failed (IO, permissions, a busy store; retrying can help).
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use anyhow::{Context, Result};
@@ -106,7 +106,8 @@ pub enum Command {
     /// Say whether changing these files would touch the flow's proofs or
     /// decide whether they are checked. Exits 2 when one would. With
     /// --command, reads a shell command line; with --hook, a Claude Code
-    /// PreToolUse payload on stdin, answering with a denial on stdout.
+    /// PreToolUse payload on stdin, answering with a denial on stdout and
+    /// noting it in the store for the next run to record.
     Guard {
         paths: Vec<PathBuf>,
         /// Also read a shell command line for the files it writes and for
@@ -115,6 +116,11 @@ pub enum Command {
         command: Option<String>,
         #[arg(long)]
         hook: bool,
+        /// Judge every edit and shell command in Claude Code transcripts
+        /// (the PATHS, files or directories; by default ~/.claude/projects)
+        /// as the hook would now, and list what it would refuse.
+        #[arg(long, conflicts_with_all = ["command", "hook"])]
+        replay: bool,
     },
     /// Summarize a recorded run.
     Show {
@@ -374,6 +380,253 @@ fn home_relative(path: &str) -> PathBuf {
     }
 }
 
+/// Why downloaded code piped into an interpreter is refused.
+const REMOTE: &str = "it runs code fetched from the network, which no step or receipt records";
+
+/// The tools whose calls the Claude Code hook sees.
+const GUARDED_TOOLS: [&str; 5] = ["Edit", "Write", "MultiEdit", "NotebookEdit", "Bash"];
+
+/// What one tool call would change: files it names, and shell command lines
+/// with the directory they run in.
+#[derive(Default)]
+struct Call {
+    targets: Vec<PathBuf>,
+    commands: Vec<(PathBuf, String)>,
+}
+
+impl Call {
+    /// A tool's input as Claude Code gives it, run from `base`.
+    fn of(base: &Path, input: &serde_json::Value) -> Call {
+        let mut call = Call::default();
+        for key in ["file_path", "notebook_path"] {
+            if let Some(path) = input[key].as_str() {
+                call.targets.push(base.join(path));
+            }
+        }
+        if let Some(command) = input["command"].as_str() {
+            call.commands
+                .push((base.to_path_buf(), command.to_string()));
+        }
+        call
+    }
+}
+
+/// What the guard refuses of one call, and the flows it consulted.
+struct Judged {
+    guarded: Vec<Guarded>,
+    /// Downloaded code piped into an interpreter, as the command spelled it.
+    remote: Vec<String>,
+    flows: Vec<Workspace>,
+}
+
+impl Judged {
+    /// Each refusal in a sentence: the protected files first, then the
+    /// downloaded code.
+    fn reasons(&self) -> Vec<String> {
+        self.guarded
+            .iter()
+            .map(|found| format!("{} is protected: {}", found.path, found.reason))
+            .chain(
+                self.remote
+                    .iter()
+                    .map(|shape| format!("`{shape}` is refused: {REMOTE}")),
+            )
+            .collect()
+    }
+}
+
+/// Judge a call against `workspace`'s flow and, when `nearest`, the flow
+/// nearest each file it changes: an edit in a subproject touches that
+/// subproject's proofs.
+fn judge(workspace: &Workspace, nearest: bool, call: Call) -> Result<Judged> {
+    let mut targets = call.targets;
+    let mut remote = Vec::new();
+    for (dir, command) in &call.commands {
+        let reading = shell::read(command);
+        targets.extend(
+            reading
+                .writes
+                .iter()
+                .map(|path| dir.join(home_relative(path))),
+        );
+        remote.extend(reading.remote_code);
+    }
+    let mut flows = vec![workspace.clone()];
+    if nearest {
+        for target in &targets {
+            let Some(dir) = target.ancestors().skip(1).find(|dir| dir.is_dir()) else {
+                continue;
+            };
+            let found = Workspace::locate(dir, None)?;
+            if !flows
+                .iter()
+                .any(|flow| flow.flow_path() == found.flow_path())
+            {
+                flows.push(found);
+            }
+        }
+    }
+    // One reason per file: flows in one repository guard its harness files
+    // alike.
+    let guarded = targets
+        .iter()
+        .filter_map(|target| {
+            flows
+                .iter()
+                .find_map(|flow| flow.guard(std::slice::from_ref(target)).pop())
+        })
+        .collect();
+    // Downloaded code is refused where a flow is, as files are.
+    if !flows.iter().any(|flow| flow.flow_path().is_file()) {
+        remote.clear();
+    }
+    Ok(Judged {
+        guarded,
+        remote,
+        flows,
+    })
+}
+
+/// One tool call the hook would have refused, read back from a transcript.
+#[derive(Serialize)]
+struct Replayed {
+    transcript: String,
+    at: String,
+    tool: String,
+    cwd: String,
+    reasons: Vec<String>,
+}
+
+#[derive(Serialize, Default)]
+struct Replay {
+    transcripts: usize,
+    /// Calls to the tools the hook sees.
+    calls: usize,
+    /// Of those, calls where a flow was found.
+    in_a_flow: usize,
+    /// Calls whose working directory is gone, so they were not judged.
+    unjudged: usize,
+    refused: Vec<Replayed>,
+}
+
+/// Judge every edit and shell command in Claude Code transcripts (JSONL
+/// files, or directories holding them; by default `~/.claude/projects`) as
+/// the hook would today, against the flows as they are now.
+fn replay_transcripts(paths: &[PathBuf], json: bool) -> Result<ExitCode> {
+    let roots: Vec<PathBuf> = if paths.is_empty() {
+        let home = std::env::var_os("HOME")
+            .or_else(|| std::env::var_os("USERPROFILE"))
+            .context("no home directory to find ~/.claude/projects in; name the transcripts")?;
+        vec![PathBuf::from(home).join(".claude").join("projects")]
+    } else {
+        paths.to_vec()
+    };
+    let mut files = Vec::new();
+    for root in &roots {
+        transcripts_in(root, &mut files)
+            .with_context(|| format!("cannot read {}", root.display()))?;
+    }
+    files.sort();
+    let mut replay = Replay {
+        transcripts: files.len(),
+        ..Replay::default()
+    };
+    let mut seen = std::collections::HashSet::new();
+    for file in &files {
+        let text =
+            std::fs::read(file).with_context(|| format!("cannot read {}", file.display()))?;
+        for line in text.split(|&byte| byte == b'\n') {
+            let Ok(entry) = serde_json::from_slice::<serde_json::Value>(line) else {
+                continue;
+            };
+            if entry["type"] != "assistant" {
+                continue;
+            }
+            let Some(content) = entry["message"]["content"].as_array() else {
+                continue;
+            };
+            for item in content {
+                let tool = item["name"].as_str().unwrap_or_default();
+                if item["type"] != "tool_use" || !GUARDED_TOOLS.contains(&tool) {
+                    continue;
+                }
+                // A call is written again when its message is.
+                if let Some(id) = item["id"].as_str() {
+                    if !seen.insert(id.to_string()) {
+                        continue;
+                    }
+                }
+                replay.calls += 1;
+                let cwd = entry["cwd"].as_str().unwrap_or_default();
+                let base = PathBuf::from(cwd);
+                if cwd.is_empty() || !base.is_dir() {
+                    replay.unjudged += 1;
+                    continue;
+                }
+                let workspace = Workspace::locate(&base, None)?;
+                let judged = judge(&workspace, true, Call::of(&base, &item["input"]))?;
+                if judged.flows.iter().any(|flow| flow.flow_path().is_file()) {
+                    replay.in_a_flow += 1;
+                }
+                let reasons = judged.reasons();
+                if !reasons.is_empty() {
+                    replay.refused.push(Replayed {
+                        transcript: file.display().to_string(),
+                        at: entry["timestamp"].as_str().unwrap_or_default().to_string(),
+                        tool: tool.to_string(),
+                        cwd: cwd.to_string(),
+                        reasons,
+                    });
+                }
+            }
+        }
+    }
+    if json {
+        print_json(&replay)?;
+    } else {
+        for found in &replay.refused {
+            say!(
+                "refused  {}  {}  {}: {}",
+                found.at,
+                found.tool,
+                found.cwd,
+                found.reasons.join("; ")
+            );
+        }
+        say!(
+            "{} transcripts, {} edits and commands: {} where a flow is, {} refused, {} not judged because their directory is gone",
+            replay.transcripts,
+            replay.calls,
+            replay.in_a_flow,
+            replay.refused.len(),
+            replay.unjudged
+        );
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
+/// The `.jsonl` files at `path`: the file itself, or those beneath it.
+fn transcripts_in(path: &Path, files: &mut Vec<PathBuf>) -> std::io::Result<()> {
+    if !path.is_dir() {
+        std::fs::metadata(path)?;
+        files.push(path.to_path_buf());
+        return Ok(());
+    }
+    for entry in std::fs::read_dir(path)? {
+        let entry = entry?;
+        let path = entry.path();
+        if entry.file_type()?.is_dir() {
+            transcripts_in(&path, files)?;
+        } else if path
+            .extension()
+            .is_some_and(|extension| extension == "jsonl")
+        {
+            files.push(path);
+        }
+    }
+    Ok(())
+}
+
 fn dispatch(
     cli: &Cli,
     workspace: &Workspace,
@@ -411,13 +664,20 @@ fn dispatch(
             paths,
             command,
             hook,
+            replay,
         } => {
             let cwd = std::env::current_dir().context("cannot read the current directory")?;
-            let mut targets: Vec<PathBuf> = paths.iter().map(|path| cwd.join(path)).collect();
-            let mut commands: Vec<(PathBuf, String)> = command
-                .iter()
-                .map(|command| (cwd.clone(), command.clone()))
-                .collect();
+            if *replay {
+                return replay_transcripts(paths, cli.json);
+            }
+            let mut call = Call {
+                targets: paths.iter().map(|path| cwd.join(path)).collect(),
+                commands: command
+                    .iter()
+                    .map(|command| (cwd.clone(), command.clone()))
+                    .collect(),
+            };
+            let mut tool = String::new();
             if *hook {
                 let mut payload = String::new();
                 std::io::Read::read_to_string(&mut std::io::stdin(), &mut payload)
@@ -425,90 +685,54 @@ fn dispatch(
                 let payload: serde_json::Value =
                     serde_json::from_str(&payload).context("the hook payload is not JSON")?;
                 let base = payload["cwd"].as_str().map(PathBuf::from).unwrap_or(cwd);
-                for key in ["file_path", "notebook_path"] {
-                    if let Some(path) = payload["tool_input"][key].as_str() {
-                        targets.push(base.join(path));
-                    }
-                }
-                if let Some(command) = payload["tool_input"]["command"].as_str() {
-                    commands.push((base, command.to_string()));
-                }
+                let asked = Call::of(&base, &payload["tool_input"]);
+                call.targets.extend(asked.targets);
+                call.commands.extend(asked.commands);
+                tool = payload["tool_name"]
+                    .as_str()
+                    .unwrap_or("a tool")
+                    .to_string();
             }
-            let mut remote = Vec::new();
-            for (dir, command) in &commands {
-                let reading = shell::read(command);
-                targets.extend(
-                    reading
-                        .writes
-                        .iter()
-                        .map(|path| dir.join(home_relative(path))),
-                );
-                remote.extend(reading.remote_code);
-            }
-            // This directory's flow, and the flow nearest each file: an edit
-            // in a subproject touches that subproject's proofs.
-            let mut flows = vec![workspace.clone()];
-            if cli.file.is_none() {
-                for target in &targets {
-                    let Some(dir) = target.ancestors().skip(1).find(|dir| dir.is_dir()) else {
-                        continue;
-                    };
-                    let found = Workspace::locate(dir, None)?;
-                    if !flows
-                        .iter()
-                        .any(|flow| flow.flow_path() == found.flow_path())
-                    {
-                        flows.push(found);
-                    }
-                }
-            }
-            // One reason per file: flows in one repository guard its harness
-            // files alike.
-            let guarded: Vec<_> = targets
-                .iter()
-                .filter_map(|target| {
-                    flows
-                        .iter()
-                        .find_map(|flow| flow.guard(std::slice::from_ref(target)).pop())
-                })
-                .collect();
-            // Downloaded code is refused where a flow is, as files are.
-            if !flows.iter().any(|flow| flow.flow_path().is_file()) {
-                remote.clear();
-            }
-            const REMOTE: &str =
-                "it runs code fetched from the network, which no step or receipt records";
+            let judged = judge(workspace, cli.file.is_none(), call)?;
             if *hook {
                 // Claude Code reads a denial on stdout; the exit stays 0 so
                 // the hook's `|| true` keeps a failure to run from blocking.
-                let mut reasons: Vec<String> = Vec::new();
-                if !guarded.is_empty() {
-                    let protected: Vec<String> = guarded
-                        .iter()
-                        .map(|found| format!("{} is protected: {}", found.path, found.reason))
-                        .collect();
-                    reasons.push(format!(
+                let reasons = judged.reasons();
+                if reasons.is_empty() {
+                    return Ok(ExitCode::SUCCESS);
+                }
+                let mut said: Vec<String> = Vec::new();
+                if !judged.guarded.is_empty() {
+                    said.push(format!(
                         "{}. Changing it would void the evidence; fix the work under test instead, or ask the user to change the check",
-                        protected.join("; ")
+                        reasons[..judged.guarded.len()].join("; ")
                     ));
                 }
-                for shape in &remote {
-                    reasons.push(format!(
-                        "`{shape}` is refused: {REMOTE}. Download the file, read it, and run it as its own command, or ask the user"
+                for reason in &reasons[judged.guarded.len()..] {
+                    said.push(format!(
+                        "{reason}. Download the file, read it, and run it as its own command, or ask the user"
                     ));
                 }
-                if !reasons.is_empty() {
-                    print_json(&serde_json::json!({
-                        "hookSpecificOutput": {
-                            "hookEventName": "PreToolUse",
-                            "permissionDecision": "deny",
-                            "permissionDecisionReason": format!("flot: {}.", reasons.join(". ")),
-                        }
-                    }))?;
+                print_json(&serde_json::json!({
+                    "hookSpecificOutput": {
+                        "hookEventName": "PreToolUse",
+                        "permissionDecision": "deny",
+                        "permissionDecisionReason": format!("flot: {}.", said.join(". ")),
+                    }
+                }))?;
+                // Kept for the next run to record. The denial stands even
+                // when it cannot be noted.
+                for flow in judged
+                    .flows
+                    .iter()
+                    .filter(|flow| flow.flow_path().is_file())
+                {
+                    let _ = flow.note_refusal(&tool, &reasons);
                 }
                 return Ok(ExitCode::SUCCESS);
             }
-            let refused: Vec<Guarded> = remote
+            let refused: Vec<Guarded> = judged
+                .remote
                 .into_iter()
                 .map(|shape| Guarded {
                     path: shape,
@@ -517,18 +741,18 @@ fn dispatch(
                 .collect();
             if cli.json {
                 print_json(&serde_json::json!({
-                    "protected": guarded,
+                    "protected": judged.guarded,
                     "refused": refused,
                 }))?;
             } else {
-                for found in &guarded {
+                for found in &judged.guarded {
                     say!("protected  {}: {}", found.path, found.reason);
                 }
                 for found in &refused {
                     say!("refused    {}: {}", found.path, found.reason);
                 }
             }
-            Ok(if guarded.is_empty() && refused.is_empty() {
+            Ok(if judged.guarded.is_empty() && refused.is_empty() {
                 ExitCode::SUCCESS
             } else {
                 ExitCode::from(2)
@@ -1182,6 +1406,7 @@ fn render_run(report: &RunReport) {
     );
     render_spend(manifest);
     render_limitations(manifest);
+    render_refusals(manifest);
 }
 
 fn render_spend(manifest: &RunManifest) {
@@ -1255,6 +1480,23 @@ fn render_limitations(manifest: &RunManifest) {
     }
 }
 
+/// At most this many refusals are listed one by one.
+const REFUSALS_SHOWN: usize = 20;
+
+/// What the guard refused agents while the run's evidence was being made.
+fn render_refusals(manifest: &RunManifest) {
+    if manifest.refusals.is_empty() {
+        return;
+    }
+    say!("refused by the guard since the previous run:");
+    for refusal in manifest.refusals.iter().take(REFUSALS_SHOWN) {
+        say!("  - {}: {}", refusal.tool, refusal.reasons.join("; "));
+    }
+    if manifest.refusals.len() > REFUSALS_SHOWN {
+        say!("  - and {} more", manifest.refusals.len() - REFUSALS_SHOWN);
+    }
+}
+
 fn render_detail(detail: &RunDetail) {
     let manifest = &detail.manifest;
     say!(
@@ -1325,6 +1567,7 @@ fn render_detail(detail: &RunDetail) {
     );
     render_spend(manifest);
     render_limitations(manifest);
+    render_refusals(manifest);
 }
 
 fn render_audit(audit: &Audit) {
@@ -1470,6 +1713,28 @@ fn markdown_report(audit: &Audit, detail: &RunDetail) -> String {
             "- Spend: {}",
             crate::core::metrics::format_usd(manifest.spend.cost_micro_usd)
         );
+    }
+    if !manifest.refusals.is_empty() {
+        let _ = writeln!(
+            out,
+            "- Refused by the guard since the previous run: {}",
+            manifest.refusals.len()
+        );
+        for refusal in manifest.refusals.iter().take(REFUSALS_SHOWN) {
+            let _ = writeln!(
+                out,
+                "  - {}: {}",
+                md(&refusal.tool),
+                md(&refusal.reasons.join("; "))
+            );
+        }
+        if manifest.refusals.len() > REFUSALS_SHOWN {
+            let _ = writeln!(
+                out,
+                "  - and {} more",
+                manifest.refusals.len() - REFUSALS_SHOWN
+            );
+        }
     }
     let _ = writeln!(out, "\n| Step | Status | Claim | |\n|---|---|---|---|");
     for step in &manifest.steps {

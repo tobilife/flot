@@ -504,6 +504,54 @@ run `sed -i … check.sh` on a proof's file and `rm .github/workflows/ci.yml`.
 The hook denied both before they ran, with the reasons above, and Claude
 reported that the check still failed instead of working around it.
 
+Claude Code's `PowerShell` tool on Windows is not read: a PowerShell command
+that rewrites a proof is left to `proofs_from`.
+
+### What the guard refused
+
+Where the store already exists, the hook also notes each denial in it, and
+the next `flot run` records the ones made since the run before it finished
+(an agent the run itself started included) in its manifest, which a
+signature covers. `flot run`, `flot show` and `flot verify --markdown` list
+them, so a reviewer sees what an agent tried, not only what it delivered. A
+denial where there is no store yet is not noted, and noting never creates
+one. Real output, after the hook refused an `Edit` and a `sed -i` of
+`tests/slug.sh`:
+
+```text
+$ flot run
+ran      docs                 ok        11ms  claims 0v/1u/0r  receipt 74d47914d421
+cached   fix                  ok        11ms  claims 1v/0u/0r  receipt c7d08429cb05
+
+UNVERIFIED 1795563098731-60af8505578c  root 60af8505578c  75ms
+limitations:
+  - docs: the proof passes with the changes undone to main (e023c8566969) too, so it shows nothing this change did; claims stay unverified
+  - proofs checked against main (e023c8566969)
+refused by the guard since the previous run:
+  - Edit: tests/slug.sh is protected: the proof of step `fix` reads it
+  - Bash: tests/slug.sh is protected: the proof of step `fix` reads it
+```
+
+`flot guard --replay [PATHS]` reads Claude Code transcripts (`.jsonl` files,
+or directories holding them; by default `~/.claude/projects`) and judges
+every `Edit`, `Write`, `MultiEdit`, `NotebookEdit` and `Bash` call in them as
+the hook would now, against the flows as they are now, listing what it would
+refuse. It notes nothing. A call whose directory is gone is counted, not
+judged. Over this machine's transcripts (real output):
+
+```text
+$ flot guard --replay
+refused  2026-11-24T16:20:49.931Z  Bash  /tmp/hooktest: check.sh is protected: the proof of step `work` reads it
+refused  2026-11-24T16:20:50.473Z  Bash  /tmp/hooktest: .github/workflows/ci.yml is protected: it is a CI workflow, which decides what CI checks
+refused  2026-11-24T14:43:39.614Z  Write  /tmp/tmp.NYNgCBazmQ: check.sh is protected: the proof of step `work` reads it
+114 transcripts, 4707 edits and commands: 36 where a flow is, 3 refused, 64 not judged because their directory is gone
+```
+
+The three are the sessions that told Claude to tamper with a proof; the 33
+other calls where a flow is (edits to the code under test, test runs,
+reviews) were let through. That is a sample of one developer's sessions,
+not a false-positive rate.
+
 ## Scope
 
 `may_change` lists, as globs, the files a step may create, edit or delete. A

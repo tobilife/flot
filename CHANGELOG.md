@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- The Claude Code hook notes each denial in the store (only where one
+  exists), and the next `flot run` records those made since the previous run
+  finished in its manifest as `refusals` (tool, reasons, time), covered by a
+  signature. `flot run`, `flot show` and `flot verify --markdown` list them.
+- `flot guard --replay [PATHS]` judges every `Edit`, `Write`, `MultiEdit`,
+  `NotebookEdit` and `Bash` call in Claude Code transcripts (by default
+  `~/.claude/projects`) as the hook would now and lists what it would refuse;
+  `--json` prints the counts and the refusals.
 - `fails_before = true` on a step: once its proof passes, it runs again on a
   copy of the work (what git sees, plus the step's declared files), where it
   must pass, and then there with every change since `proofs_from` undone

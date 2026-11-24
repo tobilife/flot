@@ -29,6 +29,8 @@ and `unverified` as they are, and not to edit a proof to make it pass. Its
 the flow file, a file a step's `verify_inputs` matches, the store, a CI
 workflow, a git hook or Claude Code's settings, and downloaded code piped
 into an interpreter ([refusing the edit](flows.md#refusing-the-edit)).
+Each denial is noted in the store and recorded by the next run
+([what the guard refused](flows.md#what-the-guard-refused)).
 The hook is `flot guard --hook || true`: when flot is missing or older than
 `guard`, edits go through rather than all being blocked. `flot doctor` fails
 when a Claude Code settings file sets `disableAllHooks`, which would stop it. This repository is

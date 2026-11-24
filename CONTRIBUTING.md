@@ -65,7 +65,8 @@ the maintainer decides so.
 
 The [release workflow](.github/workflows/release.yml) checks that the tag,
 `Cargo.toml` and the changelog agree, runs the tests, builds binaries for
-Linux (x86_64, aarch64; static musl) and macOS (x86_64, aarch64), publishes
+Linux (x86_64, aarch64; static musl), macOS (x86_64, aarch64) and Windows
+(x86_64, zip), publishes
 them with checksums on a GitHub release whose notes are the changelog section,
 and publishes the crate through crates.io trusted publishing.
 

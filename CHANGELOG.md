@@ -10,7 +10,8 @@
     Ctrl-C or a step that leaves work running stops all of it, including what
     would escape a POSIX process group;
   - the store lock uses `LockFileEx`, so `gc` cannot run under a writer;
-  - the signing key defaults to `%APPDATA%\flot\signing.key`.
+  - the signing key defaults to `%APPDATA%\flot\signing.key`;
+  - releases carry a Windows x86_64 binary (`.zip`).
 - A receipt recorded on Linux is reused on Windows and the other way round,
   with its produced files restored, when the inputs' executable bits agree
   (Windows records none).

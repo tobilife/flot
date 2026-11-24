@@ -61,6 +61,50 @@ nothing: that step's claims stay unverified.
 `unverified` if any claim lacks proof; `passed` only when every step succeeded
 and every claim is proven.
 
+## Attempts
+
+`attempts = N` lets one run execute a step up to N times until it holds: it
+succeeds and every claim with a proof command is verified. The default is 1.
+This is for agent steps whose first try may not pass the proof:
+
+```toml
+[[step]]
+id = "implement"
+attempts = 2
+run = """
+prompt="Implement SPEC.md as slug.py."
+if [ -n "${FLOT_FEEDBACK:-}" ]; then
+  prompt="$prompt Your previous attempt did not pass: $(cat "$FLOT_FEEDBACK")"
+fi
+claude -p "$prompt" ...
+"""
+```
+
+Each attempt gets `$FLOT_ATTEMPT` and `$FLOT_ATTEMPTS`. Every attempt after
+the first also gets `$FLOT_FEEDBACK`, the path of a file that says why the
+previous one did not hold, read back from its receipt: how it ended, each
+claim's verdict and reason, its limitations, and the end of what its proof and
+its own command printed (8 KiB of each). An attempt sees the workspace the
+previous one left, so it fixes rather than starts over.
+
+The step's receipt is the last attempt's. Earlier attempts are kept: the
+manifest lists their receipts and observations, `flot show` names them,
+`flot verify`, `bundle`, `import` and `gc` treat them like any other evidence,
+and what they spent counts toward the run's spend and its cost ceiling. A run
+that needed more than one says so:
+
+```
+ran      implement            ok        20556ms  claims 1v/0u/0r  receipt d78f48e273af  attempt 2
+...
+  - implement: took 2 attempts of 2 allowed: 1 refuted, 2 held
+```
+
+No further attempt starts once flot is asked to stop, once the cost ceiling is
+reached (the run says which attempt was not run), or after a command that
+could not start at all. Like a budget, `attempts` is not part of the step key:
+work that held is the same work whichever attempt it took, and is reused on
+the next run.
+
 ## Budgets
 
 A budget is set in `[flow]` for every step, or per step, and a step's own

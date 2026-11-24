@@ -662,7 +662,7 @@ fn render_run(report: &RunReport) {
             "ran"
         };
         say!(
-            "{:<8} {:<20} {:<9} {}ms  claims {}v/{}u/{}r  receipt {}",
+            "{:<8} {:<20} {:<9} {}ms  claims {}v/{}u/{}r  receipt {}{}",
             mode,
             step.step_id,
             step.status.label(),
@@ -670,7 +670,12 @@ fn render_run(report: &RunReport) {
             step.claims.verified,
             step.claims.unverified,
             step.claims.refuted,
-            digest::short(&step.receipt_id)
+            digest::short(&step.receipt_id),
+            if step.attempts > 1 {
+                format!("  attempt {}", step.attempts)
+            } else {
+                String::new()
+            }
         );
         for output in &step.outputs {
             say!("    > {}  {}", output.path, digest::short(&output.digest));
@@ -801,6 +806,13 @@ fn render_detail(detail: &RunDetail) {
             if step.cached { "cached" } else { "ran   " },
             digest::short(&step.receipt_id)
         );
+        for (number, attempt) in step.attempts.iter().enumerate() {
+            say!(
+                "      attempt {}  receipt {}  did not hold",
+                number + 1,
+                digest::short(&attempt.receipt_id)
+            );
+        }
         if let Some(claims) = detail.step_claims.get(&step.step_id) {
             for claim in claims {
                 let mark = match claim.status {

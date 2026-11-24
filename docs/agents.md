@@ -68,6 +68,47 @@ for the earlier fresh runs, and this `slug.py` keeps the accent on `ǿ`
 (`slugify("Ǿre") == "ore"`). The reviewer again said it could not execute
 code and reviewed by reading; the claim was settled by the check, not by it.
 
+## Trying again with what went wrong
+
+`examples/slugify` gives the implementer two attempts (see
+[Attempts](flows.md#attempts)). To watch the second one work, the example was
+copied to a scratch directory, and its acceptance check was given two cases
+`SPEC.md` does not mention: long slugs are cut to whole words
+(`"Alpha Beta Gamma Delta Epsilon"` becomes `"alpha-beta-gamma-delta"`). The
+agent cannot read the check (`--disallowedTools`), so only the check's output
+could tell it. `flot run --only implement` with Claude Code 2.1.330:
+
+```
+ran      implement            ok        20556ms  claims 1v/0u/0r  receipt d78f48e273af  attempt 2
+
+PASSED 1795526848776-82aa769d4a4e  root 82aa769d4a4e  37169ms
+spent $0.250539 (in 45150 / out 3806 tokens, 2 reporting step(s))  ceiling $4.000000
+limitations:
+  - implement: took 2 attempts of 2 allowed: 1 refuted, 2 held
+  - partial run: 1 of 2 steps selected
+```
+
+The first attempt's receipt holds the check's verdict on it:
+
+```
+FAIL slugify('The Quick Brown Fox Jumps Over The Lazy Dog') = 'the-quick-brown-fox-jumps-over-the-lazy-dog', want 'the-quick-brown-fox-jumps'
+FAIL slugify('Alpha Beta Gamma Delta Epsilon') = 'alpha-beta-gamma-delta-epsilon', want 'alpha-beta-gamma-delta'
+9/11 cases pass
+```
+
+The second attempt got that in its prompt, added a word-boundary cut, and said
+what it could not know: the two failures only pin the limit between 25 and 29
+characters, so it chose 29 and said so. The check passed it; whether 29 is the
+intended limit is a question for the spec, which is what the agent suggested.
+The output above omits the agent's summary between the step line and the
+verdict. Spend counts each attempt as one reporting execution. `flot verify`
+checked both receipts.
+
+Two earlier runs of the same set-up without the unstated rule passed on the
+first attempt ($0.14 and $0.09). The first of them showed that the example's
+claim "the agent never sees the check" was not true: the agent read
+`check_slug.py` and said so. The example now denies the agent that file.
+
 ## Three reviewers in parallel
 
 `examples/parallel-review.toml` was run once, copied to the root of a clone of

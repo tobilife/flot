@@ -102,6 +102,7 @@ mod tests {
     fn step(id: &str, receipt: &str, status: StepStatus) -> RunStep {
         RunStep {
             observed_digest: String::new(),
+            attempts: Vec::new(),
             step_id: id.into(),
             receipt_id: receipt.into(),
             status,

@@ -30,32 +30,29 @@ pub struct Audit {
 /// from its receipts (statuses, counts, verdict, root, run id) must follow.
 pub fn audit(store: &Store, manifest: &RunManifest) -> Result<Audit> {
     let mut findings = Vec::new();
+    let evidence = manifest.evidence();
+    // Each receipt with the observation this run recorded for it.
     let mut loaded = Vec::new();
-    for step in &manifest.steps {
-        match store.load_receipt(&step.receipt_id) {
-            Ok(receipt) => loaded.push(receipt),
-            Err(error) => findings.push(format!("{}: receipt unreadable ({error})", step.step_id)),
+    let mut observations: BTreeMap<&str, Observed> = BTreeMap::new();
+    for &(step_id, receipt_id, observed_digest) in &evidence {
+        match store.load_receipt(receipt_id) {
+            Ok(receipt) => loaded.push((receipt, observed_digest)),
+            Err(error) => findings.push(format!("{step_id}: receipt unreadable ({error})")),
+        }
+        match store.load_observation(observed_digest) {
+            Ok(observed) => {
+                observations.insert(observed_digest, observed);
+            }
+            Err(error) => findings.push(format!("{step_id}: observation unreadable ({error:#})")),
         }
     }
     let checked = loaded.len();
-    let mut observations: BTreeMap<&str, Observed> = BTreeMap::new();
-    for step in &manifest.steps {
-        match store.load_observation(&step.observed_digest) {
-            Ok(observed) => {
-                observations.insert(step.observed_digest.as_str(), observed);
-            }
-            Err(error) => findings.push(format!(
-                "{}: observation unreadable ({error:#})",
-                step.step_id
-            )),
-        }
-    }
     let receipts: BTreeMap<&str, &Receipt> = loaded
         .iter()
-        .map(|receipt| (receipt.receipt_id.as_str(), receipt))
+        .map(|(receipt, _)| (receipt.receipt_id.as_str(), receipt))
         .collect();
 
-    for receipt in &loaded {
+    for (receipt, observed_digest) in &loaded {
         let step_id = &receipt.identity.step_id;
         // Present is not enough: evidence that no longer hashes to its name
         // is not evidence.
@@ -68,9 +65,7 @@ pub fn audit(store: &Store, manifest: &RunManifest) -> Result<Audit> {
                 ));
             }
         }
-        let observed = manifest
-            .step(step_id)
-            .and_then(|step| observations.get(step.observed_digest.as_str()));
+        let observed = observations.get(observed_digest);
         if let (Some(observed), Ok(stdout), Ok(stderr)) = (
             observed,
             store.read_bytes(&receipt.identity.stdout_digest),

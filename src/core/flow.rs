@@ -98,9 +98,21 @@ pub struct Step {
     /// are still not verified.
     #[serde(default)]
     pub allow_failure: bool,
+    /// How many times the step may run in one flot run before it holds: it
+    /// succeeds and every claim with a proof command is verified. Each later
+    /// attempt sees why the one before did not hold in `$FLOT_FEEDBACK`. Like
+    /// a budget, not part of the step key: work that held is the same work
+    /// whichever attempt it took.
+    #[serde(default)]
+    pub attempts: Option<u32>,
 }
 
 impl Step {
+    /// How many attempts one run may make at this step.
+    pub fn attempts(&self) -> u32 {
+        self.attempts.unwrap_or(1)
+    }
+
     /// Whether `path`, relative to the flow root, is one of this step's
     /// declared outputs. A receipt naming any other file is not this step's to
     /// restore, whatever it claims.
@@ -208,6 +220,9 @@ impl Flow {
             }
             if step.run.trim().is_empty() {
                 bail!("step `{}` has an empty run command", step.id);
+            }
+            if step.attempts == Some(0) {
+                bail!("step `{}` attempts must be at least 1", step.id);
             }
             if !step.verify_inputs.is_empty() && step.verify.is_none() {
                 bail!(

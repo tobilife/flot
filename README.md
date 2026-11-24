@@ -60,7 +60,10 @@ It pays off when:
   `flot_run`, for $0.42.
 - **An agent loops: change, check, change again.** Steps whose inputs did not
   change are reused, so the check is cheap to repeat: this repository's gate
-  takes 16 s cold and 0.41 s when nothing changed.
+  takes 16 s cold and 0.41 s when nothing changed. A step with `attempts = N`
+  runs again with what its proof said, until it holds: in a real run the
+  check's failure output led Claude Code to a rule the spec never stated, on
+  the second attempt, for $0.25.
 - **Several agents work on one change.** Reviewers run concurrently under a
   cost ceiling, and each one's spend is recorded: isolating the three
   reviewers in `parallel-review` cut a run from $3.25 to $0.42.
@@ -309,10 +312,10 @@ with `flot --version`, the flow file, the command you ran and its output.
 
 ## Documentation
 
-- [Writing flows](docs/flows.md): steps, keys, receipts, claims, budgets, concurrency, outputs and guarded proofs.
+- [Writing flows](docs/flows.md): steps, keys, receipts, claims, attempts, budgets, concurrency, outputs and guarded proofs.
 - [CLI reference](docs/cli.md): commands, selecting runs and flows, `--json` and exit codes.
 - [MCP server](docs/mcp.md): registration, tools, replies, errors and cancellation.
-- [Running coding agents](docs/agents.md): an end-to-end agent run, spend and the cost ceiling.
+- [Running coding agents](docs/agents.md): an end-to-end agent run, attempts with feedback, spend and the cost ceiling.
 - [Evidence, bundles and trust](docs/evidence.md): bundles, signing, key rotation, the trust list and the `.flot` store.
 - [Architecture](docs/architecture.md): layers, enforced dependency rules and current scope.
 

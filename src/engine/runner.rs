@@ -21,8 +21,8 @@ use crate::core::digest;
 use crate::core::flow::{Flow, Step};
 use crate::core::metrics::{self, Metrics, Spend};
 use crate::core::receipt::{
-    verdict_for, ClaimCounts, DepRef, FileDigest, Observed, Receipt, ReceiptIdentity, RunManifest,
-    RunStep, StepStatus, ToolIdentity, FLOT_VERSION,
+    verdict_for, ClaimCounts, DepRef, FileDigest, Observed, Receipt, ReceiptIdentity, RunAttempt,
+    RunManifest, RunStep, StepStatus, ToolIdentity, FLOT_VERSION,
 };
 use crate::engine::claims::{self, Proof, ProofOutcome};
 use crate::engine::exec;
@@ -63,6 +63,9 @@ pub struct StepReport {
     pub metrics: Option<Metrics>,
     /// Files the step produced, as recorded in its receipt.
     pub outputs: Vec<FileDigest>,
+    /// How many times this run executed the step: 0 when it was reused or
+    /// not run, more than 1 when earlier attempts did not hold.
+    pub attempts: usize,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -111,6 +114,23 @@ struct Settled {
     /// What reusing the receipt changed in the workspace. Not part of the
     /// receipt, which describes the step, not this run of it.
     notes: Vec<String>,
+    /// Earlier attempts at the step in this run that did not hold, oldest
+    /// first; `receipt` is the last attempt's.
+    attempts: Vec<Receipt>,
+}
+
+impl Settled {
+    /// Cost reported by the attempts this run executed.
+    fn spent_micro_usd(&self) -> u64 {
+        let last = (!self.cached).then_some(&self.receipt);
+        self.attempts
+            .iter()
+            .chain(last)
+            .filter_map(|receipt| receipt.observed.metrics)
+            .fold(0u64, |total, metrics| {
+                total.saturating_add(metrics.cost_micro_usd)
+            })
+    }
 }
 
 pub struct Runner<'a> {
@@ -362,6 +382,32 @@ impl<'a> Runner<'a> {
             }
             let counts = receipt.claim_counts();
             totals.add(counts);
+            let mut attempts = Vec::new();
+            for earlier in &entry.attempts {
+                spend.add_executed(earlier.observed.metrics);
+                if earlier.observed.metrics.is_none() {
+                    silent.push(step_id.as_str());
+                }
+                attempts.push(RunAttempt {
+                    receipt_id: earlier.receipt_id.clone(),
+                    observed_digest: self.store.put_observation(&earlier.observed)?,
+                });
+            }
+            if !entry.attempts.is_empty() {
+                let mut told: Vec<String> = entry
+                    .attempts
+                    .iter()
+                    .enumerate()
+                    .map(|(number, earlier)| format!("{} {}", number + 1, outcome(earlier)))
+                    .collect();
+                told.push(format!("{} {}", told.len() + 1, outcome(receipt)));
+                step_limitations.push(format!(
+                    "took {} attempts of {} allowed: {}",
+                    told.len(),
+                    self.flow.step(step_id).expect("validated step").attempts(),
+                    told.join(", ")
+                ));
+            }
             if cached {
                 spend.add_reused(receipt.observed.metrics);
             } else if receipt.identity.status != StepStatus::Cancelled {
@@ -385,6 +431,7 @@ impl<'a> Runner<'a> {
                 cached,
                 claims: counts,
                 observed_digest: self.store.put_observation(&receipt.observed)?,
+                attempts,
             });
             reports.push(StepReport {
                 step_id: step_id.clone(),
@@ -401,6 +448,11 @@ impl<'a> Runner<'a> {
                 limitations: step_limitations,
                 metrics: receipt.observed.metrics,
                 outputs: receipt.identity.outputs.clone(),
+                attempts: if cached || receipt.identity.status == StepStatus::Cancelled {
+                    0
+                } else {
+                    entry.attempts.len() + 1
+                },
             });
         }
 
@@ -498,13 +550,9 @@ impl<'a> Runner<'a> {
             .expect("dependencies settle before a step launches");
         let gate = ceiling_micro_usd.map(|ceiling_micro_usd| CostGate {
             ceiling_micro_usd,
-            spent_micro_usd: settled
-                .values()
-                .filter(|entry| !entry.cached)
-                .filter_map(|entry| entry.receipt.observed.metrics)
-                .fold(0u64, |total, metrics| {
-                    total.saturating_add(metrics.cost_micro_usd)
-                }),
+            spent_micro_usd: settled.values().fold(0u64, |total, entry| {
+                total.saturating_add(entry.spent_micro_usd())
+            }),
         });
         Work {
             step,
@@ -534,6 +582,7 @@ impl<'a> Runner<'a> {
         // Facts about this run, such as why a cached receipt was passed over,
         // are notes. Only facts about the work go into a receipt.
         let mut notes = Vec::new();
+        let mut attempts = Vec::new();
 
         let (receipt, cached) = if options.stop.is_set() {
             limitations.push("not run: flot was asked to stop".into());
@@ -595,45 +644,181 @@ impl<'a> Runner<'a> {
                 false,
             )
         } else {
-            let attempt = self.execute(
-                step,
-                &step_key,
-                facts.clone(),
-                deps.clone(),
-                limitations.clone(),
-                &options.stop,
-            );
-            match attempt {
-                Ok(receipt) => (receipt, false),
-                Err(error) => {
-                    limitations.push(format!("could not run: {error:#}"));
-                    (
-                        self.unrun_receipt(
-                            StepStatus::Failed,
-                            "step could not run",
-                            step,
-                            &step_key,
-                            facts,
-                            deps,
-                            limitations,
-                        )?,
-                        false,
-                    )
-                }
-            }
+            let (receipt, earlier) =
+                self.attempt(step, step_key, facts, deps, gate, &options.stop, &mut notes)?;
+            attempts = earlier;
+            (receipt, false)
         };
 
         self.store.put_receipt(&receipt)?;
         // Only reusable work may answer for this key. A cancelled or failed
         // attempt must not displace a success recorded earlier.
         if receipt.is_reusable() {
-            self.store.remember(&step_key, &receipt.receipt_id, &[])?;
+            self.store
+                .remember(&receipt.identity.step_key, &receipt.receipt_id, &[])?;
         }
         Ok(Settled {
             receipt,
             cached,
             notes,
+            attempts,
         })
+    }
+
+    /// Execute a step until it holds or its attempts run out. An attempt that
+    /// did not hold is kept, and the next one is told why in
+    /// `$FLOT_FEEDBACK`. A later attempt sees the workspace the earlier one
+    /// left, so its facts and key are read again.
+    ///
+    /// No further attempt starts once flot is asked to stop, once the run's
+    /// cost ceiling is reached, or after a command that could not start at
+    /// all, which another attempt would not change.
+    #[allow(clippy::too_many_arguments)]
+    fn attempt(
+        &self,
+        step: &Step,
+        mut step_key: String,
+        mut facts: Facts,
+        deps: Vec<DepRef>,
+        gate: Option<CostGate>,
+        stop: &exec::StopSignal,
+        notes: &mut Vec<String>,
+    ) -> Result<(Receipt, Vec<Receipt>)> {
+        let allowed = step.attempts();
+        let mut earlier: Vec<Receipt> = Vec::new();
+        loop {
+            let number = earlier.len() as u32 + 1;
+            let mut extra = BTreeMap::new();
+            if allowed > 1 {
+                extra.insert("FLOT_ATTEMPT".to_string(), number.to_string());
+                extra.insert("FLOT_ATTEMPTS".to_string(), allowed.to_string());
+            }
+            let feedback = match earlier.last() {
+                Some(previous) => Some(self.write_feedback(previous, number - 1, allowed)?),
+                None => None,
+            };
+            if let Some(path) = &feedback {
+                extra.insert(
+                    "FLOT_FEEDBACK".to_string(),
+                    path.to_string_lossy().to_string(),
+                );
+            }
+            let executed = self.execute(step, &step_key, facts.clone(), deps.clone(), &extra, stop);
+            if let Some(path) = &feedback {
+                let _ = std::fs::remove_file(path);
+            }
+            let receipt = match executed {
+                Ok(receipt) => receipt,
+                Err(error) => {
+                    let mut limitations = facts.limitations.clone();
+                    limitations.push(format!("could not run: {error:#}"));
+                    let receipt = self.unrun_receipt(
+                        StepStatus::Failed,
+                        "step could not run",
+                        step,
+                        &step_key,
+                        facts,
+                        deps,
+                        limitations,
+                    )?;
+                    return Ok((receipt, earlier));
+                }
+            };
+            if receipt.is_reusable() || number >= allowed || stop.is_set() {
+                return Ok((receipt, earlier));
+            }
+            if let Some(gate) = gate {
+                let spent = earlier
+                    .iter()
+                    .chain(std::iter::once(&receipt))
+                    .filter_map(|receipt| receipt.observed.metrics)
+                    .fold(gate.spent_micro_usd, |total, metrics| {
+                        total.saturating_add(metrics.cost_micro_usd)
+                    });
+                if spent >= gate.ceiling_micro_usd {
+                    notes.push(format!(
+                        "attempt {} of {allowed} not run: run cost ceiling of {} reached ({} spent by executed steps)",
+                        number + 1,
+                        metrics::format_usd(gate.ceiling_micro_usd),
+                        metrics::format_usd(spent)
+                    ));
+                    return Ok((receipt, earlier));
+                }
+            }
+            self.store.put_receipt(&receipt)?;
+            earlier.push(receipt);
+            facts = keying::facts_of(&self.root, step);
+            step_key = self.step_key(step, &facts, &deps);
+        }
+    }
+
+    /// Tell the next attempt why this one did not hold: how it ended, each
+    /// claim's verdict, its limitations, and the end of what its proof and
+    /// its command printed, all read back from the recorded evidence.
+    fn write_feedback(&self, receipt: &Receipt, number: u32, allowed: u32) -> Result<PathBuf> {
+        /// Room for each stream, kept from its end, where failures are told.
+        const ROOM: usize = 8 * 1024;
+        let identity = &receipt.identity;
+        let mut text = format!(
+            "flot: attempt {number} of {allowed} at step `{}` did not hold.\n\n",
+            identity.step_id
+        );
+        text.push_str(&format!("status: {}", identity.status.label()));
+        if let Some(code) = identity.exit_code {
+            text.push_str(&format!(" (exit {code})"));
+        }
+        text.push('\n');
+        if !identity.claims.is_empty() {
+            text.push_str("claims:\n");
+            for claim in &identity.claims {
+                text.push_str(&format!("  - {}: {}\n", claim.status.label(), claim.text));
+                if let Some(reason) = &claim.reason {
+                    text.push_str(&format!("    {reason}\n"));
+                }
+            }
+        }
+        if !identity.limitations.is_empty() {
+            text.push_str("limitations:\n");
+            for limitation in &identity.limitations {
+                text.push_str(&format!("  - {limitation}\n"));
+            }
+        }
+        let mut stream = |title: String, digest: &str| -> Result<()> {
+            let bytes = self.store.read_bytes(digest)?;
+            if bytes.is_empty() {
+                return Ok(());
+            }
+            let (preview, _) = exec::stream_preview(&bytes, ROOM);
+            text.push_str(&format!("\n--- {title} ---\n{preview}"));
+            if !preview.ends_with('\n') {
+                text.push('\n');
+            }
+            Ok(())
+        };
+        let mut proofs: Vec<(&str, &str)> = identity
+            .claims
+            .iter()
+            .filter_map(|claim| {
+                Some((
+                    claim.verify_command.as_deref()?,
+                    claim.verify_output_digest.as_deref()?,
+                ))
+            })
+            .collect();
+        proofs.dedup();
+        for (command, digest) in proofs {
+            stream(format!("output of the proof `{command}`"), digest)?;
+        }
+        stream("stdout".into(), &identity.stdout_digest)?;
+        stream("stderr".into(), &identity.stderr_digest)?;
+        let path = self.store.root().join("tmp").join(format!(
+            "feedback-{}-{}.txt",
+            std::process::id(),
+            METRICS_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::create_dir_all(path.parent().expect("tmp has a parent"))?;
+        std::fs::write(&path, text).with_context(|| format!("cannot write {}", path.display()))?;
+        Ok(path)
     }
 
     /// A cached receipt with its missing outputs put back, or `None` with the
@@ -786,11 +971,13 @@ impl<'a> Runner<'a> {
         step_key: &str,
         facts: Facts,
         deps: Vec<DepRef>,
-        mut limitations: Vec<String>,
+        extra: &BTreeMap<String, String>,
         stop: &exec::StopSignal,
     ) -> Result<Receipt> {
+        let mut limitations = facts.limitations.clone();
         let budget = self.flow.resolved_budget(step);
-        let (env, metrics_path) = self.metered_env(step)?;
+        let (mut env, metrics_path) = self.metered_env(step)?;
+        env.extend(extra.clone());
         let timeout = Duration::from_secs(budget.timeout_secs);
         let outcome = exec::run_command(
             &step.run,
@@ -1038,6 +1225,23 @@ impl<'a> Runner<'a> {
             metrics,
             notes,
         ))
+    }
+}
+
+/// How one attempt ended, in a word or two: `held`, or why not.
+fn outcome(receipt: &Receipt) -> String {
+    let counts = receipt.claim_counts();
+    if !receipt.identity.status.is_ok() {
+        match receipt.identity.exit_code {
+            Some(code) => format!("{} (exit {code})", receipt.identity.status.label()),
+            None => receipt.identity.status.label().to_string(),
+        }
+    } else if counts.refuted > 0 {
+        "refuted".into()
+    } else if !receipt.is_reusable() {
+        "unverified".into()
+    } else {
+        "held".into()
     }
 }
 

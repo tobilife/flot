@@ -100,34 +100,43 @@ pub fn export(
     let mut receipts = Vec::new();
     let mut objects: BTreeMap<String, String> = BTreeMap::new();
 
-    for step in &manifest.steps {
+    // Every step's receipt, and every earlier attempt's: two attempts that
+    // did exactly the same work share one receipt.
+    for (step_id, receipt_id, observed_digest) in manifest.evidence() {
+        objects.insert(
+            observed_digest.to_string(),
+            encode(
+                &store
+                    .read_bytes(observed_digest)
+                    .with_context(|| format!("step `{step_id}` has no readable observation"))?,
+            ),
+        );
+        if receipts
+            .iter()
+            .any(|receipt: &Receipt| receipt.receipt_id == receipt_id)
+        {
+            continue;
+        }
         let mut receipt = store
-            .load_receipt(&step.receipt_id)
-            .with_context(|| format!("step `{}` has no readable receipt", step.step_id))?;
+            .load_receipt(receipt_id)
+            .with_context(|| format!("step `{step_id}` has no readable receipt"))?;
         if !receipt.is_authentic() {
-            bail!(
-                "refusing to export step `{}`: its receipt does not match its id",
-                step.step_id
-            );
+            bail!("refusing to export step `{step_id}`: its receipt does not match its id");
         }
         for object in receipt.objects() {
             if objects.contains_key(object) {
                 continue;
             }
-            let bytes = store.read_bytes(object).with_context(|| {
-                format!("step `{}` references missing object {object}", step.step_id)
-            })?;
+            let bytes = store
+                .read_bytes(object)
+                .with_context(|| format!("step `{step_id}` references missing object {object}"))?;
             objects.insert(object.to_string(), encode(&bytes));
         }
         // The stored receipt carries its latest execution's observation; the
         // bundle carries this run's, which is what the manifest names.
         receipt.observed = store
-            .load_observation(&step.observed_digest)
-            .with_context(|| format!("step `{}` has no readable observation", step.step_id))?;
-        objects.insert(
-            step.observed_digest.clone(),
-            encode(&store.read_bytes(&step.observed_digest)?),
-        );
+            .load_observation(observed_digest)
+            .with_context(|| format!("step `{step_id}` has no readable observation"))?;
         receipts.push(receipt);
     }
 
@@ -181,11 +190,16 @@ fn authenticate<'a>(store: &Store, bundle: &'a Bundle) -> Result<Authenticated<'
         decoded.insert(object.clone(), bytes);
     }
 
-    if bundle.receipts.len() != bundle.run.steps.len() {
+    let evidence = bundle.run.evidence();
+    let named_receipts: std::collections::BTreeSet<&str> = evidence
+        .iter()
+        .map(|&(_, receipt_id, _)| receipt_id)
+        .collect();
+    if bundle.receipts.len() != named_receipts.len() {
         bail!(
-            "bundle carries {} receipts for a run of {} steps",
+            "bundle carries {} receipts for a run that names {}",
             bundle.receipts.len(),
-            bundle.run.steps.len()
+            named_receipts.len()
         );
     }
 
@@ -196,20 +210,16 @@ fn authenticate<'a>(store: &Store, bundle: &'a Bundle) -> Result<Authenticated<'
         }
     };
     let mut observations: BTreeMap<&str, Observed> = BTreeMap::new();
-    for step in &bundle.run.steps {
-        let bytes = stream(&step.observed_digest).with_context(|| {
+    for &(step_id, _, observed_digest) in &evidence {
+        let bytes = stream(observed_digest).with_context(|| {
             format!(
-                "step `{}` names observation {}, which the bundle does not carry",
-                step.step_id, step.observed_digest
+                "step `{step_id}` names observation {observed_digest}, which the bundle does not carry"
             )
         })?;
         let observed: Observed = serde_json::from_slice(&bytes).with_context(|| {
-            format!(
-                "step `{}` names an object that is not an observation",
-                step.step_id
-            )
+            format!("step `{step_id}` names an object that is not an observation")
         })?;
-        observations.insert(step.observed_digest.as_str(), observed);
+        observations.insert(observed_digest, observed);
     }
 
     let mut receipts: BTreeMap<&str, &Receipt> = BTreeMap::new();
@@ -249,16 +259,13 @@ fn authenticate<'a>(store: &Store, bundle: &'a Bundle) -> Result<Authenticated<'
     }
     // Previews are what a reader sees first; each must come from the output
     // its receipt names.
-    for step in &bundle.run.steps {
-        let receipt = receipts[step.receipt_id.as_str()];
-        if !observations[step.observed_digest.as_str()].describes(
+    for &(step_id, receipt_id, observed_digest) in &evidence {
+        let receipt = receipts[receipt_id];
+        if !observations[observed_digest].describes(
             &stream(&receipt.identity.stdout_digest)?,
             &stream(&receipt.identity.stderr_digest)?,
         ) {
-            bail!(
-                "step `{}` shows an output preview that is not its stored output",
-                step.step_id
-            );
+            bail!("step `{step_id}` shows an output preview that is not its stored output");
         }
     }
 
@@ -278,11 +285,9 @@ fn authenticate<'a>(store: &Store, bundle: &'a Bundle) -> Result<Authenticated<'
         .iter()
         .flat_map(|receipt| receipt.objects())
         .chain(
-            bundle
-                .run
-                .steps
+            evidence
                 .iter()
-                .map(|step| step.observed_digest.as_str()),
+                .map(|&(_, _, observed_digest)| observed_digest),
         )
         .collect();
     if let Some(stray) = decoded
@@ -361,17 +366,23 @@ pub fn import(store: &Store, bundle: &Bundle, policy: ImportPolicy) -> Result<Im
         .filter(|signer| signer.trusted_as.is_some())
         .map(|signer| signer.key.clone())
         .collect();
-    for step in &bundle.run.steps {
-        let receipt = receipts[step.receipt_id.as_str()];
+    let mut stored = std::collections::BTreeSet::new();
+    for (_, receipt_id, observed_digest) in bundle.run.evidence() {
+        if !stored.insert(receipt_id) {
+            continue;
+        }
         // A receipt already here keeps its own observation; the run's is in
         // the observation object the manifest names.
-        if store.load_receipt(&receipt.receipt_id).is_ok() {
+        if store.load_receipt(receipt_id).is_ok() {
             already_present += 1;
         } else {
-            let mut kept = receipt.clone();
-            kept.observed = observations[step.observed_digest.as_str()].clone();
+            let mut kept = receipts[receipt_id].clone();
+            kept.observed = observations[observed_digest].clone();
             store.put_receipt(&kept)?;
         }
+    }
+    for step in &bundle.run.steps {
+        let receipt = receipts[step.receipt_id.as_str()];
         // Only what local work would remember, and never in place of an
         // entry this store already relies on.
         if reusable && receipt.is_reusable() && store.recall(&receipt.identity.step_key)?.is_none()
@@ -917,7 +928,7 @@ verify = "grep -q flot artifact.txt"
             ("does not carry", |run| {
                 run.steps[0].observed_digest = digest::bytes(b"other")
             }),
-            ("twice", |run| {
+            ("appears more than once", |run| {
                 let copy = run.steps[0].clone();
                 run.steps.push(copy);
             }),
@@ -925,10 +936,6 @@ verify = "grep -q flot artifact.txt"
         for (expected, lie) in lies {
             let mut bundle = export(&store, &manifest, None).unwrap();
             lie(&mut bundle.run);
-            if expected == "twice" {
-                let copy = bundle.receipts[0].clone();
-                bundle.receipts.push(copy);
-            }
             let (_target, fresh) = empty_store();
             let error = import(&fresh, &bundle, ImportPolicy::default()).unwrap_err();
             assert!(error.to_string().contains(expected), "{expected}: {error}");

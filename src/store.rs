@@ -634,15 +634,15 @@ impl Store {
             let manifest = self
                 .resolve_run(&run_id)
                 .map_err(unknown(format!("run {run_id}")))?;
-            for step in &manifest.steps {
-                reachable.receipts.insert(step.receipt_id.clone());
-                reachable.objects.insert(step.observed_digest.clone());
-                if !self.receipt_path(&step.receipt_id)?.exists() {
+            for (_, receipt_id, observed_digest) in manifest.evidence() {
+                reachable.receipts.insert(receipt_id.to_string());
+                reachable.objects.insert(observed_digest.to_string());
+                if !self.receipt_path(receipt_id)?.exists() {
                     continue;
                 }
                 let receipt = self
-                    .load_receipt(&step.receipt_id)
-                    .map_err(unknown(format!("receipt {}", step.receipt_id)))?;
+                    .load_receipt(receipt_id)
+                    .map_err(unknown(format!("receipt {receipt_id}")))?;
                 reachable
                     .objects
                     .extend(receipt.objects().into_iter().map(str::to_string));

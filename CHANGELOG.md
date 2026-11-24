@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- `attempts = N` on a step: one run executes it up to N times until it holds,
+  and each later attempt gets `$FLOT_FEEDBACK`, a file saying why the previous
+  one did not (verdicts, limitations, the end of the proof's and the command's
+  output). Earlier attempts are kept as evidence: the manifest lists them,
+  `show` names them, and `verify`, `bundle`, `import` and `gc` treat them like
+  any other receipt; their spend counts toward the run and its ceiling.
+- `examples/slugify`: the implementer has two attempts with feedback, and can
+  no longer read the acceptance check, which a real run showed it did.
 - Windows support; the whole suite runs on Windows (build 26300, and
   `windows-latest` in CI):
   - steps run in the `sh` of Git for Windows (on `PATH`, else beside

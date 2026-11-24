@@ -29,13 +29,27 @@ budget = { timeout_secs = 600, max_inline_bytes = 2048 }
 [[step]]
 id = "implement"
 # --permission-mode acceptEdits lets a headless agent write files; --tools
-# names the only tools it gets. Token counts include cache reads and writes,
-# which dominate an agent call.
+# names the only tools it gets, and --disallowedTools keeps the acceptance
+# check out of its reach. Token counts include cache reads and writes, which
+# dominate an agent call.
+#
+# Up to two attempts: when the check refutes the first, the second gets what
+# flot recorded about it ($FLOT_FEEDBACK: the verdict, the check's output and
+# the agent's own) and fixes slug.py where the first left it.
+attempts = 2
 run = """
 mkdir -p .flot-work
 status=0
-claude -p "Implement SPEC.md as slug.py. Create or edit only slug.py; do not write tests or other files." \
+prompt="Implement SPEC.md as slug.py. Create or edit only slug.py; do not write tests or other files."
+if [ -n "${FLOT_FEEDBACK:-}" ]; then
+  prompt="$prompt
+
+Your previous attempt did not pass the acceptance check. What flot recorded about it:
+$(cat "$FLOT_FEEDBACK")"
+fi
+claude -p "$prompt" \
   --setting-sources project --strict-mcp-config --tools Read,Edit,Write \
+  --disallowedTools "Read(./check_slug.py)" "Edit(./check_slug.py)" "Write(./check_slug.py)" \
   --permission-mode acceptEdits --max-budget-usd 1.5 --output-format json > .flot-work/implement.json || status=$?
 jq '{input_tokens: (.usage.input_tokens + .usage.cache_read_input_tokens + .usage.cache_creation_input_tokens),
      output_tokens: .usage.output_tokens, cost_usd: .total_cost_usd}' .flot-work/implement.json > "$FLOT_METRICS" || true

@@ -721,13 +721,19 @@ fn dispatch(
                     }
                 }))?;
                 // Kept for the next run to record. The denial stands even
-                // when it cannot be noted.
+                // when it cannot be noted. A flow reached through a link
+                // too, such as macOS's /var, is noted in once.
+                let mut noted = std::collections::HashSet::new();
                 for flow in judged
                     .flows
                     .iter()
                     .filter(|flow| flow.flow_path().is_file())
                 {
-                    let _ = flow.note_refusal(&tool, &reasons);
+                    let root = std::fs::canonicalize(flow.root())
+                        .unwrap_or_else(|_| flow.root().to_path_buf());
+                    if noted.insert(root) {
+                        let _ = flow.note_refusal(&tool, &reasons);
+                    }
                 }
                 return Ok(ExitCode::SUCCESS);
             }

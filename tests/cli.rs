@@ -3734,6 +3734,33 @@ fn the_next_run_records_what_the_guard_refused() {
     .unwrap();
     project.flot(&["run"]).ok().lacks("refused by the guard");
 
+    // A flow reached through a link as well is noted in once.
+    #[cfg(unix)]
+    {
+        let links = tempfile::tempdir().unwrap();
+        let link = links.path().join("project");
+        std::os::unix::fs::symlink(project.path(), &link).unwrap();
+        let through = serde_json::json!({
+            "cwd": link,
+            "tool_name": "Edit",
+            "tool_input": { "file_path": "check.sh" },
+        });
+        project
+            .flot_stdin(&["guard", "--hook"], &through.to_string())
+            .ok()
+            .has("\"permissionDecision\": \"deny\"");
+        let run = project.flot(&["run"]);
+        assert_eq!(
+            run.ok()
+                .stdout
+                .matches("- Edit: check.sh is protected")
+                .count(),
+            1,
+            "{}",
+            run.stdout
+        );
+    }
+
     // Read back from transcripts, as the hook would judge them now.
     let cwd = project.path().to_str().unwrap();
     let call = |id: &str, name: &str, input: serde_json::Value, cwd: &str| {

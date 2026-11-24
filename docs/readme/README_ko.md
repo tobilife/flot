@@ -97,7 +97,8 @@ cargo install flot-cli
 
 크레이트 이름은 `flot-cli`이고, 설치되는 명령은 `flot`입니다. Linux(x86_64, aarch64),
 macOS(x86_64, arm64), Windows(x86_64, zip)용 실행 파일은 [릴리스 페이지](https://github.com/tobilife/flot/releases/latest)에
-있습니다. 릴리스가 아닌 최신 `main`을 쓰려면
+있습니다. 0.2.4부터 각 아카이브에는 빌드 출처 증명(build provenance attestation)이 붙어
+있어 `gh attestation verify ARCHIVE --repo tobilife/flot`으로 확인할 수 있습니다. 릴리스가 아닌 최신 `main`을 쓰려면
 `cargo install --git https://github.com/tobilife/flot`을 사용하세요.
 
 ### 에이전트에 연결 (MCP)

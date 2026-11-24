@@ -106,7 +106,9 @@ cargo install flot-cli
 The crate is `flot-cli`; the command it installs is `flot`. Prebuilt binaries
 for Linux (x86_64, aarch64), macOS (x86_64, arm64) and Windows (x86_64, zip)
 are on the
-[releases page](https://github.com/tobilife/flot/releases/latest). For the
+[releases page](https://github.com/tobilife/flot/releases/latest); from
+0.2.4 on, each archive carries a build provenance attestation that
+`gh attestation verify ARCHIVE --repo tobilife/flot` checks. For the
 latest `main` instead of the latest release, use
 `cargo install --git https://github.com/tobilife/flot`.
 

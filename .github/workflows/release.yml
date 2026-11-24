@@ -1,8 +1,9 @@
 name: release
 
-# A pushed tag `vX.Y.Z` builds binaries, publishes them on a GitHub release
-# with notes from CHANGELOG.md, and publishes the crate to crates.io through
-# trusted publishing. Running the workflow by hand only builds the binaries.
+# A pushed tag `vX.Y.Z` builds binaries, attests their build provenance,
+# publishes them on a GitHub release with notes from CHANGELOG.md, and
+# publishes the crate to crates.io through trusted publishing. Running the
+# workflow by hand only builds the binaries.
 
 on:
   push:
@@ -49,6 +50,10 @@ jobs:
           - target: x86_64-pc-windows-msvc
             os: windows-latest
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
     steps:
       # The archives carry README.md and LICENSE as committed.
       - run: git config --global core.autocrlf false
@@ -61,6 +66,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y musl-tools
       - run: cargo build --release --locked --target ${{ matrix.target }}
       - name: Package
+        id: package
         shell: bash
         run: |
           name="flot-${GITHUB_REF_NAME}-${{ matrix.target }}"
@@ -80,10 +86,18 @@ jobs:
           else
             shasum -a 256 "$archive" > "$archive.sha256"
           fi
+          echo "archive=$archive" >> "$GITHUB_OUTPUT"
       - name: The binary runs
         if: matrix.target != 'x86_64-apple-darwin'
         shell: bash
         run: target/${{ matrix.target }}/release/flot --version
+      # Signed by this workflow for the tag, so `gh attestation verify`
+      # can tell a release archive from one built anywhere else.
+      - name: Attest build provenance
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: ${{ steps.package.outputs.archive }}
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.target }}

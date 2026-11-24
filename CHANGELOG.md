@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Release archives carry a GitHub build provenance attestation, made by the
+  release workflow for the tag. The action checks it with
+  `gh attestation verify` (signer workflow and tag enforced) on top of the
+  `.sha256`, so it installs 0.2.4 or later.
 - The Claude Code hook notes each denial in the store (only where one
   exists), and the next `flot run` records those made since the previous run
   finished in its manifest as `refusals` (tool, reasons, time), covered by a

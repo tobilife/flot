@@ -6,8 +6,10 @@ branch, reports it on the pull request, and can be required before a merge.
 
 ## The GitHub action
 
-This repository is also a GitHub action. It installs a release binary
-(checked against its `.sha256`), runs the flow, checks the run with
+This repository is also a GitHub action. It installs a release binary,
+checked against its `.sha256` and against its build provenance attestation
+(`gh attestation verify`, which must find it signed by this repository's
+release workflow for the version's tag), runs the flow, checks the run with
 `flot verify --markdown` and, on a pull request, holds every proof to the
 base branch:
 
@@ -33,7 +35,7 @@ and a pull request cannot merge on a claim that a weakened check proved.
 
 | Input | Default | |
 |---|---|---|
-| `version` | the release of the tag you use | the flot release to install; `path` uses a flot already on `PATH` |
+| `version` | the release of the tag you use | the flot release to install, 0.2.4 or later (earlier releases have no attestation); `path` uses a flot already on `PATH` |
 | `working-directory` | `.` | where to look for `flot.toml` |
 | `run` | `true` | run the flow first; `false` checks the latest run an earlier step executed |
 | `proofs-from` | the base branch on a pull request | a revision every proof must match; `none` turns it off |

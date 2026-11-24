@@ -73,7 +73,7 @@ fn the_claude_code_plugin_names_the_release_being_built() {
 fn the_github_action_installs_the_release_being_built() {
     let action = read("action.yml");
     let wanted = format!(
-        "  version:\n    description: flot release to install, such as {v}; `path` uses the flot already on PATH.\n    default: \"{v}\"\n",
+        "  version:\n    description: flot release to install, 0.2.4 or later, which carry a build provenance attestation; `path` uses the flot already on PATH.\n    default: \"{v}\"\n",
         v = env!("CARGO_PKG_VERSION")
     );
     assert!(

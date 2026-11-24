@@ -88,6 +88,8 @@ cargo install flot-cli
 
 crate 名为 `flot-cli`，安装的命令是 `flot`。Linux（x86_64、aarch64）、
 macOS（x86_64、arm64）和 Windows（x86_64，zip）的预编译二进制文件见[发布页面](https://github.com/tobilife/flot/releases/latest)。
+从 0.2.4 起，每个压缩包都带有构建来源证明（build provenance attestation），可用
+`gh attestation verify ARCHIVE --repo tobilife/flot` 校验。
 如需最新的 `main` 而不是最新发布版，请使用
 `cargo install --git https://github.com/tobilife/flot`。
 

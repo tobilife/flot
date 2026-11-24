@@ -218,9 +218,12 @@ impl Server {
                 jobs: count("jobs"),
                 max_cost_usd: arguments.get("max_cost_usd").and_then(Value::as_f64),
                 stop: stop.clone(),
+                // Not an argument: the agent calling the tool must not choose
+                // the revision its own proofs are checked against.
+                proofs_from: None,
             })?)?,
             "flot_show" => serde_json::to_value(workspace.show(&run_selector())?)?,
-            "flot_verify" => serde_json::to_value(workspace.verify(&run_selector())?)?,
+            "flot_verify" => serde_json::to_value(workspace.verify(&run_selector(), None)?)?,
             "flot_diff" => serde_json::to_value(workspace.diff(
                 &text("left").unwrap_or_else(|| "latest~1".into()),
                 &text("right").unwrap_or_else(|| "latest".into()),

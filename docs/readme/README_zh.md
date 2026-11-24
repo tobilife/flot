@@ -96,7 +96,8 @@ codex mcp add flot -- flot mcp      # Codex CLI
 ```
 
 在 Claude Code 中也可以改为安装插件：它注册同一个服务器，并加入一个技能，让 Claude 在说
-改动可用之前先运行流程。`flot` 需要在 `PATH` 中。
+改动可用之前先运行流程，并加入一个钩子，拒绝编辑流程文件和证明读取的文件。`flot` 需要在
+`PATH` 中。
 
 ```text
 /plugin install flot --marketplace tobilife/flot
@@ -104,7 +105,8 @@ codex mcp add flot -- flot mcp      # Codex CLI
 
 在一次真实运行中，提示词 "The slug tests fail. Fix slug.py and tell me when the work is
 done." 并没有提到 flot，装了插件的 Claude Code 2.1.330 仍然加载了该技能、调用了
-`flot_run` 并报告 `passed`，花费 $0.24。
+`flot_run` 并报告 `passed`，花费 $0.24。要求它把证明换成 `true` 时，钩子拒绝了编辑，
+Claude 也如实说明了这一点，花费 $0.23。
 
 在包含 `flot.toml` 的项目中重启智能体（`flot init` 会生成一个起步文件）。然后可以这样问它：
 
@@ -197,6 +199,9 @@ flot 根据命令、每个输入的内容、证明命令以及上游步骤的收
 - **没有证明就没有通过。** 只有当证明命令在步骤成功之后运行并以 0 退出时，声明才是
   `verified`。失败、超时、被终止或被容忍失败的步骤什么也证明不了；运行期间其文件发生变化的
   证明也不算数。
+- **智能体改不了的证明。** 设置 `proofs_from = "origin/main"` 后，与该修订不同的证明
+  （其命令、声明或它读取的文件）的声明保持 unverified；`flot verify --proofs-from`
+  也会用同一修订检查已记录的运行。Claude Code 插件还会在编辑发生之前拒绝修改这些文件。
 - **可检验的收据。** 每份收据重新哈希后都得到它自己的 id；运行的结论和根摘要从收据重新
   计算，而不是读取存储的值。`flot verify` 会重新读取每一个存储的字节。
 - **可信的复用。** 缓存命中要求在相同的输入内容和相同的上游收据上运行相同的命令，并带有

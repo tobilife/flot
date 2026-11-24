@@ -5,9 +5,10 @@ core      digest · receipt · flow · metrics · compare
           attest · fault                                 pure model, no IO
 store     content-addressed objects, receipts, runs
 engine    keying · claims · scheduler · exec · runner   flow -> receipts
+          git · baseline
 service   Workspace: plan run show verify diff receipt
           read_object runs gc sign bundle import key    the one contract
-          trust
+          trust search push pull guard
 adapters  cli · mcp                                     parse and render only
 main.rs   composition root: hands the MCP server to the CLI
 ```
@@ -21,7 +22,8 @@ Inside the engine, policy and mechanism are split. `keying` decides a step's
 identity, `claims` decides what a proof established (pure: the only path to
 `verified` is readable in one function), `scheduler` decides when a step may
 start and knows nothing about steps, and `runner` only sequences them around
-process execution.
+process execution. `baseline` compares a proof with a git revision through
+`git`, which also carries runs to and from remotes.
 
 ## Current scope
 
@@ -32,7 +34,7 @@ the content store with host-sealed cache and trust, the CLI with typed exit
 codes, an MCP stdio server over the same functions, authenticated receipt
 bundles, spend accounting with a run cost ceiling, signed attestations with a
 local trust list and key handovers, guarded proofs, produced files kept and restored, an enforced
-layer architecture, attempts with feedback, candidates, run search, sharing through git, a Claude Code plugin, and 316 tests including end-to-end runs through the real
+layer architecture, attempts with feedback, candidates, run search, sharing through git, a Claude Code plugin, and 318 tests including end-to-end runs through the real
 binary, a real MCP handshake and a cross-store bundle import.
 
 Not there yet: sandboxing steps (they run with your permissions; see

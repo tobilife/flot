@@ -8,7 +8,7 @@
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use serde::Serialize;
 
@@ -67,6 +67,9 @@ pub enum Command {
         /// Ignore cached receipts.
         #[arg(long)]
         force: bool,
+        /// Check proofs against this git revision.
+        #[arg(long, value_name = "REV")]
+        proofs_from: Option<String>,
     },
     /// Execute the flow and record receipts.
     Run {
@@ -86,6 +89,20 @@ pub enum Command {
         /// whatever its verdict. The key is checked before anything runs.
         #[arg(long)]
         sign: bool,
+        /// Check every proof against this git revision, such as origin/main:
+        /// a claim whose proof differs there stays unverified. Overrides the
+        /// flow's `proofs_from`.
+        #[arg(long, value_name = "REV")]
+        proofs_from: Option<String>,
+    },
+    /// Say whether changing these files would touch the flow's proofs: the
+    /// flow file, a step's verify_inputs, or the store. Exits 2 when one
+    /// would. With --hook, reads a Claude Code PreToolUse payload on stdin
+    /// and answers with a denial on stdout.
+    Guard {
+        paths: Vec<PathBuf>,
+        #[arg(long)]
+        hook: bool,
     },
     /// Summarize a recorded run.
     Show {
@@ -96,6 +113,11 @@ pub enum Command {
     Verify {
         #[arg(default_value = "latest")]
         run: String,
+        /// Also hold the run's proofs to this git revision, such as
+        /// origin/main; exits 2 when one differs. Overrides the flow's
+        /// `proofs_from`.
+        #[arg(long, value_name = "REV")]
+        proofs_from: Option<String>,
     },
     /// Sign a run executed here with the host key (see `flot key init`).
     Sign {
@@ -320,10 +342,83 @@ fn dispatch(
             say!("next: flot plan");
             Ok(ExitCode::SUCCESS)
         }
-        Command::Plan { only, force } => {
+        Command::Guard { paths, hook } => {
+            let cwd = std::env::current_dir().context("cannot read the current directory")?;
+            let mut targets: Vec<PathBuf> = paths.iter().map(|path| cwd.join(path)).collect();
+            if *hook {
+                let mut payload = String::new();
+                std::io::Read::read_to_string(&mut std::io::stdin(), &mut payload)
+                    .context("cannot read the hook payload")?;
+                let payload: serde_json::Value =
+                    serde_json::from_str(&payload).context("the hook payload is not JSON")?;
+                let base = payload["cwd"].as_str().map(PathBuf::from).unwrap_or(cwd);
+                for key in ["file_path", "notebook_path"] {
+                    if let Some(path) = payload["tool_input"][key].as_str() {
+                        targets.push(base.join(path));
+                    }
+                }
+            }
+            // This directory's flow, and the flow nearest each file: an edit
+            // in a subproject touches that subproject's proofs.
+            let mut flows = vec![workspace.clone()];
+            if cli.file.is_none() {
+                for target in &targets {
+                    let Some(dir) = target.ancestors().skip(1).find(|dir| dir.is_dir()) else {
+                        continue;
+                    };
+                    let found = Workspace::locate(dir, None)?;
+                    if !flows
+                        .iter()
+                        .any(|flow| flow.flow_path() == found.flow_path())
+                    {
+                        flows.push(found);
+                    }
+                }
+            }
+            let guarded: Vec<_> = flows.iter().flat_map(|flow| flow.guard(&targets)).collect();
+            if *hook {
+                // Claude Code reads a denial on stdout; the exit stays 0 so
+                // the hook's `|| true` keeps a failure to run from blocking.
+                if !guarded.is_empty() {
+                    let reasons: Vec<String> = guarded
+                        .iter()
+                        .map(|found| format!("{} is protected: {}", found.path, found.reason))
+                        .collect();
+                    print_json(&serde_json::json!({
+                        "hookSpecificOutput": {
+                            "hookEventName": "PreToolUse",
+                            "permissionDecision": "deny",
+                            "permissionDecisionReason": format!(
+                                "flot: {}. Changing it would void the evidence; fix the work under test instead, or ask the user to change the check.",
+                                reasons.join("; ")
+                            ),
+                        }
+                    }))?;
+                }
+                return Ok(ExitCode::SUCCESS);
+            }
+            if cli.json {
+                print_json(&guarded)?;
+            } else {
+                for found in &guarded {
+                    say!("protected  {}: {}", found.path, found.reason);
+                }
+            }
+            Ok(if guarded.is_empty() {
+                ExitCode::SUCCESS
+            } else {
+                ExitCode::from(2)
+            })
+        }
+        Command::Plan {
+            only,
+            force,
+            proofs_from,
+        } => {
             let plan = workspace.plan(&RunOptions {
                 only: only.clone(),
                 force: *force,
+                proofs_from: proofs_from.clone(),
                 ..RunOptions::default()
             })?;
             if cli.json {
@@ -339,6 +434,7 @@ fn dispatch(
             jobs,
             max_cost,
             sign,
+            proofs_from,
         } => {
             if *sign {
                 // A missing key must stop the run before it spends anything.
@@ -349,6 +445,7 @@ fn dispatch(
                 force: *force,
                 jobs: jobs.map(|jobs| jobs as usize),
                 max_cost_usd: *max_cost,
+                proofs_from: proofs_from.clone(),
                 ..RunOptions::default()
             })?;
             let signed = if *sign {
@@ -388,8 +485,8 @@ fn dispatch(
             }
             Ok(exit_for(detail.manifest.verdict))
         }
-        Command::Verify { run } => {
-            let audit = workspace.verify(run)?;
+        Command::Verify { run, proofs_from } => {
+            let audit = workspace.verify(run, proofs_from.as_deref())?;
             if cli.json {
                 print_json(&audit)?;
             } else {
@@ -397,6 +494,10 @@ fn dispatch(
             }
             Ok(if !audit.intact {
                 ExitCode::from(1)
+            } else if audit.verdict == Verdict::Passed
+                && audit.anchor.as_ref().is_some_and(|anchor| !anchor.holds())
+            {
+                exit_for(Verdict::Unverified)
             } else {
                 exit_for(audit.verdict)
             })
@@ -1035,6 +1136,22 @@ fn render_audit(audit: &Audit) {
         }
     }
     say!("verdict {}", audit.verdict.label());
+    if let Some(anchor) = &audit.anchor {
+        if anchor.holds() {
+            say!("proofs: as at {}", anchor.baseline);
+        } else {
+            say!("proofs: NOT as at {}", anchor.baseline);
+            for drift in &anchor.drifted {
+                say!("  - {}: {}", drift.step_id, drift.reasons.join(", "));
+            }
+            if !anchor.missing.is_empty() {
+                say!(
+                    "  - claims there that this run does not make: {}",
+                    anchor.missing.join(", ")
+                );
+            }
+        }
+    }
     render_authorship(audit.authorship, &audit.signers);
 }
 

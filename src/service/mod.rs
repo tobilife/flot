@@ -17,7 +17,9 @@ use serde::Serialize;
 use crate::core::compare::{self, RunDiff};
 use crate::core::flow::Flow;
 use crate::core::receipt::{ClaimCounts, ClaimRecord, Receipt, RunManifest, Verdict};
+use crate::engine::baseline::Baseline;
 use crate::engine::exec;
+use crate::engine::git::Git;
 use crate::engine::runner::Runner;
 // The request and report types are part of this contract; adapters take them
 // from here and never reach into the engine.
@@ -109,6 +111,30 @@ pub struct RunSummary {
     pub steps: usize,
     /// The run arrived in a bundle rather than ran here.
     pub imported: bool,
+}
+
+/// A file whose change would touch the flow's proofs, and why.
+#[derive(Debug, Clone, Serialize)]
+pub struct Guarded {
+    /// Relative to the flow's directory.
+    pub path: String,
+    pub reason: String,
+}
+
+/// `path` without `.` and with `..` applied, without touching the disk: the
+/// file may not exist yet.
+fn normalize(path: &Path) -> PathBuf {
+    let mut out = PathBuf::new();
+    for part in path.components() {
+        match part {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                out.pop();
+            }
+            other => out.push(other),
+        }
+    }
+    out
 }
 
 /// Which execution of a step [`Workspace::step_output`] reads.
@@ -247,6 +273,62 @@ impl Workspace {
         Store::open(&self.root, keys::host_secret()?)
     }
 
+    /// Which of `paths` (absolute) changing would touch this flow's proofs:
+    /// the flow file, a file a step's proof reads, or the store. A flow file
+    /// that is missing guards nothing; one that does not parse still guards
+    /// itself and the store.
+    pub fn guard(&self, paths: &[PathBuf]) -> Vec<Guarded> {
+        if !self.flow_path.is_file() {
+            return Vec::new();
+        }
+        let flow = self.flow().ok();
+        let roots: Vec<PathBuf> = [Some(self.root.clone()), self.root.canonicalize().ok()]
+            .into_iter()
+            .flatten()
+            .collect();
+        let mut guarded = Vec::new();
+        for path in paths {
+            let path = normalize(path);
+            let Some(relative) = roots
+                .iter()
+                .find_map(|root| path.strip_prefix(normalize(root)).ok())
+            else {
+                continue;
+            };
+            let relative = relative
+                .components()
+                .map(|part| part.as_os_str().to_string_lossy())
+                .collect::<Vec<_>>()
+                .join("/");
+            let reason = if Some(relative.as_str())
+                == self.flow_path.file_name().and_then(|name| name.to_str())
+            {
+                Some("it is the flow file, which says what proves the work".to_string())
+            } else if relative == crate::store::STORE_DIR
+                || relative.starts_with(&format!("{}/", crate::store::STORE_DIR))
+            {
+                Some("it is in the flot store, which holds the evidence".to_string())
+            } else {
+                flow.iter().flat_map(|flow| &flow.steps).find_map(|step| {
+                    step.verify_inputs
+                        .iter()
+                        .filter_map(|pattern| glob::Pattern::new(pattern).ok())
+                        .any(|pattern| {
+                            pattern.matches_with(&relative, crate::engine::keying::match_options())
+                        })
+                        .then(|| format!("the proof of step `{}` reads it", step.id))
+                })
+            };
+            if let Some(reason) = reason {
+                guarded.push(Guarded {
+                    path: relative,
+                    reason,
+                });
+            }
+        }
+        guarded
+    }
+
     /// Write the starter flow. Refuses to replace an existing file unless
     /// `force` is set.
     pub fn init(&self, force: bool) -> Result<PathBuf> {
@@ -264,7 +346,10 @@ impl Workspace {
     pub fn plan(&self, options: &RunOptions) -> Result<Plan> {
         let flow = self.flow()?;
         let store = self.store()?;
-        let steps = Runner::new(&flow, &self.root, &store).plan(options)?;
+        let baseline = self.baseline(Some(&flow), options.proofs_from.as_deref())?;
+        let steps = Runner::new(&flow, &self.root, &store)
+            .with_baseline(baseline.as_ref())
+            .plan(options)?;
         Ok(Plan {
             flow_digest: flow.digest(),
             flow: flow.meta.name,
@@ -275,7 +360,43 @@ impl Workspace {
     pub fn run(&self, options: &RunOptions) -> Result<RunReport> {
         let flow = self.flow()?;
         let store = self.store()?;
-        Runner::new(&flow, &self.root, &store).run(options)
+        let baseline = self.baseline(Some(&flow), options.proofs_from.as_deref())?;
+        Runner::new(&flow, &self.root, &store)
+            .with_baseline(baseline.as_ref())
+            .run(options)
+    }
+
+    /// The revision proofs must match: `named`, else the committed flow's
+    /// `proofs_from`, else the working copy's. The committed setting wins so
+    /// that an edit to the working copy cannot drop it.
+    fn baseline(&self, flow: Option<&Flow>, named: Option<&str>) -> Result<Option<Baseline>> {
+        let file = self
+            .flow_path
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_else(|| DEFAULT_FLOW_FILE.into());
+        let committed = || -> Option<String> {
+            let git = Git::open(&self.root).ok()?;
+            let id = git
+                .run(
+                    &[
+                        "rev-parse",
+                        "--verify",
+                        "--quiet",
+                        &format!("HEAD:./{file}"),
+                    ],
+                    None,
+                )
+                .ok()?;
+            let text = String::from_utf8(git.blob(&id, 1 << 20).ok()?).ok()?;
+            Flow::parse(&text).ok()?.meta.proofs_from
+        };
+        let rev = match named {
+            Some(rev) => Some(rev.to_string()),
+            None => committed().or_else(|| flow.and_then(|flow| flow.meta.proofs_from.clone())),
+        };
+        rev.map(|rev| Baseline::load(&self.root, &file, &rev))
+            .transpose()
     }
 
     /// A recorded run: `latest`, an exact id, or an unambiguous substring.
@@ -300,10 +421,18 @@ impl Workspace {
         })
     }
 
-    pub fn verify(&self, run: &str) -> Result<Audit> {
+    /// Re-authenticate a recorded run and, when a revision is named here or
+    /// set by `proofs_from`, hold its proofs to that revision.
+    pub fn verify(&self, run: &str, proofs_from: Option<&str>) -> Result<Audit> {
         let store = self.store()?;
         let manifest = store.resolve_run(run)?;
-        audit::audit(&store, &manifest)
+        let mut audit = audit::audit(&store, &manifest)?;
+        // The flow is optional here: a run can be verified without one.
+        let flow = self.flow().ok();
+        if let Some(baseline) = self.baseline(flow.as_ref(), proofs_from)? {
+            audit.anchor = Some(audit::anchor(&store, &manifest, &baseline)?);
+        }
+        Ok(audit)
     }
 
     pub fn diff(&self, left: &str, right: &str) -> Result<RunDiff> {

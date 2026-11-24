@@ -252,6 +252,90 @@ unverified claims and the proof is not run. A step that edits its declared
 `inputs` is reported too, since its receipt then describes files that no longer
 exist.
 
+That catches a step that edits its proof while it runs. It does not catch an
+agent that edits the proof before the run, or commits the weaker check: the
+run then proves the weaker check, faithfully.
+
+### Proofs from a revision
+
+`proofs_from` names a git revision the agent does not control, such as
+`origin/main`. Each step's proof must be as it is there: its claims, its
+`verify` command, its `verify_inputs` patterns, and the files they match. A
+step whose proof differs still runs, but its proof does not, its claims stay
+unverified, and no receipt stands in for it. A claim dropped from the flow is
+still listed, and a step with claims at the revision that the flow no longer
+has is named.
+
+```toml
+[flow]
+name = "acceptance"
+proofs_from = "origin/main"
+
+[[step]]
+id = "implement"
+run = "python3 make.py"
+inputs = ["make.py"]
+claims = ["the acceptance check passes"]
+verify = "python3 tests/acceptance.py"
+verify_inputs = ["tests/**"]
+```
+
+After `tests/acceptance.py` is weakened to `assert True` in the working copy
+(real output, the store's ids as printed):
+
+```text
+$ flot run
+ran      implement            ok        11ms  claims 0v/1u/0r  receipt d465823b6a30
+
+UNVERIFIED 1795531484579-cb8b58c66018  root cb8b58c66018  31ms
+limitations:
+  - implement: the proof differs from origin/main (df9bf14a7787) (tests/acceptance.py differs); claims stay unverified and the proof was not run
+  - proofs checked against origin/main (df9bf14a7787)
+```
+
+The revision is the one `--proofs-from REV` names, else `proofs_from` in the
+flow as committed at `HEAD`, else in the working copy: deleting the line from
+the working copy does not turn the check off. A branch that commits both a
+weaker check and its own `proofs_from` does pass its own run, so
+`flot verify --proofs-from origin/main` holds a recorded run to a revision
+too, and exits 2 when a proof differs:
+
+```text
+$ flot verify --proofs-from origin/main
+run 1795531484704-4498c0026bef  receipts checked 1  root 4498c0026bef
+integrity: intact
+verdict passed
+proofs: NOT as at origin/main (df9bf14a7787)
+  - implement: tests/acceptance.py differs
+authorship: unsigned
+```
+
+A receipt does not record the `verify_inputs` patterns, so `verify` compares
+the files they matched, the claims and the command. The revision must be a
+commit in the repository (`fetch` it first in CI); one that is not is an
+environment error. The MCP tools take no revision: an agent cannot pick what
+its own proofs are checked against. Files are compared byte for byte, so a
+checkout that rewrites line endings differs from the revision.
+
+### Refusing the edit
+
+`flot guard PATH...` names the paths whose change would touch the proofs: the
+flow file, a file some step's `verify_inputs` matches, and the store. It exits
+2 when there is one. Each path is checked against the flow of the current
+directory and the flow nearest the path.
+
+```text
+$ flot guard tests/acceptance.py flot.toml
+protected  tests/acceptance.py: the proof of step `implement` reads it
+protected  flot.toml: it is the flow file, which says what proves the work
+```
+
+`flot guard --hook` reads a Claude Code `PreToolUse` payload on stdin and
+answers with a denial; the [Claude Code plugin](mcp.md#claude-code-plugin)
+installs it for `Edit`, `Write`, `MultiEdit` and `NotebookEdit`. A shell
+command such as `sed -i` is not a file edit the hook sees; `proofs_from` is
+what catches that.
+
 ## Outputs
 
 `outputs` names the files a step produces. When the step finishes

@@ -3,11 +3,12 @@
 | Command | Purpose |
 |---|---|
 | `flot init` | write a starter `flot.toml` in the current directory |
-| `flot plan [--only STEP] [--force]` | predicted execution, reuse and evidence gaps; runs nothing |
-| `flot run [--only STEP] [--force] [--jobs N] [--max-cost USD] [--sign]` | execute and record receipts; `--sign` then signs the run |
+| `flot plan [--only STEP] [--force] [--proofs-from REV]` | predicted execution, reuse and evidence gaps; runs nothing |
+| `flot run [--only STEP] [--force] [--jobs N] [--max-cost USD] [--sign] [--proofs-from REV]` | execute and record receipts; `--sign` then signs the run; `--proofs-from` holds each proof to a git revision ([proofs from a revision](flows.md#proofs-from-a-revision)) |
 | `flot sign [RUN]` | sign a run executed here with the host key |
 | `flot show [RUN]` | steps, claims and limitations of a run |
-| `flot verify [RUN]` | re-authenticate a run from the store alone |
+| `flot verify [RUN] [--proofs-from REV]` | re-authenticate a run from the store alone; with a revision (or the flow's `proofs_from`), also check its proofs are as they are there |
+| `flot guard PATH... [--hook]` | name the paths whose change would touch the proofs and exit 2 if any; `--hook` answers a Claude Code `PreToolUse` payload |
 | `flot diff [LEFT] [RIGHT]` | step-by-step comparison by receipt identity; by default `latest~1` against `latest` |
 | `flot receipt ID` | one receipt as JSON (id prefix accepted) |
 | `flot log STEP [RUN] [--stderr] [--candidate NAME] [--attempt N]` | complete output one step of a run printed; by default the receipt the run kept, else another candidate it ran or an earlier attempt |
@@ -58,7 +59,8 @@ JSON reader decodes to the same text; `flot cat` is byte-exact.
 
 `0` passed; `1` failed, or evidence that does not authenticate (a
 broken run, a tampered receipt or object, a bundle that fails its checks, a
-store record that cannot be read); `2` unverified claims or a non-identical
-diff; `3` invalid request, including usage errors and policy refusals such as
+store record that cannot be read); `2` unverified claims, a non-identical
+diff, a run whose proofs differ from the revision `verify` holds it to, or a
+path `flot guard` protects; `3` invalid request, including usage errors and policy refusals such as
 `--require-trusted`; `4` the environment failed (IO, permissions, a store busy
 with a run), so retrying can succeed.

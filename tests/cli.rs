@@ -123,6 +123,31 @@ impl Project {
             stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
         }
     }
+
+    fn flot_stdin(&self, args: &[&str], stdin: &str) -> Output {
+        use std::io::Write;
+        let mut child = Command::new(flot_bin())
+            .args(args)
+            .current_dir(self.path())
+            .env("FLOT_SIGNING_KEY", self.key_path())
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .expect("flot runs");
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(stdin.as_bytes())
+            .unwrap();
+        let output = child.wait_with_output().expect("flot runs");
+        Output {
+            code: output.status.code().unwrap_or(-1),
+            stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+        }
+    }
 }
 
 const PROVEN: &str = r#"
@@ -3068,4 +3093,176 @@ fn sharing_needs_a_git_repository() {
     let outside = project.flot(&["push", "--remote", "origin"]);
     assert_eq!(outside.code, 4, "{}", outside.stderr);
     outside.has("sharing runs needs the flow to be in a git repository");
+}
+
+const ANCHORED: &str = r#"
+[flow]
+name = "anchored"
+proofs_from = "main"
+
+[[step]]
+id = "work"
+run = "echo 1 > out.txt"
+claims = ["out.txt holds 1"]
+verify = "sh check.sh"
+verify_inputs = ["check.sh"]
+"#;
+
+/// A project committed on `main`, with `check.sh` as its proof.
+fn anchored_project() -> Project {
+    let project = Project::new(ANCHORED);
+    project.write("check.sh", "grep -q 1 out.txt\n");
+    project.write(".gitignore", ".flot\nout.txt\n");
+    let dir = project.path();
+    git_in(dir, &["init", "-q", "-b", "main"]);
+    git_in(dir, &["add", "-A"]);
+    git_in(
+        dir,
+        &[
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@t",
+            "commit",
+            "-qm",
+            "base",
+        ],
+    );
+    project
+}
+
+#[test]
+fn a_proof_that_differs_from_the_baseline_proves_nothing() {
+    let project = anchored_project();
+    project
+        .flot(&["run"])
+        .ok()
+        .has("proofs checked against main");
+    project
+        .flot(&["verify", "--proofs-from", "main"])
+        .ok()
+        .has("proofs: as at main");
+
+    // The proof is weakened in the working copy: the step runs, the proof does
+    // not, and no receipt made before is reused.
+    project.write("check.sh", "true\n");
+    let weakened = project.flot(&["run"]);
+    assert_eq!(weakened.code, 2, "{}", weakened.stdout);
+    weakened
+        .has("claims 0v/1u/0r")
+        .has("the proof differs from main")
+        .has("check.sh differs");
+    project
+        .flot(&["plan"])
+        .has("its claims would stay unverified");
+
+    // Dropping the setting from the working copy does not drop the check: the
+    // committed flow keeps it.
+    project.write(
+        "flot.toml",
+        &ANCHORED.replace("proofs_from = \"main\"\n", ""),
+    );
+    let dropped = project.flot(&["run"]);
+    assert_eq!(dropped.code, 2, "{}", dropped.stdout);
+
+    // Committed on another branch, the weaker proof passes its own run, and
+    // `verify` against main still refuses it.
+    project.write("flot.toml", ANCHORED);
+    let dir = project.path();
+    git_in(dir, &["checkout", "-q", "-b", "agent"]);
+    git_in(
+        dir,
+        &[
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@t",
+            "commit",
+            "-qam",
+            "weaken",
+        ],
+    );
+    project.write("flot.toml", &ANCHORED.replace("main", "agent"));
+    git_in(
+        dir,
+        &[
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@t",
+            "commit",
+            "-qam",
+            "own baseline",
+        ],
+    );
+    project.flot(&["run"]).ok();
+    let held = project.flot(&["verify", "--proofs-from", "main"]);
+    assert_eq!(held.code, 2, "{}", held.stdout);
+    held.has("proofs: NOT as at main")
+        .has("work: check.sh differs");
+    // Nor does a receipt that passed against its own baseline stand in.
+    let reused = project.flot(&["run", "--proofs-from", "main"]);
+    assert_eq!(reused.code, 2, "{}", reused.stdout);
+    reused.has("ran      work").lacks("cached ");
+
+    // A claim dropped from the flow still counts against it.
+    project.write(
+        "flot.toml",
+        "[flow]\nname = \"anchored\"\n\n[[step]]\nid = \"other\"\nrun = \"true\"\n",
+    );
+    project
+        .flot(&["run", "--proofs-from", "main"])
+        .has("steps with claims at main")
+        .has("work; their claims are not made");
+
+    let missing = project.flot(&["run", "--proofs-from", "nowhere"]);
+    assert_eq!(missing.code, 4, "{}", missing.stderr);
+    missing.has("which is not a commit in this repository");
+}
+
+#[test]
+fn guard_names_the_files_that_prove_the_work() {
+    let project = Project::new(ANCHORED);
+    project.write("check.sh", "true\n");
+    let guarded = project.flot(&[
+        "guard",
+        "check.sh",
+        "flot.toml",
+        ".flot/latest",
+        "src/lib.rs",
+    ]);
+    assert_eq!(guarded.code, 2, "{}", guarded.stdout);
+    guarded
+        .has("protected  check.sh: the proof of step `work` reads it")
+        .has("protected  flot.toml: it is the flow file")
+        .has("protected  .flot/latest: it is in the flot store")
+        .lacks("src/lib.rs");
+    project.flot(&["guard", "src/lib.rs"]).ok();
+    // A file of a subproject is guarded by the subproject's flow.
+    project.write(
+        "sub/flot.toml",
+        "[flow]\nname = \"sub\"\n\n[[step]]\nid = \"inner\"\nrun = \"true\"\nclaims = [\"t\"]\nverify = \"sh t.sh\"\nverify_inputs = [\"t.sh\"]\n",
+    );
+    let nested = project.flot(&["guard", "sub/t.sh"]);
+    assert_eq!(nested.code, 2, "{}", nested.stdout);
+    nested.has("protected  t.sh: the proof of step `inner` reads it");
+
+    // As a Claude Code hook: the payload names the file and the session's
+    // directory, and a protected file is denied on stdout with exit 0.
+    let payload = |path: &str| {
+        serde_json::json!({
+            "cwd": project.path(),
+            "tool_name": "Edit",
+            "tool_input": { "file_path": path },
+        })
+        .to_string()
+    };
+    let denied = project.flot_stdin(&["guard", "--hook"], &payload("check.sh"));
+    denied
+        .ok()
+        .has("\"permissionDecision\": \"deny\"")
+        .has("check.sh is protected");
+    let absolute = project.path().join("src/lib.rs");
+    let allowed = project.flot_stdin(&["guard", "--hook"], &payload(absolute.to_str().unwrap()));
+    assert_eq!(allowed.ok().stdout.trim(), "");
 }

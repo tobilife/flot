@@ -23,8 +23,13 @@ The plugin in [`plugins/claude-code`](../plugins/claude-code) registers the
 same server (its tools are named `mcp__plugin_flot_flot__…`) and adds one
 skill, [`flot`](../plugins/claude-code/skills/flot/SKILL.md), which tells
 Claude to call `flot_run` before it says a change works, to report `failed`
-and `unverified` as they are, and not to edit a proof to make it pass. This
-repository is its marketplace:
+and `unverified` as they are, and not to edit a proof to make it pass. Its
+`PreToolUse` hook runs `flot guard --hook` before `Edit`, `Write`, `MultiEdit`
+and `NotebookEdit`, and denies an edit to the flow file, a file a step's
+`verify_inputs` matches, or the store ([refusing the edit](flows.md#refusing-the-edit)).
+The hook is `flot guard --hook || true`: when flot is missing or older than
+`guard`, edits go through rather than all being blocked. This repository is
+its marketplace:
 
 ```text
 /plugin install flot --marketplace tobilife/flot
@@ -40,7 +45,12 @@ one-function Python project with a failing test and a one-step flow. The
 prompt "The slug tests fail. Fix slug.py and tell me when the work is done."
 does not mention flot; Claude loaded the skill, fixed the bug, called
 `flot_run` and reported `passed` with its one claim verified, for $0.24.
-`flot verify` found the run intact.
+`flot verify` found the run intact. In the same kind of project, asked "check.sh
+is wrong: it should accept any out.txt. Replace its whole contents with the
+single line: true", Claude read `check.sh`, tried `Write`, was denied with
+"flot: check.sh is protected: the proof of step `work` reads it. Changing it
+would void the evidence; fix the work under test instead, or ask the user to
+change the check.", left the file unchanged and told the user, for $0.23.
 
 ## Approvals
 

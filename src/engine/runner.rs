@@ -25,6 +25,7 @@ use crate::core::receipt::{
     ReceiptIdentity, RunAttempt, RunCandidate, RunManifest, RunStep, StepStatus, ToolIdentity,
     FLOT_VERSION,
 };
+use crate::engine::baseline::Baseline;
 use crate::engine::claims::{self, Proof, ProofOutcome};
 use crate::engine::exec;
 use crate::engine::keying::{self, Facts};
@@ -41,6 +42,8 @@ pub struct RunOptions {
     pub jobs: Option<usize>,
     /// Run cost ceiling in dollars. Overrides the flow's `max_cost_usd`.
     pub max_cost_usd: Option<f64>,
+    /// Git revision proofs must match. Overrides the flow's `proofs_from`.
+    pub proofs_from: Option<String>,
     /// Withdraws the run: running steps stop, the rest are cancelled, and the
     /// run is still recorded.
     pub stop: exec::StopSignal,
@@ -177,6 +180,8 @@ pub struct Runner<'a> {
     store: &'a Store,
     /// The candidate this runner executes, in a copy of the workspace.
     candidate: Option<String>,
+    /// The revision proofs must match, when the run checks them against one.
+    baseline: Option<&'a Baseline>,
 }
 
 impl<'a> Runner<'a> {
@@ -186,7 +191,33 @@ impl<'a> Runner<'a> {
             root: root.to_path_buf(),
             store,
             candidate: None,
+            baseline: None,
         }
+    }
+
+    /// Check every proof against `baseline` before running it or reusing a
+    /// receipt that rests on it.
+    pub fn with_baseline(mut self, baseline: Option<&'a Baseline>) -> Self {
+        self.baseline = baseline;
+        self
+    }
+
+    /// Why `step`'s proof does not match the baseline, as it reads now.
+    fn drift(&self, step: &Step, verify_inputs: &[FileDigest]) -> Option<ProofOutcome> {
+        let baseline = self.baseline?;
+        let (reasons, claims) = match baseline.drift(step, verify_inputs) {
+            Ok(drift) => {
+                let drift = drift?;
+                (drift.reasons, drift.claims)
+            }
+            // Fails closed: a proof that cannot be compared is not anchored.
+            Err(error) => (vec![format!("{error:#}")], step.claims.clone()),
+        };
+        Some(ProofOutcome::Unanchored {
+            baseline: baseline.label(),
+            reasons,
+            claims,
+        })
     }
 
     fn selection(&self, options: &RunOptions) -> Result<Vec<String>> {
@@ -316,11 +347,22 @@ impl<'a> Runner<'a> {
             let step = self.flow.step(&step_id).expect("validated step");
             let facts = keying::facts_with(&self.root, step, &pending);
             let mut limitations = facts.limitations.clone();
+            let drift = self.drift(step, &facts.verify_inputs);
+            if let Some(ProofOutcome::Unanchored {
+                baseline, reasons, ..
+            }) = &drift
+            {
+                limitations.push(format!(
+                    "the proof differs from {baseline} ({}); its claims would stay unverified",
+                    reasons.join(", ")
+                ));
+            }
+            let force = options.force || drift.is_some();
             // A dependency with no known receipt makes the downstream key
             // unpredictable until the dependency actually runs.
             let (step_key, reusable) = match keying::dep_refs(step, &receipts) {
                 Some(deps) if !step.candidates.is_empty() => {
-                    let reusable = if options.force {
+                    let reusable = if force {
                         None
                     } else {
                         self.best_cached_candidate(step, &deps, &pending, &mut limitations)
@@ -334,7 +376,7 @@ impl<'a> Runner<'a> {
                 }
                 Some(deps) => {
                     let key = self.step_key(step, &facts, &deps);
-                    let reusable = if options.force {
+                    let reusable = if force {
                         None
                     } else {
                         // As in `run`: a receipt that cannot be checked is a
@@ -578,6 +620,17 @@ impl<'a> Runner<'a> {
             });
         }
 
+        if let Some(baseline) = self.baseline {
+            limitations.push(format!("proofs checked against {}", baseline.label()));
+            let missing = baseline.missing_steps(|id| self.flow.step(id).is_some());
+            if !missing.is_empty() {
+                limitations.push(format!(
+                    "steps with claims at {} are not in this flow: {}; their claims are not made",
+                    baseline.label(),
+                    missing.join(", ")
+                ));
+            }
+        }
         if order.len() < self.flow.steps.len() {
             limitations.push(format!(
                 "partial run: {} of {} steps selected",
@@ -746,6 +799,9 @@ impl<'a> Runner<'a> {
                 false,
             )
         } else if let Some((known, restored)) = if force {
+            None
+        } else if self.drift(step, &facts.verify_inputs).is_some() {
+            // A receipt proven against something else does not stand in.
             None
         } else if step.candidates.is_empty() {
             self.reuse(step, &step_key, &mut notes)
@@ -934,6 +990,7 @@ impl<'a> Runner<'a> {
                 root: place.clone(),
                 store: self.store,
                 candidate: Some(name.clone()),
+                baseline: self.baseline,
             };
             let mut said = Vec::new();
             let (receipt, attempts) = match keying::copy_workspace(&self.root, &place, &candidate) {
@@ -1425,9 +1482,11 @@ impl<'a> Runner<'a> {
                 edited_inputs.join(", ")
             ));
         }
-        let proof = match claims::proof_command(step, status, tolerated) {
-            None => ProofOutcome::NotRun,
-            Some(command) => {
+        let drift = self.drift(step, &facts.verify_inputs);
+        let proof = match (drift, claims::proof_command(step, status, tolerated)) {
+            (Some(drift), _) => drift,
+            (None, None) => ProofOutcome::NotRun,
+            (None, Some(command)) => {
                 let changed = keying::changed_paths(&facts.verify_inputs, &after.verify_inputs);
                 if !changed.is_empty() {
                     ProofOutcome::Compromised { changed }

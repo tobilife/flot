@@ -8,6 +8,7 @@ use crate::core::digest;
 use std::collections::BTreeMap;
 
 use crate::core::receipt::{Observed, Receipt, RunManifest, Verdict};
+use crate::engine::baseline::Baseline;
 use crate::store::Store;
 
 #[derive(Debug, Clone, Serialize)]
@@ -22,6 +23,56 @@ pub struct Audit {
     /// Who vouched for this run, judged against this store's trust list.
     pub authorship: Authorship,
     pub signers: Vec<SignerCheck>,
+    /// How the run's proofs compare with a revision, when checked against one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub anchor: Option<Anchor>,
+}
+
+/// A recorded run's proofs held to a git revision.
+#[derive(Debug, Clone, Serialize)]
+pub struct Anchor {
+    /// The revision and the commit it named, such as `origin/main (1a2b…)`.
+    pub baseline: String,
+    /// Steps whose recorded proof differs from the revision.
+    pub drifted: Vec<StepDrift>,
+    /// Steps with claims at the revision that the run did not record.
+    pub missing: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct StepDrift {
+    pub step_id: String,
+    pub reasons: Vec<String>,
+}
+
+impl Anchor {
+    /// Whether every claim the revision makes was proven as it says.
+    pub fn holds(&self) -> bool {
+        self.drifted.is_empty() && self.missing.is_empty()
+    }
+}
+
+/// Compare each receipt `manifest` kept with `baseline`. A receipt that
+/// cannot be read is left to the integrity findings.
+pub fn anchor(store: &Store, manifest: &RunManifest, baseline: &Baseline) -> Result<Anchor> {
+    let mut drifted = Vec::new();
+    for step in &manifest.steps {
+        let Ok(receipt) = store.load_receipt(&step.receipt_id) else {
+            continue;
+        };
+        if let Some(drift) = baseline.drift_of(&receipt.identity)? {
+            drifted.push(StepDrift {
+                step_id: step.step_id.clone(),
+                reasons: drift.reasons,
+            });
+        }
+    }
+    let missing = baseline.missing_steps(|id| manifest.steps.iter().any(|step| step.step_id == id));
+    Ok(Anchor {
+        baseline: baseline.label(),
+        drifted,
+        missing,
+    })
 }
 
 /// Re-authenticate a run from the store alone: every receipt must hash to its
@@ -112,5 +163,6 @@ pub fn audit(store: &Store, manifest: &RunManifest) -> Result<Audit> {
         findings,
         authorship,
         signers,
+        anchor: None,
     })
 }

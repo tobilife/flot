@@ -31,6 +31,14 @@ pub enum ProofOutcome {
     Ran(Proof),
     /// The proof command could not be started at all.
     Failed(String),
+    /// The proof differs from the revision the run checks proofs against,
+    /// so it was not run. `claims` are the step's claims and any it made at
+    /// that revision.
+    Unanchored {
+        baseline: String,
+        reasons: Vec<String>,
+        claims: Vec<String>,
+    },
     /// The proof ran, but files it judged were different afterwards: the
     /// proof changed the step's outputs, or something changed its inputs
     /// while it ran. Whatever it concluded was about files that are gone.
@@ -58,6 +66,31 @@ pub fn settle(
     proof: ProofOutcome,
     limitations: &mut Vec<String>,
 ) -> Vec<ClaimRecord> {
+    // Checked first: a claim dropped from the flow since the revision still
+    // shows, as unproven.
+    if let ProofOutcome::Unanchored {
+        baseline,
+        reasons,
+        claims,
+    } = &proof
+    {
+        limitations.push(format!(
+            "the proof differs from {baseline} ({}); claims stay unverified and the proof was not run",
+            reasons.join(", ")
+        ));
+        let reason = format!("the proof differs from {baseline}");
+        return claims
+            .iter()
+            .map(|text| ClaimRecord {
+                text: text.clone(),
+                status: ClaimStatus::Unverified,
+                verify_command: step.verify.clone(),
+                verify_exit: None,
+                verify_output_digest: None,
+                reason: Some(reason.clone()),
+            })
+            .collect();
+    }
     if step.claims.is_empty() {
         if step.verify.is_some() {
             limitations.push("a verify command is declared but the step claims nothing".into());
@@ -101,7 +134,7 @@ pub fn settle(
             ));
             return unverified(step, "files changed while the proof ran");
         }
-        ProofOutcome::NotRun => {
+        ProofOutcome::NotRun | ProofOutcome::Unanchored { .. } => {
             unreachable!("a step with claims, a verify command and success always attempts a proof")
         }
     };

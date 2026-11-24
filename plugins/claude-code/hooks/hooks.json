@@ -1,0 +1,16 @@
+{
+  "description": "Block edits to the files that prove the work: the flow file, files a step's verify reads, and the flot store.",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "flot guard --hook || true"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -182,6 +182,11 @@ pub struct FlowMeta {
     /// what executed steps reported through `$FLOT_METRICS`.
     #[serde(default)]
     pub max_cost_usd: Option<f64>,
+    /// Git revision every proof must match, such as `origin/main`. The
+    /// committed flow's setting wins over the working copy's, so removing it
+    /// takes a commit.
+    #[serde(default)]
+    pub proofs_from: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -217,6 +222,14 @@ impl Flow {
         }
         if self.steps.is_empty() {
             bail!("flow `{}` declares no steps", self.meta.name);
+        }
+        if self
+            .meta
+            .proofs_from
+            .as_deref()
+            .is_some_and(|rev| rev.trim().is_empty() || rev.starts_with('-'))
+        {
+            bail!("flow.proofs_from must name a git revision");
         }
         if let Some(ceiling) = self.meta.max_cost_usd {
             crate::core::metrics::usd_to_micro(ceiling)

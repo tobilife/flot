@@ -33,6 +33,17 @@
 - A Claude Code plugin (`plugins/claude-code`, with this repository as its
   marketplace): it registers `flot mcp` and adds a skill that runs the flow
   before Claude says a change works.
+- `proofs_from = "REV"` in `[flow]` and `--proofs-from REV` on `run` and
+  `plan`: each step's proof (claims, `verify`, `verify_inputs` and the files
+  they match) must be as it is at a git revision such as `origin/main`, or the
+  proof is not run, its claims stay unverified and no receipt stands in. The
+  flow as committed at `HEAD` decides the revision before the working copy
+  does, and the MCP tools take none.
+- `flot verify --proofs-from REV` holds a recorded run's proofs to a revision,
+  and exits 2 when one differs or a claim there is missing from the run.
+- `flot guard PATH...` names the paths whose change would touch the proofs (the
+  flow file, files `verify_inputs` matches, the store); `--hook` answers a
+  Claude Code `PreToolUse` payload, and the plugin installs it for file edits.
 - A metrics report without `cost_usd` is an unknown cost, not $0: `flot run`
   counts such steps as "without cost", and the cost ceiling names them.
 - `examples/slugify/compare.toml`: Claude Code and Codex implement the spec as

@@ -18,7 +18,7 @@ always = true
 
 [[step]]
 id = "format"
-run = "cargo fmt"
+run = "cargo fmt --check"
 needs = ["toolchain"]
 inputs = ["src/**/*.rs", "tests/**/*.rs"]
 claims = ["every source file is rustfmt-clean"]

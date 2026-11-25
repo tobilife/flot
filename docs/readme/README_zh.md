@@ -20,7 +20,7 @@
 
 <code>cargo install flot-cli</code>
 
-最新版本 **0.2.5**：能读懂 PowerShell 命令的守卫、在 macOS 上隔离步骤、在 Windows 与 Linux 检出之间一致的步骤键、复用开发者签名运行的 CI，以及注明每个复用步骤由谁担保的报告 · [更新日志](../../CHANGELOG.md)
+最新版本 **0.2.6**：`flot verify` 会把由本机密钥签名的运行如实标出；智能体审阅示例还会证明格式、lint 和新增的测试，其花费上限依据一次实测运行设定 · [更新日志](../../CHANGELOG.md)
 
 </div>
 

@@ -200,6 +200,50 @@ alone shows nothing once a change is staged, and the `stage` step's own proof
 reviewer was paid for. The two `silent` steps are the shell steps, which report
 no metrics because they spend nothing; the run names them.
 
+## A change to flot itself, with no spending cap
+
+`examples/agent-review.toml` was run once on flot 0.2.5, at the root of a
+worktree of this repository, with every `--max-budget-usd` and the flow's
+`max_cost_usd` removed, so that nothing cut it short. The task was the label
+`flot verify` now gives a run signed by this host's own key. Claude Code
+2.1.330:
+
+```
+ran      spec                 ok        172683ms  claims 1v/0u/0r  receipt 69d7ebaba013
+    > .flot-work/spec.md  1ccb5b7640c3
+ran      implement            ok        98680ms  claims 2v/0u/0r  receipt f928611c9222
+ran      review               ok        96287ms  claims 2v/0u/0r  receipt 4cfa760f8260
+    > .flot-work/review.md  b16b9c4659a9
+
+PASSED 1795594416998-5852cdf1d2a2  root 5852cdf1d2a2  383579ms
+spent $6.807012 (in 1638746 / out 39553 tokens, 3 reporting step(s))
+```
+
+The spec cost $2.46 in 33 turns, the implementation $1.65 in 34 and the
+review $2.70 in 23. The example's caps then were $1, $3 and $1 per step and
+$5 for the flow: the spec alone would have been stopped, and the run as a
+whole was over the ceiling. The spec was 283 lines for a change of 60.
+
+The run passed, and the change was still not done:
+
+- The implementation did not pass `cargo fmt --check`, which the flow did not
+  run.
+- It had no test of the change. The step was told not to touch tests, and
+  the existing suite passing says nothing about new code.
+- It printed authorship in `flot show` as well, which the task, not the
+  agent, asked for; that made `show` fail on a damaged attestation it had
+  never read before. The review, which had no shell and said so, found this
+  and the missing tests by reading the code.
+
+The commit as the agent left it is `6f9b830`; the change that went in,
+`7efe6ab`, drops the `show` part and adds the tests by hand. The example now
+also proves the implementation with `cargo fmt --check`, clippy, and a
+`#[test]` added under `src/`, has the step write unit tests beside the code,
+and caps each step at $5 and the flow at $15. That `verify`, run without an
+agent on the two commits, fails on `6f9b830` (`Diff in src/service/bundle.rs`;
+it adds no test either) and passes on `7efe6ab`. The example has not been run
+by an agent since.
+
 ## Spend and the cost ceiling
 
 flot does not parse any agent's output format. Each executed step gets a path in

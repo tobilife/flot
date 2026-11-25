@@ -20,7 +20,7 @@
 
 <code>cargo install flot-cli</code>
 
-Latest release **0.2.5**: a guard that reads PowerShell commands, steps confined on macOS, step keys that match across Windows and Linux checkouts, CI that reuses a developer's signed run, and reports that name who vouched for each reused step · [changelog](CHANGELOG.md)
+Latest release **0.2.6**: `flot verify` names a run signed by this host's own key as such, and the agent-review example proves formatting, lint and a new test, with caps set from a measured run · [changelog](CHANGELOG.md)
 
 </div>
 

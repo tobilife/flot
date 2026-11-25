@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.6
 
 - `flot verify` names a run signed by this host's own key, while that key is
   not on the trust list, as `authorship: this host's key` (`this_host` in
@@ -8,6 +8,11 @@
   is a label only: `--require-trusted`, import and cache reuse still count
   only keys on the trust list, and another host reading the run still sees
   `untrusted`.
+- `examples/agent-review.toml` proves an implementation with
+  `cargo fmt --check`, clippy and a unit test the change adds, not only a
+  build and the existing suite, and its spending caps sit above what a run
+  with no cap spent ($6.81 for the three steps). The run, and what it got
+  wrong, is in `docs/agents.md`.
 
 ## 0.2.5
 

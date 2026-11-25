@@ -348,7 +348,7 @@ fn authenticate<'a>(store: &Store, bundle: &'a Bundle) -> Result<Authenticated<'
     }
 
     let (signers, authorship) =
-        attest::assess(&bundle.attestations, &bundle.run, &store.trusted_keys()?);
+        attest::assess(&bundle.attestations, &bundle.run, &store.trusted_keys()?, None);
     if let Some(broken) = signers.iter().find(|signer| !signer.is_valid()) {
         bail!(
             "attestation by {} does not hold: {}; the bundle was altered after signing",

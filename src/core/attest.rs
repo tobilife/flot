@@ -215,6 +215,9 @@ pub enum Authorship {
     Unsigned,
     /// Validly signed, but by no key this reader trusts.
     Untrusted,
+    /// Validly signed by the key this reader holds, which is not on the
+    /// trust list. A label, not trust.
+    ThisHost,
     /// Validly signed by at least one key on this reader's trust list.
     Trusted,
 }
@@ -224,6 +227,7 @@ impl Authorship {
         match self {
             Authorship::Unsigned => "unsigned",
             Authorship::Untrusted => "untrusted",
+            Authorship::ThisHost => "this host's key",
             Authorship::Trusted => "trusted",
         }
     }
@@ -237,6 +241,9 @@ pub struct SignerCheck {
     pub trusted_as: Option<String>,
     /// Why the attestation does not hold, when it does not.
     pub problem: Option<String>,
+    /// The signature holds and is by the key this reader holds.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub this_host: bool,
 }
 
 impl SignerCheck {
@@ -247,11 +254,13 @@ impl SignerCheck {
 
 /// Judge every attestation. Only valid signatures count towards authorship;
 /// an invalid one is reported, never ignored, because it means something was
-/// altered after signing.
+/// altered after signing. `host_key` is the public key the reader holds the
+/// secret of, if any: a valid signature by it is labeled, never trusted.
 pub fn assess(
     attestations: &[Attestation],
     manifest: &RunManifest,
     trusted: &BTreeMap<String, String>,
+    host_key: Option<&str>,
 ) -> (Vec<SignerCheck>, Authorship) {
     let checks: Vec<SignerCheck> = attestations
         .iter()
@@ -264,6 +273,7 @@ pub fn assess(
                     .is_none()
                     .then(|| trusted.get(&attestation.key).cloned())
                     .flatten(),
+                this_host: problem.is_none() && host_key == Some(attestation.key.as_str()),
                 key: attestation.key.clone(),
                 problem,
             }
@@ -271,6 +281,8 @@ pub fn assess(
         .collect();
     let authorship = if checks.iter().any(|check| check.trusted_as.is_some()) {
         Authorship::Trusted
+    } else if checks.iter().any(|check| check.this_host) {
+        Authorship::ThisHost
     } else if checks.iter().any(SignerCheck::is_valid) {
         Authorship::Untrusted
     } else {
@@ -507,19 +519,19 @@ mod tests {
         let theirs = sign(&OTHER, &run);
         let trust = BTreeMap::from([(mine.key.clone(), "alice".to_string())]);
 
-        assert_eq!(assess(&[], &run, &trust).1, Authorship::Unsigned);
+        assert_eq!(assess(&[], &run, &trust, None).1, Authorship::Unsigned);
         assert_eq!(
-            assess(std::slice::from_ref(&theirs), &run, &trust).1,
+            assess(std::slice::from_ref(&theirs), &run, &trust, None).1,
             Authorship::Untrusted
         );
-        let (checks, authorship) = assess(&[theirs, mine.clone()], &run, &trust);
+        let (checks, authorship) = assess(&[theirs, mine.clone()], &run, &trust, None);
         assert_eq!(authorship, Authorship::Trusted);
         assert_eq!(checks[1].trusted_as.as_deref(), Some("alice"));
 
         // A trusted key whose signature no longer holds establishes nothing.
         let mut broken = mine;
         broken.signature = sign(&SECRET, &manifest("sha256:else")).signature;
-        let (checks, authorship) = assess(&[broken], &run, &trust);
+        let (checks, authorship) = assess(&[broken], &run, &trust, None);
         assert_eq!(authorship, Authorship::Unsigned);
         assert!(!checks[0].is_valid());
         assert_eq!(checks[0].trusted_as, None);

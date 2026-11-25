@@ -9,6 +9,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::core::receipt::{Observed, Receipt, RunManifest, Verdict};
 use crate::engine::baseline::Baseline;
+use crate::service::keys;
 use crate::store::Store;
 
 #[derive(Debug, Clone, Serialize)]
@@ -160,11 +161,7 @@ pub fn audit(store: &Store, manifest: &RunManifest) -> Result<Audit> {
         .collect();
     let recomputed_root = RunManifest::root_of(&pairs);
 
-    let (signers, authorship) = attest::assess(
-        &store.attestations(&manifest.run_id)?,
-        manifest,
-        &store.trusted_keys()?,
-    );
+    let (signers, authorship) = authorship(store, manifest)?;
     for signer in signers.iter().filter(|signer| !signer.is_valid()) {
         findings.push(format!(
             "attestation by {} does not hold: {}",
@@ -186,6 +183,18 @@ pub fn audit(store: &Store, manifest: &RunManifest) -> Result<Audit> {
         vouched: vouched(store, manifest)?,
         anchor: None,
     })
+}
+
+/// Who signed `manifest`, judged against this store's trust list and the
+/// signing key this host holds. The host key only labels its own signature;
+/// it is never a reason to trust or reuse a run.
+pub fn authorship(store: &Store, manifest: &RunManifest) -> Result<(Vec<SignerCheck>, Authorship)> {
+    Ok(attest::assess(
+        &store.attestations(&manifest.run_id)?,
+        manifest,
+        &store.trusted_keys()?,
+        keys::host_public_key().as_deref(),
+    ))
 }
 
 /// Who vouched for each step `manifest` reused from an imported run. The

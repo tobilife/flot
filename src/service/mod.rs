@@ -142,6 +142,10 @@ pub struct RunDetail {
     /// as [`audit::vouched`] judges them now.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub vouched: Vec<attest::VouchedStep>,
+    /// Who signed this run, as [`audit::authorship`] judges it now.
+    pub authorship: attest::Authorship,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub signers: Vec<attest::SignerCheck>,
 }
 
 /// Recorded runs, newest first, and the ones that could not be read.
@@ -536,11 +540,14 @@ impl Workspace {
             })
             .collect();
         let vouched = audit::vouched(&store, &manifest)?;
+        let (signers, authorship) = audit::authorship(&store, &manifest)?;
         Ok(RunDetail {
             imported: store.is_imported(&manifest.run_id),
             manifest,
             step_claims,
             vouched,
+            authorship,
+            signers,
         })
     }
 

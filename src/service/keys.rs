@@ -46,6 +46,16 @@ pub fn default_path() -> Result<PathBuf> {
     Ok(config_dir()?.join("flot").join("signing.key"))
 }
 
+/// The public key of the key at [`default_path`], as `flot key show` prints
+/// it, or `None` when the path cannot be resolved or the key cannot be
+/// loaded. The error is dropped on purpose: this key only labels a signer,
+/// and a label must not make `verify` fail. `flot doctor` reports an
+/// unusable key.
+pub fn host_public_key() -> Option<String> {
+    let path = default_path().ok()?;
+    load(&path).ok().map(|key| key.public_key())
+}
+
 #[cfg(not(test))]
 fn config_dir() -> Result<PathBuf> {
     let set = |name: &str| std::env::var_os(name).filter(|value| !value.is_empty());

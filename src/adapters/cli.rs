@@ -1612,6 +1612,9 @@ fn render_detail(detail: &RunDetail) {
         manifest.claims.refuted,
         manifest.max_parallel
     );
+    if !detail.signers.is_empty() {
+        render_authorship(detail.authorship, &detail.signers);
+    }
     render_spend(manifest);
     render_limitations(manifest);
     render_refusals(manifest);
@@ -1899,13 +1902,17 @@ fn render_signed(signed: &SignReport) {
 fn render_authorship(authorship: Authorship, signers: &[SignerCheck]) {
     say!("authorship: {}", authorship.label());
     for signer in signers {
-        match (&signer.problem, &signer.trusted_as) {
-            (Some(problem), _) => say!("  x {}  {problem}", attest::fingerprint(&signer.key)),
-            (None, Some(name)) => say!(
+        match (&signer.problem, &signer.trusted_as, signer.this_host) {
+            (Some(problem), _, _) => say!("  x {}  {problem}", attest::fingerprint(&signer.key)),
+            (None, Some(name), _) => say!(
                 "  + {}  trusted as {name}",
                 attest::fingerprint(&signer.key)
             ),
-            (None, None) => say!(
+            (None, None, true) => say!(
+                "  ~ {}  this host's key, not on the trust list",
+                attest::fingerprint(&signer.key)
+            ),
+            (None, None, false) => say!(
                 "  ? {}  not on the trust list",
                 attest::fingerprint(&signer.key)
             ),

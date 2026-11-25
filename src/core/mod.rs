@@ -7,6 +7,7 @@ pub mod digest;
 pub mod fault;
 pub mod flow;
 pub mod metrics;
+pub mod powershell;
 pub mod receipt;
 pub mod secrets;
 pub mod shell;

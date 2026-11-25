@@ -222,7 +222,7 @@ fn command(words: &[String]) -> &[String] {
 }
 
 /// The paths one simple command changes through its arguments.
-fn changed_by(words: &[String]) -> Vec<String> {
+pub(crate) fn changed_by(words: &[String]) -> Vec<String> {
     let Some((name, args)) = command(words).split_first() else {
         return Vec::new();
     };

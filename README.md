@@ -244,7 +244,8 @@ budgets, concurrency, outputs, guarded proofs, scope and sandbox.
   proof that differs from that revision (its command, its claims or the files
   it reads) leaves its claims unverified, and `flot verify --proofs-from`
   holds a recorded run to the same revision. The Claude Code plugin also
-  refuses edits to those files before they happen, and to what decides
+  refuses edits to those files before they happen, made directly or through
+  a Bash or PowerShell command, and to what decides
   whether they are checked: CI workflows, git hooks, Claude Code's settings.
   `flot verify` also names the files that changed since that revision but
   that no step read, the changes no claim speaks for. A step with

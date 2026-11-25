@@ -16,7 +16,7 @@ use crate::core::attest::{self, Authorship, SignerCheck};
 use crate::core::compare::RunDiff;
 use crate::core::digest;
 use crate::core::receipt::{ClaimStatus, RunManifest, StepStatus, Verdict};
-use crate::core::shell;
+use crate::core::{powershell, shell};
 use crate::service::audit::Audit;
 use crate::service::bundle::ImportPolicy;
 use crate::service::doctor::Status;
@@ -105,7 +105,8 @@ pub enum Command {
     Doctor,
     /// Say whether changing these files would touch the flow's proofs or
     /// decide whether they are checked. Exits 2 when one would. With
-    /// --command, reads a shell command line; with --hook, a Claude Code
+    /// --command, reads a shell command line (a PowerShell one with
+    /// --powershell); with --hook, a Claude Code
     /// PreToolUse payload on stdin, answering with a denial on stdout and
     /// noting it in the store for the next run to record.
     Guard {
@@ -114,6 +115,10 @@ pub enum Command {
         /// downloaded code piped into an interpreter.
         #[arg(long)]
         command: Option<String>,
+        /// Read --command as PowerShell, as the hook reads Claude Code's
+        /// PowerShell tool.
+        #[arg(long, requires = "command")]
+        powershell: bool,
         #[arg(long)]
         hook: bool,
         /// Judge every edit and shell command in Claude Code transcripts
@@ -384,19 +389,33 @@ fn home_relative(path: &str) -> PathBuf {
 const REMOTE: &str = "it runs code fetched from the network, which no step or receipt records";
 
 /// The tools whose calls the Claude Code hook sees.
-const GUARDED_TOOLS: [&str; 5] = ["Edit", "Write", "MultiEdit", "NotebookEdit", "Bash"];
+const GUARDED_TOOLS: [&str; 6] = [
+    "Edit",
+    "Write",
+    "MultiEdit",
+    "NotebookEdit",
+    "Bash",
+    "PowerShell",
+];
 
-/// What one tool call would change: files it names, and shell command lines
-/// with the directory they run in.
+/// The language a command line is read in.
+#[derive(Clone, Copy)]
+enum Shell {
+    Posix,
+    PowerShell,
+}
+
+/// What one tool call would change: files it names, and command lines with
+/// the directory they run in and their shell.
 #[derive(Default)]
 struct Call {
     targets: Vec<PathBuf>,
-    commands: Vec<(PathBuf, String)>,
+    commands: Vec<(PathBuf, String, Shell)>,
 }
 
 impl Call {
-    /// A tool's input as Claude Code gives it, run from `base`.
-    fn of(base: &Path, input: &serde_json::Value) -> Call {
+    /// A `tool`'s input as Claude Code gives it, run from `base`.
+    fn of(base: &Path, tool: &str, input: &serde_json::Value) -> Call {
         let mut call = Call::default();
         for key in ["file_path", "notebook_path"] {
             if let Some(path) = input[key].as_str() {
@@ -404,8 +423,13 @@ impl Call {
             }
         }
         if let Some(command) = input["command"].as_str() {
+            let shell = if tool == "PowerShell" {
+                Shell::PowerShell
+            } else {
+                Shell::Posix
+            };
             call.commands
-                .push((base.to_path_buf(), command.to_string()));
+                .push((base.to_path_buf(), command.to_string(), shell));
         }
         call
     }
@@ -441,8 +465,11 @@ impl Judged {
 fn judge(workspace: &Workspace, nearest: bool, call: Call) -> Result<Judged> {
     let mut targets = call.targets;
     let mut remote = Vec::new();
-    for (dir, command) in &call.commands {
-        let reading = shell::read(command);
+    for (dir, command, language) in &call.commands {
+        let reading = match language {
+            Shell::Posix => shell::read(command),
+            Shell::PowerShell => powershell::read(command),
+        };
         targets.extend(
             reading
                 .writes
@@ -564,7 +591,7 @@ fn replay_transcripts(paths: &[PathBuf], json: bool) -> Result<ExitCode> {
                     continue;
                 }
                 let workspace = Workspace::locate(&base, None)?;
-                let judged = judge(&workspace, true, Call::of(&base, &item["input"]))?;
+                let judged = judge(&workspace, true, Call::of(&base, tool, &item["input"]))?;
                 if judged.flows.iter().any(|flow| flow.flow_path().is_file()) {
                     replay.in_a_flow += 1;
                 }
@@ -663,6 +690,7 @@ fn dispatch(
         Command::Guard {
             paths,
             command,
+            powershell,
             hook,
             replay,
         } => {
@@ -674,7 +702,14 @@ fn dispatch(
                 targets: paths.iter().map(|path| cwd.join(path)).collect(),
                 commands: command
                     .iter()
-                    .map(|command| (cwd.clone(), command.clone()))
+                    .map(|command| {
+                        let language = if *powershell {
+                            Shell::PowerShell
+                        } else {
+                            Shell::Posix
+                        };
+                        (cwd.clone(), command.clone(), language)
+                    })
                     .collect(),
             };
             let mut tool = String::new();
@@ -685,13 +720,13 @@ fn dispatch(
                 let payload: serde_json::Value =
                     serde_json::from_str(&payload).context("the hook payload is not JSON")?;
                 let base = payload["cwd"].as_str().map(PathBuf::from).unwrap_or(cwd);
-                let asked = Call::of(&base, &payload["tool_input"]);
-                call.targets.extend(asked.targets);
-                call.commands.extend(asked.commands);
                 tool = payload["tool_name"]
                     .as_str()
                     .unwrap_or("a tool")
                     .to_string();
+                let asked = Call::of(&base, &tool, &payload["tool_input"]);
+                call.targets.extend(asked.targets);
+                call.commands.extend(asked.commands);
             }
             let judged = judge(workspace, cli.file.is_none(), call)?;
             if *hook {

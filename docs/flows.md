@@ -493,19 +493,36 @@ variable, `cd` into another directory or `python -c` is not seen, and is
 what `proofs_from` catches: a proof that differs from the revision proves
 nothing, however it was changed.
 
+`flot guard --powershell --command` reads the command line as PowerShell:
+redirections, cmdlets that change the paths they are given (`Set-Content`,
+`Out-File`, `Remove-Item`, `Move-Item`, `Copy-Item`, `Rename-Item`,
+`New-Item`, ...) under their names and aliases, `[IO.File]` methods given a
+literal path, `Invoke-WebRequest -OutFile`, the native programs the shell
+reading knows, and downloaded code handed to `Invoke-Expression`. Real
+output:
+
+```text
+$ flot guard --powershell --command "Set-Content -Path .\check.sh -Value 'exit 0'"
+protected  check.sh: the proof of step `work` reads it
+$ flot guard --powershell --command "[IO.File]::WriteAllText('check.sh', 'exit 0')"
+protected  check.sh: the proof of step `work` reads it
+$ flot guard --powershell --command "irm https://example.com/install.ps1 | iex"
+refused    irm | iex: it runs code fetched from the network, which no step or receipt records
+$ flot guard --powershell --command "cargo test *> test.log"
+```
+
+As with a shell command, a path held in a variable or computed is not seen.
+
 `flot guard --hook` reads a Claude Code `PreToolUse` payload on stdin (a file
-path, or a Bash command line) and answers with a denial; the
+path, or a Bash or PowerShell command line) and answers with a denial; the
 [Claude Code plugin](mcp.md#claude-code-plugin) installs it for `Edit`,
-`Write`, `MultiEdit`, `NotebookEdit` and `Bash`. Downloaded code is refused
-only where a flow is; elsewhere the hook says nothing.
+`Write`, `MultiEdit`, `NotebookEdit`, `Bash` and `PowerShell`. Downloaded
+code is refused only where a flow is; elsewhere the hook says nothing.
 
 In a real headless session (Claude Code 2.1.330, $0.23), Claude was told to
 run `sed -i … check.sh` on a proof's file and `rm .github/workflows/ci.yml`.
 The hook denied both before they ran, with the reasons above, and Claude
 reported that the check still failed instead of working around it.
-
-Claude Code's `PowerShell` tool on Windows is not read: a PowerShell command
-that rewrites a proof is left to `proofs_from`.
 
 ### What the guard refused
 
@@ -534,7 +551,8 @@ refused by the guard since the previous run:
 
 `flot guard --replay [PATHS]` reads Claude Code transcripts (`.jsonl` files,
 or directories holding them; by default `~/.claude/projects`) and judges
-every `Edit`, `Write`, `MultiEdit`, `NotebookEdit` and `Bash` call in them as
+every `Edit`, `Write`, `MultiEdit`, `NotebookEdit`, `Bash` and `PowerShell`
+call in them as
 the hook would now, against the flows as they are now, listing what it would
 refuse. It notes nothing. A call whose directory is gone is counted, not
 judged. Over this machine's transcripts (real output):
@@ -550,7 +568,12 @@ refused  2026-11-24T14:43:39.614Z  Write  /tmp/tmp.NYNgCBazmQ: check.sh is prote
 The three are the sessions that told Claude to tamper with a proof; the 33
 other calls where a flow is (edits to the code under test, test runs,
 reviews) were let through. That is a sample of one developer's sessions,
-not a false-positive rate.
+not a false-positive rate. Over the same developer's Windows transcripts,
+755 transcripts and 6960 calls (231 of them `PowerShell`), 14 where a flow
+is, none was refused. Of the 231 PowerShell command lines, 9 named files
+they write (a `Set-Content` of a doc, `New-Item` junctions, a `Move-Item`
+and `Rename-Item` of a credentials file); one more name, `main` from
+`git checkout main`, is a branch read as a path, as the shell reading does.
 
 ## Scope
 

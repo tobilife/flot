@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- The guard reads PowerShell: the Claude Code hook now covers the
+  `PowerShell` tool, `flot guard --replay` judges its calls, and
+  `flot guard --powershell --command CMD` reads a command line as PowerShell
+  (redirections, cmdlets that change files and their aliases, `[IO.File]`
+  methods, `Invoke-WebRequest -OutFile`, and downloaded code handed to
+  `Invoke-Expression`).
+
 ## 0.2.4
 
 - Release archives carry a GitHub build provenance attestation, made by the

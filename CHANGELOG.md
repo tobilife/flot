@@ -8,6 +8,11 @@
   (redirections, cmdlets that change files and their aliases, `[IO.File]`
   methods, `Invoke-WebRequest -OutFile`, and downloaded code handed to
   `Invoke-Expression`).
+- `sandbox` is enforced on macOS too: the step's shell starts under
+  `/usr/bin/sandbox-exec` with a Seatbelt profile that denies every write
+  outside the allowed paths and, without `network`, every network operation.
+  The receipt's mechanism reads `seatbelt file writes, seatbelt network`.
+  Elsewhere than Linux and macOS a confined step is still not run.
 - A step whose inline output was trimmed no longer adds a limitation saying
   so: trimming is how the output is shown, not a limit of the evidence, and
   the `complete output: flot log ...` line under the step already says where

@@ -37,7 +37,7 @@ local trust list and key handovers, guarded proofs, produced files kept and rest
 layer architecture, attempts with feedback, candidates, run search, sharing through git that refuses credential-shaped tokens, a Claude Code plugin whose guard reads edits, shell and PowerShell commands, `flot doctor`, and 347 tests including end-to-end runs through the real
 binary, a real MCP handshake and a cross-store bundle import.
 
-Not there yet: confining steps outside Linux, and confining reads (a step
+Not there yet: confining steps on Windows, and confining reads (a step
 with a [sandbox](flows.md#sandbox) still reads what you can).
 
 Steps run in `sh` everywhere. On Linux and macOS a step leads its own process

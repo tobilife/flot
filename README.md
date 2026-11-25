@@ -88,8 +88,8 @@ It is not the tool when:
 
 - you run a command once and need no record of it;
 - you need to contain untrusted code: a step runs with your permissions
-  unless it asks for a `sandbox` (Linux: no network, writes only beneath named
-  paths), and even then it can read what you can;
+  unless it asks for a `sandbox` (Linux and macOS: no network, writes only
+  beneath named paths), and even then it can read what you can;
 - you want a CI service: flot runs inside your CI or your terminal, it does not
   replace them.
 
@@ -257,7 +257,8 @@ budgets, concurrency, outputs, guarded proofs, scope and sandbox.
   `flot guard --replay` judges past Claude Code sessions the same way.
 - **Changes kept in scope.** A step with `may_change = ["src/**"]` fails if
   it creates, edits or deletes any other file that git does not ignore. On
-  Linux, `sandbox` makes the kernel refuse those writes and the network.
+  Linux and macOS, `sandbox` makes the kernel refuse those writes and the
+  network.
 - **Receipts you can check.** Every receipt re-hashes to its own id, and a run's
   verdict and root digest are recomputed from its receipts, never read.
   `flot verify` re-reads every stored byte.
@@ -317,9 +318,10 @@ Codex is shown above; see [MCP server](docs/mcp.md) for the protocol details.
 <summary><strong>Does flot sandbox the steps it runs?</strong></summary>
 
 Not by default. A step runs with your user's permissions and environment. A
-step with `sandbox = { write = ["src"] }` runs, on Linux, with no network and
-writes only beneath `src`, both enforced by the kernel (a network namespace
-and Landlock); where that cannot be enforced the step is not run. Reads are
+step with `sandbox = { write = ["src"] }` runs, on Linux and macOS, with no
+network and writes only beneath `src`, both enforced by the kernel (a network
+namespace and Landlock on Linux, a Seatbelt profile on macOS); where that
+cannot be enforced the step is not run. Reads are
 never restricted, so it is not a container. Run flows you have read, and an
 agent with the permissions you would give it anyway.
 

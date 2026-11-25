@@ -92,11 +92,8 @@ pub fn prepare(network: bool, write: Option<&[PathBuf]>, extra: &[PathBuf]) -> R
     let mut profile = String::from("(version 1)\n(allow default)\n");
     let mut mechanism = Vec::new();
     if let Some(write) = write {
-        // A rule added later wins over an earlier one. A hard link is
-        // allowed only where both of its names are writable.
-        profile.push_str(
-            "(deny file-write* file-link)\n(allow file-write* file-link\n  (subpath \"/dev/fd\")",
-        );
+        // A rule added later wins over an earlier one.
+        profile.push_str("(deny file-write*)\n(allow file-write*\n  (subpath \"/dev/fd\")");
         for path in always_writable(extra).iter().chain(write) {
             let real = std::fs::canonicalize(path)
                 .with_context(|| format!("cannot resolve {}", path.display()))?;

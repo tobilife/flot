@@ -617,7 +617,8 @@ of mode alone is not a change of content and is not reported.
 ## Sandbox
 
 `may_change` judges what a step changed; `sandbox` stops it from changing
-anything else, and from reaching the network. The kernel enforces it, on Linux:
+anything else, and from reaching the network. The kernel enforces it, on Linux
+and macOS:
 
 ```toml
 [[step]]
@@ -629,18 +630,27 @@ claims = ["src/slug.txt is fixed"]
 verify = "grep -q fixed src/slug.txt"
 ```
 
-- `network` (default `false`): without it, the step runs in a new user and
-  network namespace whose only interface is an unconfigured loopback.
+- `network` (default `false`): without it, on Linux the step runs in a new
+  user and network namespace whose only interface is an unconfigured
+  loopback; on macOS a Seatbelt profile denies it every network operation,
+  `127.0.0.1` and Unix sockets included.
 - `write`: paths, relative to the flow root, the step may create, edit,
   delete or rename files beneath. Absent, writes are not restricted. Present,
-  a Landlock ruleset denies every other write: everywhere else, including
-  `/tmp`, `.git` and the store. `/dev/null`, `/dev/zero`, `/dev/full` and
-  `/dev/tty` stay writable, and the step gets a scratch directory of its own as
-  `$TMPDIR`, where its `$FLOT_METRICS` file also is; it is removed after the
+  a Landlock ruleset (Linux) or the Seatbelt profile (macOS) denies every
+  other write: everywhere else, including `/tmp`, `.git` and the store.
+  `/dev/null`, `/dev/zero`, `/dev/full` and `/dev/tty` (and on macOS
+  `/dev/fd`) stay writable, and the step gets a scratch directory of its own
+  as `$TMPDIR`, where its `$FLOT_METRICS` file also is; it is removed after the
   step. Each path must exist.
 
+On macOS the step's shell is started by `/usr/bin/sandbox-exec` with the
+profile, which every process the step starts inherits. Apple marks
+`sandbox-exec` deprecated, but ships it.
+
 Reads are not restricted, so a confined step can still read your files, your
-credentials and the environment flot passes it; this is not a container.
+credentials and the environment flot passes it; this is not a container. Nor
+are other processes: a confined step can still ask a service that runs
+outside it (over D-Bus on Linux, over Mach or XPC on macOS) to write for it.
 `network = true` with no `write` restricts nothing, and is refused.
 
 Here `agent.sh` fixes `src/slug.txt` and then tries to rewrite `check.sh`
@@ -671,17 +681,23 @@ $ flot receipt b2b222b1555a | jq -c .identity.sandbox
 {"network":false,"write":["src"],"mechanism":"landlock abi 7, network namespace"}
 ```
 
+On macOS the mechanism reads `seatbelt file writes, seatbelt network`.
+
 A step that asks for a sandbox runs in it or not at all. Where it cannot be
-enforced (not Linux, a kernel without Landlock, a host that does not let an
-unprivileged process have a user namespace, a `write` path that does not
-exist) the step is not run: it fails with "could not run: its sandbox cannot
+enforced (neither Linux nor macOS, a kernel without Landlock, a host that
+does not let an unprivileged process have a user namespace, a macOS without
+`sandbox-exec`, a `write` path that does not exist) the step is not run: it fails with "could not run: its sandbox cannot
 be enforced here" and the reason. The policy is part of the step key. The
 proof runs unconfined, like any proof, and so does the rest of the flow.
 
-Tested where both are enforced: WSL2 with kernel 6.18 (Landlock ABI 7), and
+Tested where both are enforced: WSL2 with kernel 6.18 (Landlock ABI 7),
 GitHub's `ubuntu-latest` runners, which refuse `unshare -Urn` (it maps root)
-but let flot create the namespaces it needs. The suite runs the same test on
-macOS and Windows, where the step is not run.
+but let flot create the namespaces it needs, and GitHub's `macos-latest`
+runners. The same test checks that a confined step writes and hard-links
+beneath `src` but cannot write a file outside it or hard-link one into it,
+and that a step without network cannot connect to a port on `127.0.0.1`
+that an unconfined step reaches. With the network rule taken out of the
+macOS profile, that test fails there. On Windows the step is not run.
 
 Landlock needs stable inodes: on file systems without them, such as WSL's
 `/mnt` drives (9p), writes beneath an allowed path are denied too, so a

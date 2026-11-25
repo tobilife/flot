@@ -95,7 +95,7 @@ pub fn prepare(network: bool, write: Option<&[PathBuf]>, extra: &[PathBuf]) -> R
         // A rule added later wins over an earlier one. A hard link is
         // allowed only where both of its names are writable.
         profile.push_str(
-            "(deny file-write* file-link)\n(allow file-write* file-link\n  (subpath \"/dev/fd\")",
+            "(deny file-write*)\n(allow file-write* file-link\n  (subpath \"/dev/fd\")",
         );
         for path in always_writable(extra).iter().chain(write) {
             let real = std::fs::canonicalize(path)

@@ -9,9 +9,17 @@ max_parallel = 1
 # Proofs must match main as pushed, so a change cannot also loosen its check.
 proofs_from = "origin/main"
 
+# No step key covers the toolchain on PATH. This step runs every time; what
+# needs it is reused only while rustc and cargo print what they printed then.
+[[step]]
+id = "toolchain"
+run = "rustc -vV && cargo -V"
+always = true
+
 [[step]]
 id = "format"
 run = "cargo fmt"
+needs = ["toolchain"]
 inputs = ["src/**/*.rs", "tests/**/*.rs"]
 claims = ["every source file is rustfmt-clean"]
 verify = "cargo fmt --check"
@@ -19,7 +27,7 @@ verify = "cargo fmt --check"
 [[step]]
 id = "build"
 run = "cargo build --all-targets"
-needs = ["format"]
+needs = ["toolchain", "format"]
 inputs = ["src/**/*.rs", "tests/**/*.rs", "Cargo.toml", "Cargo.lock"]
 claims = ["the library, binary and test targets compile"]
 verify = "cargo build --all-targets --quiet"
@@ -27,7 +35,7 @@ verify = "cargo build --all-targets --quiet"
 [[step]]
 id = "lint"
 run = "cargo clippy --all-targets -- -D warnings"
-needs = ["build"]
+needs = ["toolchain", "build"]
 inputs = ["src/**/*.rs", "tests/**/*.rs"]
 claims = ["clippy reports no warnings on any target"]
 verify = "cargo clippy --all-targets -- -D warnings"
@@ -35,7 +43,7 @@ verify = "cargo clippy --all-targets -- -D warnings"
 [[step]]
 id = "test"
 run = "cargo test"
-needs = ["build"]
+needs = ["toolchain", "build"]
 # tests/readme.rs reads the READMEs and the files that name the release, so
 # they key this step too.
 inputs = [

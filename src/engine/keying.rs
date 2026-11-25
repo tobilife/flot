@@ -8,8 +8,10 @@
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result};
+use ignore::gitignore::{Gitignore, GitignoreBuilder};
 
 use crate::core::digest;
 use crate::core::flow::{Step, SCHEMA_VERSION};
@@ -29,22 +31,12 @@ pub fn facts_of(root: &Path, step: &Step) -> Facts {
 }
 
 /// [`facts_of`] a copy of the project at `root`, such as a candidate's,
-/// with the executable bits `root`'s repository records: the copy has no
-/// history of its own, and its key must be the one `root` computes.
+/// read as `root` reads it: with the files `root`'s ignore rules let a
+/// wildcard reach, and the executable bits `root`'s repository records. The
+/// copy has no history of its own, and its key must be the one `root`
+/// computes.
 pub fn facts_of_copy(copy: &Path, root: &Path, step: &Step) -> Facts {
-    let mut facts = facts_of(copy, step);
-    if let Some(modes) = recorded_modes(root) {
-        for file in facts
-            .inputs
-            .iter_mut()
-            .chain(facts.verify_inputs.iter_mut())
-        {
-            if let Some(executable) = modes.get(&file.path) {
-                file.executable = *executable;
-            }
-        }
-    }
-    facts
+    facts_in(copy, Some(root), step, &[])
 }
 
 /// Whether git records each file it tracks under `root` as executable, when
@@ -75,11 +67,17 @@ pub fn recorded_modes(root: &Path) -> Option<BTreeMap<String, bool>> {
 /// that are missing now but that reusing an upstream receipt will restore.
 /// `plan` needs this to predict what `run` will see.
 pub fn facts_with(root: &Path, step: &Step, pending: &[FileDigest]) -> Facts {
-    let (inputs, mut limitations) = digest_globs(root, &step.inputs, "input", pending);
+    facts_in(root, None, step, pending)
+}
+
+/// The facts of `step` in `root`, a copy of `origin` when that is given.
+fn facts_in(root: &Path, origin: Option<&Path>, step: &Step, pending: &[FileDigest]) -> Facts {
+    let (inputs, mut limitations) = digest_in(root, origin, &step.inputs, "input", pending);
     let (verify_inputs, proof_limitations) =
-        digest_globs(root, &step.verify_inputs, "verify input", pending);
+        digest_in(root, origin, &step.verify_inputs, "verify input", pending);
     limitations.extend(proof_limitations);
-    if step.inputs.is_empty() {
+    // A step that always runs is never reused, whatever its key.
+    if step.inputs.is_empty() && !step.always {
         limitations.push(
             "step declares no inputs; only its command and dependencies key it, so it is reused even when files it reads change"
                 .into(),
@@ -158,11 +156,145 @@ fn literal_base(pattern: &str) -> (&str, bool) {
     (base, rest.contains(['*', '?', '[']))
 }
 
+/// The ignore rules of a project, applied to a copy of it.
+///
+/// A copy lives in the store, whose `.gitignore` ignores everything, and
+/// what lies above the store is the project and its parents, not the copy's:
+/// read from there, the rules would hide every file of the copy. Here they
+/// are what a scan of the project itself reads, in the same order: the
+/// copy's own `.gitignore` files, those of the directories above the project,
+/// `info/exclude` of every repository at or above each of them, and the
+/// user's global excludes. The first one that matches decides.
+struct CopyIgnore {
+    copy: PathBuf,
+    /// The project, as its absolute path.
+    origin: PathBuf,
+    /// `.gitignore` of each directory above the project, nearest first.
+    above: Vec<Gitignore>,
+    /// `info/exclude` of each repository above the project, nearest first.
+    excludes: Vec<Gitignore>,
+    global: Gitignore,
+    /// The rules of each directory of the copy, read once.
+    levels: Mutex<HashMap<PathBuf, Arc<Level>>>,
+}
+
+/// The rules one directory of a copy contributes.
+struct Level {
+    /// Its `.gitignore`, as the copy holds it.
+    gitignore: Gitignore,
+    /// `info/exclude` of a repository at the same place in the project: a
+    /// copy has no `.git`.
+    exclude: Option<Gitignore>,
+}
+
+impl CopyIgnore {
+    fn new(copy: &Path, origin: &Path) -> Self {
+        let origin = origin
+            .canonicalize()
+            .unwrap_or_else(|_| origin.to_path_buf());
+        let parents: Vec<&Path> = origin.ancestors().skip(1).collect();
+        CopyIgnore {
+            copy: copy.to_path_buf(),
+            above: parents
+                .iter()
+                .map(|dir| Gitignore::new(dir.join(".gitignore")).0)
+                .collect(),
+            excludes: parents.iter().filter_map(|dir| exclude_of(dir)).collect(),
+            global: Gitignore::global().0,
+            levels: Mutex::new(HashMap::new()),
+            origin,
+        }
+    }
+
+    fn level(&self, dir: &Path) -> Arc<Level> {
+        let mut levels = self
+            .levels
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        levels
+            .entry(dir.to_path_buf())
+            .or_insert_with(|| {
+                let relative = dir.strip_prefix(&self.copy).unwrap_or(Path::new(""));
+                Arc::new(Level {
+                    gitignore: Gitignore::new(dir.join(".gitignore")).0,
+                    exclude: exclude_of(&self.origin.join(relative)),
+                })
+            })
+            .clone()
+    }
+
+    /// Whether the project's rules ignore `path`, a path in the copy.
+    fn ignores(&self, path: &Path, is_dir: bool) -> bool {
+        let Ok(relative) = path.strip_prefix(&self.copy) else {
+            return false;
+        };
+        let mapped = self.origin.join(relative);
+        let levels: Vec<Arc<Level>> = path
+            .ancestors()
+            .skip(1)
+            .take_while(|dir| dir.starts_with(&self.copy))
+            .map(|dir| self.level(dir))
+            .collect();
+        let decided = levels
+            .iter()
+            .map(|level| level.gitignore.matched(path, is_dir))
+            .chain(
+                self.above
+                    .iter()
+                    .map(|rules| rules.matched(&mapped, is_dir)),
+            )
+            .chain(
+                levels
+                    .iter()
+                    .filter_map(|level| level.exclude.as_ref())
+                    .map(|rules| rules.matched(&mapped, is_dir)),
+            )
+            .chain(
+                self.excludes
+                    .iter()
+                    .map(|rules| rules.matched(&mapped, is_dir)),
+            )
+            .chain(std::iter::once(self.global.matched(&mapped, is_dir)))
+            .find(|matched| !matched.is_none());
+        decided.is_some_and(|matched| matched.is_ignore())
+    }
+}
+
+/// `info/exclude` of the repository whose work tree is `dir`, found as a
+/// scan of the project finds it: in `.git`, or for a linked work tree in the
+/// common directory its `.git` file leads to.
+fn exclude_of(dir: &Path) -> Option<Gitignore> {
+    let dot_git = dir.join(".git");
+    let meta = std::fs::metadata(&dot_git).ok()?;
+    let git_dir = if meta.is_file() {
+        let text = std::fs::read_to_string(&dot_git).ok()?;
+        let real = PathBuf::from(text.lines().next()?.strip_prefix("gitdir: ")?);
+        let common = std::fs::read_to_string(real.join("commondir")).ok()?;
+        let common = common.lines().next()?;
+        if common.starts_with('.') {
+            real.join(common)
+        } else {
+            PathBuf::from(common)
+        }
+    } else {
+        dot_git
+    };
+    let mut builder = GitignoreBuilder::new(dir);
+    let _ = builder.add(git_dir.join("info").join("exclude"));
+    builder.build().ok()
+}
+
 /// Files under `root` a pattern names. A wildcard never enters `.git` or the
 /// store, and with [`Reach::Tracked`] it skips what git ignores below the
 /// pattern's literal directories; a path the pattern spells
-/// out is always followed.
-fn candidates(root: &Path, pattern: &str, reach: Reach) -> Result<Vec<PathBuf>, String> {
+/// out is always followed. In a copy of the project, what git ignores is
+/// what it ignores in the project (`copy`).
+fn candidates(
+    root: &Path,
+    pattern: &str,
+    reach: Reach,
+    copy: Option<&Arc<CopyIgnore>>,
+) -> Result<Vec<PathBuf>, String> {
     let compiled = glob::Pattern::new(pattern).map_err(|error| error.to_string())?;
     let (base, wild) = literal_base(pattern);
     if !wild {
@@ -177,7 +309,10 @@ fn candidates(root: &Path, pattern: &str, reach: Reach) -> Result<Vec<PathBuf>, 
     if !start.is_dir() {
         return Ok(Vec::new());
     }
-    let tracked = reach == Reach::Tracked;
+    // A copy's rules are the project's, applied below; the walker would read
+    // the store's.
+    let copy = copy.filter(|_| reach == Reach::Tracked).cloned();
+    let tracked = reach == Reach::Tracked && copy.is_none();
     let walker = ignore::WalkBuilder::new(&start)
         .standard_filters(false)
         .git_ignore(tracked)
@@ -186,11 +321,16 @@ fn candidates(root: &Path, pattern: &str, reach: Reach) -> Result<Vec<PathBuf>, 
         .parents(tracked)
         .require_git(false)
         .follow_links(true)
-        .filter_entry(|entry| {
+        .filter_entry(move |entry| {
+            if entry.depth() == 0 {
+                return true;
+            }
             let name = entry.file_name();
-            !(entry.depth() > 0
-                && entry.file_type().is_some_and(|kind| kind.is_dir())
-                && (name == ".git" || name == crate::store::STORE_DIR))
+            let is_dir = entry.file_type().is_some_and(|kind| kind.is_dir());
+            !(is_dir && (name == ".git" || name == crate::store::STORE_DIR))
+                && !copy
+                    .as_ref()
+                    .is_some_and(|rules| rules.ignores(entry.path(), is_dir))
         })
         .build();
     Ok(walker
@@ -213,6 +353,21 @@ pub fn scan_globs<E>(
     patterns: &[String],
     kind: &str,
     reach: Reach,
+    keep: impl FnMut(&[u8]) -> Result<String, E>,
+) -> Result<Scan, E> {
+    scan_in(root, None, patterns, kind, reach, true, keep)
+}
+
+/// [`scan_globs`] in `root`, a copy of `origin` when that is given, whose
+/// ignore rules and recorded executable bits then apply. Without `modes`,
+/// every file keeps the bit the file system shows.
+fn scan_in<E>(
+    root: &Path,
+    origin: Option<&Path>,
+    patterns: &[String],
+    kind: &str,
+    reach: Reach,
+    modes: bool,
     mut keep: impl FnMut(&[u8]) -> Result<String, E>,
 ) -> Result<Scan, E> {
     let mut files: BTreeMap<String, (String, bool)> = BTreeMap::new();
@@ -221,11 +376,14 @@ pub fn scan_globs<E>(
     // the file system; what it produces keeps the bit it was written with,
     // which reuse restores.
     let recorded = match reach {
-        Reach::Tracked => recorded_modes(root),
-        Reach::Everything => None,
+        Reach::Tracked if modes => recorded_modes(origin.unwrap_or(root)),
+        _ => None,
     };
+    let copy = origin
+        .filter(|_| reach == Reach::Tracked)
+        .map(|origin| Arc::new(CopyIgnore::new(root, origin)));
     for pattern in patterns {
-        let entries = match candidates(root, pattern, reach) {
+        let entries = match candidates(root, pattern, reach, copy.as_ref()) {
             Ok(entries) => entries,
             Err(error) => {
                 scan.problems
@@ -285,10 +443,11 @@ pub fn scan_globs<E>(
 /// store), and every file the step names as an input, proof input or output,
 /// ignored or not. Files are copied with their modes; links are followed.
 pub fn copy_workspace(root: &Path, dest: &Path, step: &Step) -> Result<()> {
-    let mut files: std::collections::BTreeSet<PathBuf> = candidates(root, "**/*", Reach::Tracked)
-        .map_err(|error| anyhow::anyhow!("cannot list the project's files: {error}"))?
-        .into_iter()
-        .collect();
+    let mut files: std::collections::BTreeSet<PathBuf> =
+        candidates(root, "**/*", Reach::Tracked, None)
+            .map_err(|error| anyhow::anyhow!("cannot list the project's files: {error}"))?
+            .into_iter()
+            .collect();
     for (patterns, reach) in [
         (&step.inputs, Reach::Tracked),
         (&step.verify_inputs, Reach::Tracked),
@@ -296,7 +455,7 @@ pub fn copy_workspace(root: &Path, dest: &Path, step: &Step) -> Result<()> {
     ] {
         for pattern in patterns {
             // An invalid pattern is reported where the step's facts are read.
-            if let Ok(found) = candidates(root, pattern, reach) {
+            if let Ok(found) = candidates(root, pattern, reach, None) {
                 files.extend(found);
             }
         }
@@ -406,9 +565,26 @@ pub fn digest_globs(
     kind: &str,
     pending: &[FileDigest],
 ) -> (Vec<FileDigest>, Vec<String>) {
-    let mut scan = match scan_globs(root, patterns, kind, Reach::Tracked, |bytes| {
-        Ok::<_, std::convert::Infallible>(digest::bytes(bytes))
-    }) {
+    digest_in(root, None, patterns, kind, pending)
+}
+
+/// [`digest_globs`] in `root`, a copy of `origin` when that is given.
+fn digest_in(
+    root: &Path,
+    origin: Option<&Path>,
+    patterns: &[String],
+    kind: &str,
+    pending: &[FileDigest],
+) -> (Vec<FileDigest>, Vec<String>) {
+    let mut scan = match scan_in(
+        root,
+        origin,
+        patterns,
+        kind,
+        Reach::Tracked,
+        true,
+        |bytes| Ok::<_, std::convert::Infallible>(digest::bytes(bytes)),
+    ) {
         Ok(scan) => scan,
         Err(never) => match never {},
     };
@@ -469,16 +645,60 @@ pub fn step_key(flow_name: &str, step: &Step, facts: &Facts, deps: &[DepRef]) ->
 }
 
 /// Every file a wildcard reaches under `root` (so not what git ignores, and
-/// never `.git` or the store), with the digest of its content.
-pub fn snapshot(root: &Path) -> Scan {
-    scan_globs(
+/// never `.git` or the store), with the digest of its content. `root` is the
+/// project `origin` or a copy of it, read with the project's ignore rules.
+pub fn snapshot(root: &Path, origin: &Path) -> Scan {
+    scan_in(
         root,
+        (root != origin).then_some(origin),
         &["**/*".to_string()],
         "project file",
         Reach::Tracked,
+        false,
         |bytes| Ok::<_, std::convert::Infallible>(digest::bytes(bytes)),
     )
     .unwrap_or_else(|never| match never {})
+}
+
+/// Files whose content differs between two snapshots: created or edited,
+/// with their content afterwards, or deleted, as `None`. A change of mode
+/// alone is not a change of content.
+pub fn changes(before: &[FileDigest], after: &[FileDigest]) -> BTreeMap<String, Option<String>> {
+    let before: BTreeMap<&str, &str> = before
+        .iter()
+        .map(|file| (file.path.as_str(), file.digest.as_str()))
+        .collect();
+    let after: BTreeMap<&str, &str> = after
+        .iter()
+        .map(|file| (file.path.as_str(), file.digest.as_str()))
+        .collect();
+    before
+        .keys()
+        .chain(after.keys())
+        .filter(|path| before.get(*path) != after.get(*path))
+        .map(|path| {
+            (
+                path.to_string(),
+                after.get(path).map(|digest| digest.to_string()),
+            )
+        })
+        .collect()
+}
+
+/// The digest of the file at `relative` under `root` as it is now, `None`
+/// when there is none. Anything but a file there, such as a directory, reads
+/// as an empty digest, which no recorded file has.
+pub fn content_of(root: &Path, relative: &str) -> Result<Option<String>> {
+    let path = root.join(relative);
+    match std::fs::metadata(&path) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error).with_context(|| format!("cannot inspect {relative}")),
+        Ok(meta) if !meta.is_file() => Ok(Some(String::new())),
+        Ok(_) => {
+            let bytes = std::fs::read(&path).with_context(|| format!("cannot read {relative}"))?;
+            Ok(Some(digest::bytes(&bytes)))
+        }
+    }
 }
 
 /// Files created, edited or deleted between two snapshots that `step` may not

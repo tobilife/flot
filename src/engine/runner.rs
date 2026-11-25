@@ -12,7 +12,7 @@
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::RwLock;
+use std::sync::{OnceLock, RwLock};
 use std::time::Duration;
 
 use anyhow::{bail, Context, Result};
@@ -20,7 +20,7 @@ use serde::Serialize;
 
 use crate::core::attest::VouchedStep;
 use crate::core::digest;
-use crate::core::flow::{Flow, Step};
+use crate::core::flow::{is_contained, Flow, Step};
 use crate::core::metrics::{self, Metrics, Spend};
 use crate::core::receipt::{
     candidate_rank, sum_costs, verdict_for, ClaimCounts, ClaimStatus, DepRef, FileDigest, Observed,
@@ -198,6 +198,9 @@ pub struct Runner<'a> {
     /// Held shared while a step runs, and alone by a step with `may_change`,
     /// so the files that changed while it ran are its own doing.
     scope: RwLock<()>,
+    /// Each step's receipt in the newest run of this flow recorded here,
+    /// read once when a step first needs it.
+    latest: OnceLock<HashMap<String, String>>,
 }
 
 impl<'a> Runner<'a> {
@@ -219,6 +222,7 @@ impl<'a> Runner<'a> {
             origin: root.to_path_buf(),
             baseline: None,
             scope: RwLock::new(()),
+            latest: OnceLock::new(),
         }
     }
 
@@ -262,10 +266,13 @@ impl<'a> Runner<'a> {
     ///
     /// Reuse writes the receipt's outputs back, so a receipt naming a file this
     /// flow does not declare for the step is never reused. Neither is one whose
-    /// outputs were changed since: its claims were proven against the recorded
+    /// outputs were changed since, or that a file now matching an output
+    /// pattern is missing from: its claims were proven against the recorded
     /// content, and both overwriting the change and keeping it under that
     /// receipt would leave a verdict about files that are not there. A missing
-    /// output is fine; reuse restores it.
+    /// output is fine; reuse restores it. The other files the step changed
+    /// must be as it left them too, for the same reason; those are not
+    /// restored, since a change there is someone else's work.
     ///
     /// An imported receipt comes with its signers, so the run can record
     /// whose word stands in for the work.
@@ -360,6 +367,40 @@ impl<'a> Runner<'a> {
                 }
             }
         }
+        if !step.outputs.is_empty() {
+            let now =
+                keying::scan_outputs(&self.root, &step.outputs, |bytes| Ok(digest::bytes(bytes)))?;
+            if let Some(file) = now.files.iter().find(|file| {
+                !known
+                    .identity
+                    .outputs
+                    .iter()
+                    .any(|output| output.path == file.path)
+            }) {
+                notes.push(format!(
+                    "{} matches an output pattern but is not in its receipt; the step runs again",
+                    file.path
+                ));
+                return Ok(None);
+            }
+        }
+        for (path, left) in &known.identity.changed {
+            if !is_contained(path) {
+                notes.push(format!(
+                    "cached receipt names {path}, which is outside the flow root; not reused"
+                ));
+                return Ok(None);
+            }
+            if keying::content_of(&self.root, path)? != *left {
+                notes.push(match left {
+                    Some(_) => format!("{path} changed since its receipt; the step runs again"),
+                    None => format!(
+                        "{path}, which the step deleted, is there again; the step runs again"
+                    ),
+                });
+                return Ok(None);
+            }
+        }
         Ok(Some(recalled))
     }
 
@@ -404,7 +445,13 @@ impl<'a> Runner<'a> {
                     reasons.join(", ")
                 ));
             }
-            let force = options.force || drift.is_some();
+            if step.always {
+                limitations.push(
+                    "runs on every run (always); the steps that need it are reused only when its receipt comes out the same, which running it decides"
+                        .into(),
+                );
+            }
+            let force = options.force || drift.is_some() || step.always;
             // A dependency with no known receipt makes the downstream key
             // unpredictable until the dependency actually runs.
             let (step_key, reusable) = match keying::dep_refs(step, &receipts) {
@@ -852,7 +899,7 @@ impl<'a> Runner<'a> {
                 )?,
                 false,
             )
-        } else if let Some((known, restored)) = if force {
+        } else if let Some((known, restored)) = if force || step.always {
             None
         } else if self.drift(step, &facts.verify_inputs).is_some() {
             // A receipt proven against something else does not stand in.
@@ -1051,6 +1098,7 @@ impl<'a> Runner<'a> {
                 origin: self.root.clone(),
                 baseline: self.baseline,
                 scope: RwLock::new(()),
+                latest: OnceLock::new(),
             };
             let mut said = Vec::new();
             let (receipt, attempts) = match keying::copy_workspace(&self.root, &place, &candidate) {
@@ -1151,6 +1199,9 @@ impl<'a> Runner<'a> {
     ) -> Result<(Receipt, Vec<Receipt>)> {
         let allowed = step.attempts();
         let mut earlier: Vec<Receipt> = Vec::new();
+        // The workspace before the first attempt: each attempt's receipt
+        // answers for what every attempt so far changed.
+        let mut since = None;
         loop {
             let number = earlier.len() as u32 + 1;
             let mut extra = BTreeMap::new();
@@ -1168,7 +1219,15 @@ impl<'a> Runner<'a> {
                     path.to_string_lossy().to_string(),
                 );
             }
-            let executed = self.execute(step, &step_key, facts.clone(), deps.clone(), &extra, stop);
+            let executed = self.execute(
+                step,
+                &step_key,
+                facts.clone(),
+                deps.clone(),
+                &extra,
+                stop,
+                &mut since,
+            );
             if let Some(path) = &feedback {
                 let _ = std::fs::remove_file(path);
             }
@@ -1415,6 +1474,7 @@ impl<'a> Runner<'a> {
                 inputs: facts.inputs,
                 verify_inputs: facts.verify_inputs,
                 outputs: Vec::new(),
+                changed: BTreeMap::new(),
                 deps,
                 claims: claims::not_run(step, reason),
                 limitations,
@@ -1430,6 +1490,9 @@ impl<'a> Runner<'a> {
         ))
     }
 
+    /// Run a step once and settle its claims. `since` is the workspace before
+    /// the step's first attempt, taken here when this is it.
+    #[allow(clippy::too_many_arguments)]
     fn execute(
         &self,
         step: &Step,
@@ -1438,6 +1501,7 @@ impl<'a> Runner<'a> {
         deps: Vec<DepRef>,
         extra: &BTreeMap<String, String>,
         stop: &exec::StopSignal,
+        since: &mut Option<Vec<FileDigest>>,
     ) -> Result<Receipt> {
         let mut limitations = facts.limitations.clone();
         let budget = self.flow.resolved_budget(step);
@@ -1512,7 +1576,10 @@ impl<'a> Runner<'a> {
                 .unwrap_or_else(|poison| poison.into_inner());
             (Some(shared), None)
         };
-        let before = scoped.then(|| keying::snapshot(&self.root));
+        // What a step changes is bound to its receipt. A candidate's changes
+        // other than its outputs stay in its copy: there is nothing to bind.
+        let binds = self.candidate.is_none();
+        let before = (scoped || binds).then(|| keying::snapshot(&self.root, &self.origin));
         let outcome = match exec::run_confined(
             &step.run,
             &self.root,
@@ -1543,13 +1610,24 @@ impl<'a> Runner<'a> {
                 return Err(error).with_context(|| format!("step `{}` could not start", step.id));
             }
         };
-        let strayed = before.map(|before| {
-            let after = keying::snapshot(&self.root);
-            limitations.extend(before.problems);
-            limitations.extend(after.problems);
-            keying::out_of_scope(step, &before.files, &after.files)
-        });
+        let after = before
+            .as_ref()
+            .map(|_| keying::snapshot(&self.root, &self.origin));
+        let strayed = match (&before, &after) {
+            (Some(before), Some(after)) if scoped => {
+                limitations.extend(before.problems.iter().cloned());
+                limitations.extend(after.problems.iter().cloned());
+                Some(keying::out_of_scope(step, &before.files, &after.files))
+            }
+            _ => None,
+        };
         drop((_shared, _alone));
+        let mut changed = match (before, after) {
+            (Some(before), Some(after)) if binds => {
+                keying::changes(since.get_or_insert(before.files), &after.files)
+            }
+            _ => BTreeMap::new(),
+        };
         let (mut step_metrics, mut metrics_notes) = read_metrics(&metrics_path);
         if outcome.strays_stopped {
             limitations.push(
@@ -1660,6 +1738,21 @@ impl<'a> Runner<'a> {
                 edited_inputs.join(", ")
             ));
         }
+        if binds {
+            // Declared files the scan does not reach, such as an input git
+            // ignores, are bound too.
+            for (path, content) in keying::changes(&facts.inputs, &after.inputs)
+                .into_iter()
+                .chain(keying::changes(&facts.verify_inputs, &after.verify_inputs))
+            {
+                changed.entry(path).or_insert(content);
+            }
+            for (path, content) in self.still_in_place(step, step_key) {
+                changed.entry(path).or_insert(content);
+            }
+            // Outputs are recorded, restored and checked as outputs.
+            changed.retain(|path, _| !step.declares_output(path));
+        }
         let drift = self.drift(step, &facts.verify_inputs);
         let proof = match (drift, claims::proof_command(step, status, tolerated)) {
             (Some(drift), _) => drift,
@@ -1738,6 +1831,7 @@ impl<'a> Runner<'a> {
                 inputs: facts.inputs,
                 verify_inputs: facts.verify_inputs,
                 outputs: produced.files,
+                changed,
                 deps,
                 claims,
                 limitations,
@@ -1763,6 +1857,55 @@ impl<'a> Runner<'a> {
                 metrics_notes,
             },
         ))
+    }
+
+    /// The files earlier receipts of `step` answer for that are still as
+    /// those receipts say the step left them: the receipt this key would
+    /// reuse, and the step's receipt in the newest run here. A run that finds
+    /// that work already done (a file it writes already holds what it writes,
+    /// one it deletes is already gone) changes nothing there, and must answer
+    /// for it all the same. A file someone else has changed since is no
+    /// longer the step's doing, and is left out.
+    fn still_in_place(&self, step: &Step, step_key: &str) -> BTreeMap<String, Option<String>> {
+        let latest = self.latest.get_or_init(|| {
+            self.store
+                .resolve_run("latest")
+                .ok()
+                .filter(|run| run.flow == self.flow.meta.name)
+                .map(|run| {
+                    run.steps
+                        .into_iter()
+                        .map(|entry| (entry.step_id, entry.receipt_id))
+                        .collect()
+                })
+                .unwrap_or_default()
+        });
+        let earlier = self
+            .store
+            .recall(step_key)
+            .ok()
+            .flatten()
+            .map(|recalled| recalled.receipt)
+            .into_iter()
+            .chain(
+                latest
+                    .get(&step.id)
+                    .and_then(|receipt_id| self.store.load_receipt(receipt_id).ok()),
+            );
+        let mut kept = BTreeMap::new();
+        for receipt in earlier {
+            if receipt.identity.flow != self.flow.meta.name || receipt.identity.step_id != step.id {
+                continue;
+            }
+            for (path, left) in receipt.identity.changed {
+                if is_contained(&path)
+                    && keying::content_of(&self.root, &path).is_ok_and(|now| now == left)
+                {
+                    kept.insert(path, left);
+                }
+            }
+        }
+        kept
     }
 
     /// Recorded outputs that now differ from what was recorded, or that are

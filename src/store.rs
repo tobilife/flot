@@ -942,6 +942,7 @@ mod tests {
                 inputs: vec![],
                 verify_inputs: vec![],
                 outputs: vec![],
+                changed: Default::default(),
                 deps: vec![],
                 claims: vec![],
                 limitations: vec![],

@@ -1,5 +1,43 @@
 # Changelog
 
+## Unreleased
+
+Five ways a cached step reported a verdict its proof would not give on the
+tree as it is:
+
+- A step answers for the files it changes. The receipt records every file
+  the step created, edited or deleted other than its outputs (`changed`, left
+  out of receipts of steps that changed nothing, whose bytes are as before),
+  and is reused only while each is still as the step left it
+  (`edit: src/lib.txt changed since its receipt; the step runs again`).
+  Before, a step that wrote `src/lib.txt` was reused after the file was
+  changed back, and the run `PASSED` while its proof failed. The cost is
+  re-runs: an agent step runs again, and is paid for again, after a person
+  edits a file it changed. Every step now reads the project before and after
+  it runs, as `may_change` did; what git ignores is not read, so such a
+  product must be declared in `outputs`. Under `--jobs` above 1, a file
+  changed beside a step is recorded in its receipt too, so receipt ids of
+  steps that run beside an editing step depend on timing.
+- A candidate's copy matches patterns by the project's ignore rules. The
+  store's `.gitignore` ignores everything, so in the copy a wildcard input or
+  proof input matched nothing: a run whose candidate rewrote the check its
+  proof reads `PASSED`, and honest candidates ran again on every run. Now
+  the first is `UNVERIFIED` (`the step changed its own proof`) and the
+  second is reused.
+- On reuse, output patterns are matched again: a file that matches one but
+  is not in the receipt makes the step run again. Before, after a new
+  `out/bad.txt` appeared under `outputs = ["out/*.txt"]`, the receipt was
+  reused and the run `PASSED`, though the proof rejects that file.
+- A failure `allow_failure` tolerated is never reused: a receipt stands in
+  only if the step exited zero. Before, the next run reused the tolerated
+  failure after its cause was fixed.
+- `always = true` runs a step on every run and never reuses it, for a probe
+  of what no key covers: the environment, `PATH` and the tools on it, which
+  `docs/flows.md` now says are not keyed. Its receipt id follows its output,
+  so the steps that need it are reused while that stays the same. It is
+  refused with `candidates`. This repository's flow starts with such a
+  `toolchain` step (`rustc -vV && cargo -V`), which the other steps need.
+
 ## 0.2.6
 
 - `flot verify` names a run signed by this host's own key, while that key is

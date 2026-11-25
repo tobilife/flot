@@ -94,7 +94,10 @@ validly signed that kept the same receipt for the step, and only while the
 trust list holds the key. Otherwise they show the key marked
 `(not confirmed here)` or `(not trusted here)`. An import replaces an entry
 that only signers no longer trusted vouched for, so a trusted signer's run of
-the same work is reused.
+the same work is reused. Like a local one, an imported receipt that records
+files its step changed stands in only where they are as the step left them,
+as in a checkout of the work it produced
+([step keys](flows.md#step-keys)).
 
 An imported run is marked `(imported)` in `flot runs` and `flot show`, is never
 `latest`, and is never re-signed by this host: `flot bundle --sign` on it is

@@ -154,6 +154,12 @@ pub struct ReceiptIdentity {
     /// Files the step produced, each kept in the object store, so a reused
     /// receipt can put back exactly what its claims were proven against.
     pub outputs: Vec<FileDigest>,
+    /// Every other file the step created, edited or deleted that flot saw it
+    /// change, with the digest of its content as the step left it, or `None`
+    /// for one it deleted. Its claims were proven on those files, so the
+    /// receipt stands in for the step only while each one is still so.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub changed: BTreeMap<String, Option<String>>,
     pub deps: Vec<DepRef>,
     pub claims: Vec<ClaimRecord>,
     /// Known gaps in this receipt's evidence, stated rather than implied.
@@ -278,10 +284,12 @@ impl Receipt {
     ///
     /// Only settled outcomes qualify. A failure, timeout or cancellation might
     /// not repeat, and neither might a refuted or timed-out proof, so those are
-    /// always retried. A claim with no verify command stays unverified however
-    /// often it runs, so it does not block reuse.
+    /// always retried; so is a failure `allow_failure` tolerated, which is `ok`
+    /// without exiting zero. A claim with no verify command stays unverified
+    /// however often it runs, so it does not block reuse.
     pub fn is_reusable(&self) -> bool {
         self.identity.status.is_ok()
+            && self.identity.exit_code == Some(0)
             && self.identity.claims.iter().all(|claim| match claim.status {
                 ClaimStatus::Verified => true,
                 ClaimStatus::Unverified => claim.verify_command.is_none(),
@@ -878,6 +886,7 @@ mod tests {
             inputs: vec![],
             verify_inputs: vec![],
             outputs: vec![],
+            changed: BTreeMap::new(),
             deps: vec![],
             claims: vec![],
             limitations: vec![],
@@ -1003,6 +1012,24 @@ mod tests {
         ] {
             assert!(!with(status, vec![]).is_reusable(), "{status:?}");
         }
+        // `ok` under allow_failure without exiting zero is a failure kept
+        // from failing the run, and is tried again like one.
+        let mut tolerated = identity("a", "out");
+        tolerated.exit_code = Some(1);
+        assert!(!Receipt::seal(tolerated, Observed::default()).is_reusable());
+    }
+
+    #[test]
+    fn a_receipt_that_changed_nothing_has_the_bytes_it_always_had() {
+        let quiet = Receipt::seal(identity("a", "out"), Observed::default());
+        assert!(!serde_json::to_string(&quiet).unwrap().contains("changed"));
+        let mut body = identity("a", "out");
+        body.changed
+            .insert("src/lib.txt".into(), Some(digest::bytes(b"new")));
+        assert_ne!(
+            Receipt::seal(body, Observed::default()).receipt_id,
+            quiet.receipt_id
+        );
     }
 
     #[test]

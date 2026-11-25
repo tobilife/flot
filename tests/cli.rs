@@ -1029,8 +1029,11 @@ fn every_report_names_who_vouched_for_a_step_reused_from_a_signed_run() {
         .lacks("Reused from signed runs");
 
     // CI's run is unsigned; its reports still say whose word a step rests on.
+    // Its tree holds what the step left, as a checkout of the work would: the
+    // receipt answers for that file.
     let target = Project::new(PROVEN);
     target.write("seed.txt", "one");
+    target.write("artifact.txt", "flot\n");
     target.flot(&["trust", "add", "alice", &key]).ok();
     target
         .flot(&["import", "--require-trusted", bundle.to_str().unwrap()])
@@ -3324,7 +3327,9 @@ fn runs_travel_through_a_git_remote_and_a_signed_one_stands_in() {
         .has("trusted  reusable")
         .has(": 1 imported, 0 already here, 0 refused");
     bob.flot(&["verify", &run_id]).ok().has("integrity: intact");
-    // Alice's signed receipt stands in for Bob's work.
+    // Alice's signed receipt stands in for Bob's work, on a tree that holds
+    // what her step left.
+    bob.write("artifact.txt", "flot\n");
     bob.flot(&["run"]).ok().has("cached   write");
     bob.flot(&["pull", "--remote", &url])
         .ok()
@@ -4650,4 +4655,359 @@ fn flaky_names_what_changed_its_result_on_the_same_inputs() {
     project
         .flot(&["doctor"])
         .has("warn  history         1 step and 1 proof changed their result on the same inputs");
+}
+
+/// Receipt of `step` in the newest run, as `flot receipt` prints it.
+fn receipt_of(project: &Project, step: &str) -> serde_json::Value {
+    let show = project.flot(&["--json", "show"]).json();
+    let receipt_id = show["steps"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|entry| entry["step_id"] == step)
+        .and_then(|entry| entry["receipt_id"].as_str())
+        .unwrap_or_else(|| panic!("no step {step} in {show}"))
+        .to_string();
+    project.flot(&["receipt", &receipt_id]).json()
+}
+
+const BOUND: &str = r#"
+[flow]
+name = "bound"
+
+[[step]]
+id = "edit"
+run = "echo new > src/lib.txt"
+inputs = ["task.md"]
+may_change = ["src/**"]
+claims = ["src/lib.txt says new"]
+verify = "grep -q new src/lib.txt"
+
+[[step]]
+id = "implement"
+# Edits files it does not declare, as an agent step does.
+run = "cp task.md src/impl.txt; rm -f src/legacy.txt"
+inputs = ["task.md"]
+claims = ["src/impl.txt holds the task and src/legacy.txt is gone"]
+verify = "grep -q task src/impl.txt && test ! -e src/legacy.txt"
+
+[[step]]
+id = "quiet"
+run = "echo quiet"
+claims = ["it ran"]
+verify = "true"
+"#;
+
+#[test]
+fn a_reused_step_answers_for_the_files_it_changed() {
+    let project = Project::new(BOUND);
+    project.write("task.md", "task\n");
+    project.write("src/lib.txt", "old\n");
+    project.write("src/legacy.txt", "legacy\n");
+    project.flot(&["run"]).ok().has("PASSED");
+    project
+        .flot(&["run"])
+        .ok()
+        .has("cached   edit")
+        .has("cached   implement");
+
+    // What a step changed is bound to its receipt, deletions too; a step
+    // that changed nothing keeps the receipt it always had.
+    let edit = receipt_of(&project, "edit");
+    assert_eq!(
+        edit["identity"]["changed"],
+        serde_json::json!({ "src/lib.txt": flot::core::digest::bytes(b"new\n") }),
+        "{edit}"
+    );
+    let implement = receipt_of(&project, "implement");
+    assert_eq!(
+        implement["identity"]["changed"]["src/legacy.txt"],
+        serde_json::Value::Null,
+        "{implement}"
+    );
+    assert!(implement["identity"]["changed"]
+        .as_object()
+        .is_some_and(|changed| changed.contains_key("src/legacy.txt")
+            && changed.contains_key("src/impl.txt")));
+    let quiet = receipt_of(&project, "quiet");
+    assert!(
+        quiet["identity"].get("changed").is_none(),
+        "a step that changed nothing records nothing: {quiet}"
+    );
+
+    // Reverting the file the proof judged is not answered by the receipt.
+    project.write("src/lib.txt", "old\n");
+    project
+        .flot(&["run"])
+        .ok()
+        .has("ran      edit")
+        .has("edit: src/lib.txt changed since its receipt; the step runs again")
+        .has("cached   implement");
+    // Nor is editing a file the step wrote without declaring it.
+    project.write("src/impl.txt", "broken\n");
+    project
+        .flot(&["run"])
+        .ok()
+        .has("ran      implement")
+        .has("implement: src/impl.txt changed since its receipt; the step runs again");
+    // Nor bringing back a file it deleted.
+    project.write("src/legacy.txt", "legacy\n");
+    project.flot(&["run"]).ok().has("ran      implement").has(
+        "implement: src/legacy.txt, which the step deleted, is there again; the step runs again",
+    );
+    project
+        .flot(&["run"])
+        .ok()
+        .has("cached   edit")
+        .has("cached   implement")
+        .has("cached   quiet");
+}
+
+#[test]
+fn a_step_that_edits_its_own_input_answers_for_the_edit() {
+    // Also where git ignores the input, so only its declaration finds it.
+    for ignored in [false, true] {
+        let project = Project::new(
+            r#"
+[flow]
+name = "tune"
+
+[[step]]
+id = "tune"
+run = "echo tuned > config.txt"
+inputs = ["config.txt"]
+claims = ["config.txt is tuned"]
+verify = "grep -q tuned config.txt"
+"#,
+        );
+        if ignored {
+            project.write(".gitignore", "config.txt\n");
+        }
+        project.write("config.txt", "old\n");
+        project
+            .flot(&["run"])
+            .ok()
+            .has("the step changed its own declared inputs (config.txt)");
+        // Keyed on the tuned file now, it runs once more and then holds.
+        project.flot(&["run"]).ok().has("ran      tune");
+        project.flot(&["run"]).ok().has("cached   tune");
+        // Back to the content the first run was keyed on: its receipt said
+        // the step left config.txt tuned, which is no longer so.
+        project.write("config.txt", "old\n");
+        project
+            .flot(&["run"])
+            .ok()
+            .has("ran      tune")
+            .has("tune: config.txt changed since its receipt; the step runs again");
+    }
+}
+
+#[test]
+fn a_later_attempt_answers_for_what_earlier_attempts_changed() {
+    let project = Project::new(
+        r#"
+[flow]
+name = "halves"
+
+[[step]]
+id = "fix"
+attempts = 2
+run = """
+if [ "$FLOT_ATTEMPT" = 1 ]; then echo half > half.txt; exit 1; fi
+echo done > done.txt
+"""
+claims = ["both halves are there"]
+verify = "grep -q half half.txt && grep -q done done.txt"
+"#,
+    );
+    project.flot(&["run"]).ok().has("attempt 2");
+    project.flot(&["run"]).ok().has("cached   fix");
+    std::fs::remove_file(project.path().join("half.txt")).unwrap();
+    project
+        .flot(&["run"])
+        .ok()
+        .has("ran      fix")
+        .has("fix: half.txt changed since its receipt; the step runs again");
+}
+
+/// Both candidates answer honestly; the check is found by a wildcard.
+const HONEST: &str = r#"
+[flow]
+name = "copies"
+
+[[step]]
+id = "solve"
+candidates = ["first", "second"]
+run = "echo good > answer"
+outputs = ["answer"]
+claims = ["the answer is good"]
+verify = "sh checks/check.sh"
+verify_inputs = ["checks/*.sh"]
+"#;
+
+#[test]
+fn a_candidate_copy_reads_the_files_the_project_does() {
+    let project = Project::new(HONEST);
+    project.write("checks/check.sh", "grep -q good answer\n");
+    project
+        .flot(&["run"])
+        .ok()
+        .has("PASSED")
+        .lacks("matched no readable file");
+    project.flot(&["run"]).ok().has("cached   solve");
+
+    // A candidate that rewrites the check in its copy changed its own proof.
+    let cheat = Project::new(&HONEST.replace(
+        "run = \"echo good > answer\"",
+        "run = \"echo bad > answer; echo true > checks/check.sh\"",
+    ));
+    cheat.write("checks/check.sh", "grep -q good answer\n");
+    let run = cheat.flot(&["run"]);
+    assert_eq!(run.code, 2, "{}", run.stdout);
+    run.has("UNVERIFIED")
+        .has("the step changed its own proof (checks/check.sh)");
+}
+
+#[test]
+fn a_new_file_under_an_output_pattern_is_not_answered_by_the_receipt() {
+    let project = Project::new(
+        r#"
+[flow]
+name = "gen"
+
+[[step]]
+id = "gen"
+run = "mkdir -p out; echo ok > out/good.txt"
+outputs = ["out/*.txt"]
+claims = ["no bad output"]
+verify = "test ! -e out/bad.txt"
+"#,
+    );
+    project.flot(&["run"]).ok().has("PASSED");
+    project.write("out/bad.txt", "x\n");
+    let run = project.flot(&["run"]);
+    assert_eq!(run.code, 1, "{}", run.stdout);
+    run.has("ran      gen")
+        .has("gen: out/bad.txt matches an output pattern but is not in its receipt; the step runs again")
+        .has("FAILED");
+    // Without it, the receipt that held is reused, and a missing output
+    // is still put back.
+    std::fs::remove_file(project.path().join("out/bad.txt")).unwrap();
+    std::fs::remove_file(project.path().join("out/good.txt")).unwrap();
+    project
+        .flot(&["run"])
+        .ok()
+        .has("cached   gen")
+        .has("output out/good.txt was missing and was restored from its receipt");
+}
+
+#[test]
+fn a_tolerated_failure_is_never_reused() {
+    let project = Project::new(
+        r#"
+[flow]
+name = "lint"
+
+[[step]]
+id = "lint"
+run = "test -e ready"
+allow_failure = true
+"#,
+    );
+    project
+        .flot(&["run"])
+        .ok()
+        .has("exited 1 but the step is declared allow_failure");
+    project.write("ready", "");
+    project
+        .flot(&["run"])
+        .ok()
+        .has("ran      lint")
+        .lacks("exited 1");
+    project.flot(&["run"]).ok().has("cached   lint");
+}
+
+const PROBED: &str = r#"
+[flow]
+name = "probed"
+
+[[step]]
+id = "toolchain"
+run = "cat ver"
+always = true
+
+[[step]]
+id = "build"
+needs = ["toolchain"]
+run = "echo built"
+claims = ["it built"]
+verify = "true"
+"#;
+
+#[test]
+fn an_always_step_runs_every_time_and_its_dependents_follow_its_output() {
+    let project = Project::new(PROBED);
+    project.write("ver", "1.88\n");
+    project
+        .flot(&["run"])
+        .ok()
+        .has("ran      toolchain")
+        .has("ran      build");
+    let plan = project.flot(&["plan"]);
+    plan.ok().has("  run   toolchain");
+    // Only `build` is warned that no input keys it: `toolchain` is never
+    // reused, whatever its key.
+    assert_eq!(
+        plan.stdout.matches("step declares no inputs").count(),
+        1,
+        "{}",
+        plan.stdout
+    );
+    // Same output, same receipt: what needs it is reused.
+    project
+        .flot(&["run"])
+        .ok()
+        .has("ran      toolchain")
+        .has("cached   build");
+    project.write("ver", "1.85\n");
+    project
+        .flot(&["run"])
+        .ok()
+        .has("ran      toolchain")
+        .has("ran      build");
+    project
+        .flot(&["run"])
+        .ok()
+        .has("ran      toolchain")
+        .has("cached   build");
+
+    // Candidates would all run every time, and which one is kept could
+    // change with what each reported spending.
+    let refused = Project::new(&PROBED.replace(
+        "always = true",
+        "always = true\ncandidates = [\"a\", \"b\"]",
+    ))
+    .flot(&["plan"]);
+    assert_eq!(refused.code, 3, "{}", refused.stderr);
+    refused.has("step `toolchain` sets always, which candidates do not support");
+}
+
+#[test]
+fn an_always_step_still_checks_that_its_proof_fails_before_the_change() {
+    let project = Project::new(
+        "[flow]\nname = \"red\"\nproofs_from = \"main\"\n\n[[step]]\nid = \"check\"\nrun = \"true\"\nalways = true\nclaims = [\"app.txt is fixed\"]\nverify = \"grep -q fixed app.txt\"\nfails_before = true\n",
+    );
+    project.write("app.txt", "broken\n");
+    project.write(".gitignore", ".flot\n.test-keys/\n");
+    git_in(project.path(), &["init", "-q", "-b", "main"]);
+    commit(project.path(), "base");
+    project.write("app.txt", "fixed\n");
+    for _ in 0..2 {
+        project
+            .flot(&["run"])
+            .ok()
+            .has("ran      check")
+            .has("claims 1v/0u/0r");
+        project.flot(&["show"]).ok().has("before the change (");
+    }
 }

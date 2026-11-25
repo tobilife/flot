@@ -24,9 +24,16 @@ verify = "cargo build --all-targets --quiet"
 
 Digest over the command, the declared environment, the content and
 executable bit of every declared input file and proof input, the verify command, the declared
-output patterns, and the receipt ids of upstream steps. Equal key ⇒ the same work over the same facts ⇒ the receipt is reused.
+output patterns, and the receipt ids of upstream steps. Equal key ⇒ the same work over the same facts ⇒ the receipt is reused,
+if the step exited zero and the files it produced and changed are still as it
+left them.
 Declaring inputs is what makes a cache hit trustworthy; a step with none carries
 a limitation saying so, in `flot plan` and in its receipt.
+
+The rest of the environment is not keyed: variables the step does not declare
+in `env`, `PATH`, and the compilers and tools found on it. Upgrading a
+compiler does not run a step again by itself; a step that
+[always runs](#steps-that-always-run) can probe it.
 
 Input and proof-input patterns are globs relative to the flow file (`*` stays
 within a directory, `**` crosses them). A wildcard skips what git ignores
@@ -44,10 +51,88 @@ never matched one computed in CI, so a run signed there could not be reused
 there. A file git does not track, and an output, keep the bit the file system
 shows.
 
+### Files a step changed
+
+A step also answers for the files it changes. flot reads the project before
+and after each step, as [`may_change`](#scope) does, and the receipt records
+every file the step created, edited or deleted other than its outputs, with
+the digest of what it left (or that it deleted the file). Its claims were
+proven on those files, so the receipt is reused only while each one is still
+so; once someone edits one, or brings back a file the step deleted, the step
+runs again:
+
+```text
+$ echo old > src/lib.txt
+$ flot run
+ran      edit                 ok        11ms  claims 1v/0u/0r  receipt 46ce815e7705
+
+PASSED 1795631368920-685b56d208be  root 685b56d208be  63ms
+limitations:
+  - edit: src/lib.txt changed since its receipt; the step runs again
+```
+
+Here the step writes `new` into `src/lib.txt` and its proof checks for it.
+Up to 0.2.6 the edit was answered with the cached receipt and `PASSED`,
+while the proof failed. The re-run seals the receipt it sealed before the
+edit. A file an earlier receipt of the step records, and that is still as
+that receipt says, is recorded again when a run finds it already as the step
+leaves it, such as a file the step deletes that is already gone. A step that
+changes nothing records nothing, and its receipt is what it always was.
+
+The cost is re-runs. An agent step that edited `src/**` runs again, and is
+paid for again, after a person edits any file it changed, even a line its
+claims do not depend on: flot cannot tell which edits matter to a proof, and
+a proof that judged other content says nothing about this one. What git
+ignores, `.git` and the store are not read, so a product there, such as a
+file under `.flot-work/`, is checked only if the step declares it in
+`outputs`. Across steps that run at once see [Concurrency](#concurrency).
+
+### Steps that always run
+
+A step with `always = true` runs on every run and is never reused, so it
+can probe what no key covers:
+
+```toml
+[[step]]
+id = "toolchain"
+run = "rustc -vV && cargo -V"
+always = true
+
+[[step]]
+id = "build"
+run = "cargo build"
+needs = ["toolchain"]
+```
+
+Its receipt id follows what it printed and produced, so it comes out the same
+while the tools do, and the steps that need it are reused; once they print
+something else, those steps run again. Real output, for a probe that prints
+the version in `ver`: the second run, and one after the version changed
+(the verdict and limitations are left out):
+
+```text
+$ flot run
+ran      toolchain            ok        11ms  claims 0v/0u/0r  receipt f42699e3dc2d
+    | 1.88
+cached   build                ok        11ms  claims 1v/0u/0r  receipt c62bdb4f366e
+
+$ echo 1.85 > ver
+$ flot run
+ran      toolchain            ok        11ms  claims 0v/0u/0r  receipt 05a7fec7721d
+    | 1.85
+ran      build                ok        11ms  claims 1v/0u/0r  receipt c3d387e28bce
+    | built
+```
+
+`always` is not part of the step key. It is refused with `candidates`: every
+candidate would run on every run, and which one is kept could change with what
+each reported spending. With `fails_before`, the proof runs before the change
+on every run too.
+
 ## Receipts
 
 Split in two. `identity` is deterministic — command, step key,
-status, exit code, output digests, inputs, produced files, dependency receipts, claim verdicts,
+status, exit code, output digests, inputs, produced files, other files the step changed, dependency receipts, claim verdicts,
 limitations, deriving tool. The receipt id *is* the digest of that body, so an
 edited receipt stops authenticating. `observed` carries timing, host and bounded
 inline previews, and is never hashed — two honest runs disagree on milliseconds,
@@ -61,7 +146,9 @@ succeeded and exited zero), `refuted` (it ran and rejected), `unverified`
 by a signal, or a file the proof judges changed while it ran). Each one
 records the proof command, its exit code and a digest of its output.
 `allow_failure = true` lets a run continue past a failed step, but proves
-nothing: that step's claims stay unverified.
+nothing: that step's claims stay unverified. Its receipt is `ok` but records
+the exit code, and like any failure it is never reused: the next run tries
+the step again.
 
 ### Proofs that change their mind
 
@@ -167,7 +254,8 @@ writes and the git commands it runs stay in its copy; like every step, it is
 not sandboxed, and a command that names a path outside the copy reaches it.
 The copy holds the project as it is, outputs included, so a command that must
 start without an earlier output removes it first. Each candidate gets its own receipt, and its own attempts when the
-step has `attempts`.
+step has `attempts`. A step with candidates cannot set
+[`always`](#steps-that-always-run).
 
 The kept candidate is the first one in this order: one that held before one
 that did not; among those that held, a known cost before an unknown one, and a
@@ -177,7 +265,15 @@ through `$FLOT_METRICS`; a report of tokens alone, or an attempt that reported
 nothing, makes it unknown, not free.
 The kept candidate's outputs are written into the project, and its receipt is
 the step's, so later steps see what was proven. Files a candidate deleted, or
-wrote without declaring them as outputs, stay in its copy.
+wrote without declaring them as outputs, stay in its copy, so its receipt
+answers only for its outputs.
+
+Patterns are matched in the copy by the project's ignore rules, not by the
+store's (`.flot/.gitignore` ignores everything beneath it), so a wildcard
+input or proof input finds in the copy what it finds in the project. A
+candidate that rewrites a proof file a wildcard names is caught like any other
+step: `the step changed its own proof (checks/check.sh)`, and its claims stay
+unverified.
 
 The run says how each candidate did and which one it kept:
 
@@ -223,11 +319,17 @@ budget is still reused after the budget shrinks.
 `flot run --jobs N`, or `max_parallel = N` in `[flow]`, runs up
 to N independent steps at once; a step still waits for its dependencies. Because
 completion order never enters a receipt or the run root, `--jobs 8` and
-`--jobs 1` produce byte-identical digests for the same work — verified by test.
+`--jobs 1` produce byte-identical digests for the same work — verified by test —
+as long as no step changes undeclared files while another runs.
 Concurrency is opt-in and the manifest records it as a limitation: flot checks
-the files steps *declare* as outputs (see [Outputs](#outputs)), but cannot see files they
-write without declaring them. A failing branch cancels only its own dependents; an
-independent branch still completes.
+the files steps *declare* as outputs (see [Outputs](#outputs)), but cannot tell
+which of the steps running at once changed a file they do not declare. Such a
+file is recorded in the receipt of every step that was running when it changed
+(see [Files a step changed](#files-a-step-changed)). That only makes those
+steps run again once the file changes, never reuses one wrongly, but the
+receipt ids of steps that run beside an editing step then depend on timing. A
+step with `may_change` runs alone, so what it records is its own. A failing
+branch cancels only its own dependents; an independent branch still completes.
 
 Measured on a fan-out of three independent one-second steps joined by a gate:
 
@@ -615,12 +717,14 @@ limitations:
   - fix: claims are unverified because the step did not succeed
 ```
 
-Every file the scan reaches is hashed before and after the step, so the check
-costs a read of the project per execution. A step with `may_change` runs
-alone: no other step of the run runs beside it, so what changed is its own
-doing (its proof, and candidates in their own copies, are not held back). The
-scope is part of the step key, so narrowing it runs the step again. A change
-of mode alone is not a change of content and is not reported.
+Every file the scan reaches is hashed before and after each step outside a
+candidate's copy, for this check and for the files the step answers for (see
+[Files a step changed](#files-a-step-changed)), so each execution costs two
+reads of the project. A step with `may_change` runs alone: no other step of
+the run runs beside it, so what changed is its own doing (its proof, and
+candidates in their own copies, are not held back). The scope is part of the
+step key, so narrowing it runs the step again. A change of mode alone is not
+a change of content; it is neither reported nor recorded.
 
 ## Sandbox
 
@@ -720,8 +824,12 @@ Reusing a receipt puts missing outputs back, so the files on disk are the ones
 its claims were proven against. An output that exists with different content
 is never overwritten, and never vouched for by a receipt that proved other
 content: the receipt is not reused and the step runs again, so its proof judges
-the file that is actually there. Output files travel in a bundle, so an
-importing host gets the produced artifact, not just a report about it. Two steps that
+the file that is actually there. On reuse the patterns are matched again too:
+a file that matches one now but is not in the receipt was never judged by its
+proof, so the step runs again
+(`gen: out/bad.txt matches an output pattern but is not in its receipt; the step runs again`).
+Output files travel in a bundle, so an importing host gets the produced
+artifact, not just a report about it. Two steps that
 produce the same file without one needing the other are reported, because which
 content survives depends on scheduling. Patterns must stay inside the flow root,
 a step cannot declare its own proof as an output, and a receipt is never reused

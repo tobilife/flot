@@ -841,10 +841,17 @@ verify = "grep -q flot artifact.txt"
         );
     }
 
-    /// Import `bundle` into a fresh project and run the same flow there.
+    /// What the step leaves in the project, which its receipt answers for.
+    fn checkout(dir: &std::path::Path) {
+        std::fs::write(dir.join("artifact.txt"), "flot\n").unwrap();
+    }
+
+    /// Import `bundle` into a fresh project holding what the step left, and
+    /// run the same flow there.
     fn run_after_import(bundle: &Bundle, trusted: Option<&[u8; 32]>) -> (ImportReport, bool) {
         let target = tempfile::tempdir().unwrap();
         std::fs::write(target.path().join("flot.toml"), FLOW).unwrap();
+        checkout(target.path());
         let fresh = Store::open(target.path(), HostSecret::from_bytes([7; 32])).unwrap();
         if let Some(secret) = trusted {
             trust(&fresh, secret, "alice");
@@ -895,6 +902,7 @@ verify = "grep -q flot artifact.txt"
         let (_alice_dir, alice_store, alice_run) = recorded();
         let (_bob_dir, bob_store, bob_run) = recorded();
         let target = tempfile::tempdir().unwrap();
+        checkout(target.path());
         let fresh = Store::open(target.path(), HostSecret::from_bytes([7; 32])).unwrap();
         let flow = Flow::parse(FLOW).unwrap();
         let run = || {

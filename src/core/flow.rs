@@ -132,6 +132,12 @@ pub struct Step {
     /// there. A proof that passes either way shows nothing this change did.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub fails_before: bool,
+    /// The step runs on every run and its receipt is never reused: for a
+    /// probe of what no key covers, such as the toolchain on `PATH`. Its
+    /// receipt id follows what it printed and produced, so the steps that
+    /// need it run again only when that changed. Not part of the step key.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub always: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -298,6 +304,12 @@ impl Flow {
                         step.id
                     );
                 }
+            }
+            if step.always && !step.candidates.is_empty() {
+                bail!(
+                    "step `{}` sets always, which candidates do not support: every candidate would run on every run, and which one is kept could change with what each reported spending, so the steps that need it could not be reused",
+                    step.id
+                );
             }
             if !step.candidates.is_empty() {
                 if step.candidates.len() < 2 {

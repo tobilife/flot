@@ -94,7 +94,10 @@ This repository does so: its [`action` job](../.github/workflows/ci.yml)
 reads [`.github/flot-signers`](../.github/flot-signers) from the base branch
 (from the commit itself on a push to `main`), trusts those keys, runs
 `flot pull --require-trusted`, and then the action. Where the base branch
-has no such file, every step runs in CI. The other jobs still build and test
+has no such file, every step runs in CI. The flow's `toolchain` step runs
+every time (`always = true`, see [step keys](flows.md#step-keys)), so CI
+reuses the developer's other steps only while its `rustc -vV` and `cargo -V`
+print what the developer's did. The other jobs still build and test
 every commit themselves.
 
 After the local run, the developer shares it with `flot push --sign`. A

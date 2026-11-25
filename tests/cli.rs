@@ -4143,26 +4143,41 @@ verify = "grep -q a src/a.txt"
 
 [[step]]
 id = "outside"
-run = "echo b > b.txt"
+run = "ln flot.toml src/flot.toml || echo link refused; echo b > b.txt"
 sandbox = { write = ["src"] }
 
 [[step]]
 id = "offline"
-run = "if grep ':' /proc/net/dev | grep -qv 'lo:'; then echo online; exit 1; fi"
+run = "if nc -z 127.0.0.1 PORT; then echo online; exit 1; fi"
 sandbox = { network = false }
+
+[[step]]
+id = "online"
+run = "nc -z 127.0.0.1 PORT"
 "#;
 
 #[test]
 fn a_confined_step_writes_only_where_it_may() {
-    let project = Project::new(CONFINED);
+    // A port the steps can reach unless their network is taken away.
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port().to_string();
+    let confined = CONFINED.replace("PORT", &port);
+    let project = Project::new(&confined);
     project.write("src/.keep", "");
     let run = project.flot(&["run"]);
-    if cfg!(target_os = "linux") {
+    if cfg!(any(target_os = "linux", target_os = "macos")) {
         assert_eq!(run.code, 1, "{}", run.stdout);
         run.has("ran      inside               ok")
             .has("ran      outside              failed")
-            .has("b.txt: Permission denied");
+            .has("link refused")
+            .has(if cfg!(target_os = "linux") {
+                "b.txt: Permission denied"
+            } else {
+                "b.txt: Operation not permitted"
+            })
+            .has("ran      online               ok");
         assert!(!project.path().join("b.txt").exists());
+        assert!(!project.path().join("src/flot.toml").exists());
         let inside = project.flot(&["--json", "show"]).json()["steps"][0]["receipt_id"]
             .as_str()
             .unwrap()
@@ -4172,7 +4187,11 @@ fn a_confined_step_writes_only_where_it_may() {
         assert!(receipt["identity"]["sandbox"]["mechanism"]
             .as_str()
             .unwrap()
-            .contains("landlock abi"));
+            .contains(if cfg!(target_os = "linux") {
+                "landlock abi"
+            } else {
+                "seatbelt file writes"
+            }));
         // A host that does not let an unprivileged process have a network
         // namespace must not run the step at all; any other host must run it
         // offline.
@@ -4192,7 +4211,7 @@ fn a_confined_step_writes_only_where_it_may() {
     } else {
         assert_eq!(run.code, 1, "{}", run.stdout);
         run.has(
-            "could not run: its sandbox cannot be enforced here: flot confines steps on Linux only",
+            "could not run: its sandbox cannot be enforced here: flot confines steps on Linux and macOS only",
         );
         assert!(!project.path().join("src/a.txt").exists());
     }
@@ -4200,14 +4219,14 @@ fn a_confined_step_writes_only_where_it_may() {
     // A path to write beneath must exist, or the step does not run.
     project.write(
         "flot.toml",
-        &CONFINED.replace("write = [\"src\"]", "write = [\"gone\"]"),
+        &confined.replace("write = [\"src\"]", "write = [\"gone\"]"),
     );
     project
         .flot(&["run", "--only", "outside"])
         .has("could not run: its sandbox cannot be enforced here");
     project.write(
         "flot.toml",
-        &CONFINED.replace("network = false", "network = true"),
+        &confined.replace("network = false", "network = true"),
     );
     project
         .flot(&["plan"])
@@ -4292,6 +4311,9 @@ fn doctor_names_what_weakens_the_evidence_and_changes_nothing() {
         report
             .stdout
             .contains("ok    sandbox         inside, outside, offline: enforced by landlock")
+            || report
+                .stdout
+                .contains("ok    sandbox         inside, outside, offline: enforced by seatbelt")
             || (report.code == 1
                 && report.stdout.contains(
                     "FAIL  sandbox         inside, outside, offline: cannot be enforced here"

@@ -201,7 +201,11 @@ pub fn run_confined(
     let started_at_ms = now_ms();
     let started = Instant::now();
 
-    let mut builder = Command::new(shell()?);
+    let shell = shell()?;
+    let mut builder = match sandbox {
+        Some(sandbox) => sandbox.command(&shell),
+        None => Command::new(&shell),
+    };
     builder
         .arg("-e")
         .arg("-c")
@@ -224,10 +228,6 @@ pub fn run_confined(
         use std::os::windows::process::CommandExt;
         builder.creation_flags(job::SPAWN_FLAGS);
     }
-    if let Some(sandbox) = sandbox {
-        sandbox.apply(&mut builder);
-    }
-
     let mut child = builder
         .spawn()
         .with_context(|| format!("cannot start `{command}`"))?;

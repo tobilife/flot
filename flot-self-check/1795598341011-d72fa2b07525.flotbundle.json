@@ -1,0 +1,948 @@
+{
+  "schema": 4,
+  "flot_version": "0.2.6",
+  "run": {
+    "run_id": "1795598341011-d72fa2b07525",
+    "flow": "flot-self-check",
+    "flow_digest": "sha256:23970d7c05e4248af89ead83559a7a73cb4d155cf9815afdc2270c8c68316031",
+    "root_digest": "sha256:d72fa2b07525797b821d9d7dfe2c9f8dd60f7800d979a34f172a9352d5e986e5",
+    "verdict": "passed",
+    "steps": [
+      {
+        "step_id": "format",
+        "receipt_id": "sha256:75c14019f18bf0fba1616103d17117dae2221d2d9924db610259a3db0db2fc55",
+        "status": "ok",
+        "cached": false,
+        "claims": {
+          "verified": 1,
+          "unverified": 0,
+          "refuted": 0
+        },
+        "observed_digest": "sha256:444242e7f3178a20b522690bae3c4a9bf986763410acfcf3d4431d77cacc285a"
+      },
+      {
+        "step_id": "build",
+        "receipt_id": "sha256:d96101599b8fb5c5cb61fb378854f02a5b0c3ebb88967be6e41f95c25ee83cc9",
+        "status": "ok",
+        "cached": false,
+        "claims": {
+          "verified": 1,
+          "unverified": 0,
+          "refuted": 0
+        },
+        "observed_digest": "sha256:b745e30a8a2c8e1ea7db0cfbea3817ccdf0dd6235d3b595c492a3dffb61bdd72"
+      },
+      {
+        "step_id": "lint",
+        "receipt_id": "sha256:fd98588a3c98202b184d4f156e7922e3f595e21cdd14e5b0321ea18bce624344",
+        "status": "ok",
+        "cached": false,
+        "claims": {
+          "verified": 1,
+          "unverified": 0,
+          "refuted": 0
+        },
+        "observed_digest": "sha256:c2f66001ad3351a936b2d61cf1b5f923670ec2f5acf4c04529fb8a44ac9684e1"
+      },
+      {
+        "step_id": "test",
+        "receipt_id": "sha256:2bbbb994dad5d97fce71d2ad9bda17b7a6958634a5ad7f738f5db0b87555e1aa",
+        "status": "ok",
+        "cached": false,
+        "claims": {
+          "verified": 2,
+          "unverified": 0,
+          "refuted": 0
+        },
+        "observed_digest": "sha256:554637b296eca882cfcd1058c2999d328c995ab61f75bc837beb0e7ab42c7c91"
+      }
+    ],
+    "claims": {
+      "verified": 5,
+      "unverified": 0,
+      "refuted": 0
+    },
+    "limitations": [
+      "proofs checked against origin/main (7efe6ab67a26)"
+    ],
+    "max_parallel": 1,
+    "spend": {
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "cost_micro_usd": 0,
+      "reporting_steps": 0,
+      "silent_steps": 4,
+      "unpriced_steps": 0,
+      "reused_cost_micro_usd": 0
+    },
+    "max_cost_micro_usd": null,
+    "started_at_ms": 1795598341011,
+    "duration_ms": 17773,
+    "flot_version": "0.2.6"
+  },
+  "receipts": [
+    {
+      "receipt_id": "sha256:75c14019f18bf0fba1616103d17117dae2221d2d9924db610259a3db0db2fc55",
+      "identity": {
+        "flow": "flot-self-check",
+        "step_id": "format",
+        "step_key": "sha256:7860faf25a4d2bb0dc4c3c057fb9c7c47b2dce77b5a9db713b7d5a9e87a3ad42",
+        "command": "cargo fmt",
+        "status": "ok",
+        "exit_code": 0,
+        "stdout_digest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_digest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "inputs": [
+          {
+            "path": "src/adapters/cli.rs",
+            "digest": "sha256:60d3b8d2abc0289eb1bf0639dff8e11601646d1581f528b70d064b46e6802179"
+          },
+          {
+            "path": "src/adapters/mcp.rs",
+            "digest": "sha256:2bdb7d50bb0f394f40d74253b8e05562831cceb4ce58557a4b2b39f980e4d6ab"
+          },
+          {
+            "path": "src/adapters/mod.rs",
+            "digest": "sha256:2305acb0c4b63bc1bfc993a31ecba153c2b95c99141052fb97f8aac9651990ed"
+          },
+          {
+            "path": "src/core/attest.rs",
+            "digest": "sha256:5015111f2a7771186280d279cfeb057cb25582ac1e65f9eed78b3370d27fc643"
+          },
+          {
+            "path": "src/core/compare.rs",
+            "digest": "sha256:4d7570455f4118d4992aa3a9b70cf3ee626d47e05aab04accf2af7c5eaf12a81"
+          },
+          {
+            "path": "src/core/digest.rs",
+            "digest": "sha256:6396d50610171415e43c10ba1c541fb8b094ef59a774520e36307dbb8a9e4e27"
+          },
+          {
+            "path": "src/core/fault.rs",
+            "digest": "sha256:0a35676337719eec6005c3f203b5364a702941ed73e0b17a37bfde1cd7cc2f42"
+          },
+          {
+            "path": "src/core/flow.rs",
+            "digest": "sha256:79e04dbba4d362daac8edf8ed8cdd29fee542bc8687ab87d5ee4bf7b9c807528"
+          },
+          {
+            "path": "src/core/metrics.rs",
+            "digest": "sha256:ba809d9be9c3d532205a7efd6ce6c48a51ec0a7b203a4fa64d42a37c44f4cb0c"
+          },
+          {
+            "path": "src/core/mod.rs",
+            "digest": "sha256:e49a5033e8856653cdd86c5d0983d9ddb88e5c807e2a2f5f9ab29ff2ecc33c47"
+          },
+          {
+            "path": "src/core/powershell.rs",
+            "digest": "sha256:bf04b85c824a92d2df2fd3bb97bc86947d2d275de7043dd5fd984dacc57257b5"
+          },
+          {
+            "path": "src/core/receipt.rs",
+            "digest": "sha256:95b3017c4b7d4701726bde0c49091b78925c553f2e2ff5b2c8cb2e827ae925fa"
+          },
+          {
+            "path": "src/core/secrets.rs",
+            "digest": "sha256:dd8ac5ec7744e88e6d2795dddb499b1b1233f1ae983217ec9512de23193a6ee2"
+          },
+          {
+            "path": "src/core/shell.rs",
+            "digest": "sha256:25405917f53a7d83a2cb5fb151b5b348d54b9bb2d7901d2e65489fdf150019c1"
+          },
+          {
+            "path": "src/engine/baseline.rs",
+            "digest": "sha256:7427e1c8746038c928008e62d7b49a3b32c516bded1d96feca28686fb4984407"
+          },
+          {
+            "path": "src/engine/claims.rs",
+            "digest": "sha256:12b15334156ffe6cd1fb4e4e8027399dca69fb83a703c29532a9ed965401a70d"
+          },
+          {
+            "path": "src/engine/exec.rs",
+            "digest": "sha256:5fb4cf90c11ee864728090d54e7fe0f1e6389874c2f943f230a93a18df442ec0"
+          },
+          {
+            "path": "src/engine/git.rs",
+            "digest": "sha256:be64199bc3e7bc6cda052bf3e2eca2d3e73b54e4fafe5239f561cfadc9034173"
+          },
+          {
+            "path": "src/engine/keying.rs",
+            "digest": "sha256:c96dfd0ce319f3e4c884dedacb2cff5d800bec40655137ca977138539f434122"
+          },
+          {
+            "path": "src/engine/mod.rs",
+            "digest": "sha256:0508d93b324886261827e1de5fdb660863fccdc16dd3f1b053d0348fd413b675"
+          },
+          {
+            "path": "src/engine/runner.rs",
+            "digest": "sha256:85d0964c8fed30eb048395c76ec2f6794208495f40b771dc71580861cbbbd9b9"
+          },
+          {
+            "path": "src/engine/sandbox.rs",
+            "digest": "sha256:b8045a08346fd9683c72ea5ca82c10855ac29756c58988db5dd22d3e0f1f31af"
+          },
+          {
+            "path": "src/engine/scheduler.rs",
+            "digest": "sha256:61793c339544dd259738b4dd0aa1292557c2bd109eb810a5b38dafec16d86d22"
+          },
+          {
+            "path": "src/lib.rs",
+            "digest": "sha256:c477511aad556e416ef2e1fedee887a663dcb66372a50c6a4ac39aa92f0e9cb9"
+          },
+          {
+            "path": "src/main.rs",
+            "digest": "sha256:426249f89a22bf66be9d41e21f558c4efa193000a5e3cbdaa2ff98b52578eb82"
+          },
+          {
+            "path": "src/service/audit.rs",
+            "digest": "sha256:bb4f188fd99166c85d33fd314dbee55117621625b3b7e704d8e37f238dd69f2a"
+          },
+          {
+            "path": "src/service/bundle.rs",
+            "digest": "sha256:56931dc5ad85405122bca384b9f0cd68e756849fcc7155b146761e203a9b7f3a"
+          },
+          {
+            "path": "src/service/doctor.rs",
+            "digest": "sha256:76adbf0443b118dcb85f6b4532f6f7646acfab6d9acc2040f263a9d6d295cfa4"
+          },
+          {
+            "path": "src/service/flaky.rs",
+            "digest": "sha256:ea7521eb4a1ffc4ab148724ad5c5d185fb7cb9734b9f7aeb108610dde3ca2a11"
+          },
+          {
+            "path": "src/service/keys.rs",
+            "digest": "sha256:d61271815e9b311dcae85a18722709ebabcd5654a7907cff532ca835212b6d0b"
+          },
+          {
+            "path": "src/service/mod.rs",
+            "digest": "sha256:492d79c3255c6a1b9e77de1663cccbe443458b9356aad6b0210cd3c6836760a0"
+          },
+          {
+            "path": "src/service/search.rs",
+            "digest": "sha256:ef86399f28db12cc5be57330c659063d6801989c7dbccd350accc58a66bc840a"
+          },
+          {
+            "path": "src/service/share.rs",
+            "digest": "sha256:63f27be8ee57e035886c1aafccccc50a1e3da59c1882bfde0385654ff426c573"
+          },
+          {
+            "path": "src/store.rs",
+            "digest": "sha256:c89a52a75bd3af495a3e714c5ced1339f392bfbf4620fc40df6037ef5a66152a"
+          },
+          {
+            "path": "tests/architecture.rs",
+            "digest": "sha256:09bb7032ecadf80f37c82e1361d9c409e1688541db82443f2949af61d9e6e81a"
+          },
+          {
+            "path": "tests/cli.rs",
+            "digest": "sha256:07bfda261db5c742e4c1f3abca26db5d29a52808ed0e8b608fbab8278c58cacb"
+          },
+          {
+            "path": "tests/readme.rs",
+            "digest": "sha256:6eb4c57de48203a208b96ca987a8176abcea168b7c6ff086621f3c9b5a9ea610"
+          }
+        ],
+        "verify_inputs": [],
+        "outputs": [],
+        "deps": [],
+        "claims": [
+          {
+            "text": "every source file is rustfmt-clean",
+            "status": "verified",
+            "verify_command": "cargo fmt --check",
+            "verify_exit": 0,
+            "verify_output_digest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "reason": null
+          }
+        ],
+        "limitations": [],
+        "tool": {
+          "name": "flot",
+          "version": "0.2.6",
+          "schema": 5
+        }
+      },
+      "observed": {
+        "started_at_ms": 1795598341138,
+        "duration_ms": 273,
+        "host_os": "linux",
+        "stdout_inline": "",
+        "stdout_truncated": false,
+        "stderr_inline": "",
+        "stderr_truncated": false,
+        "stdout_bytes": 0,
+        "stderr_bytes": 0,
+        "metrics": null,
+        "metrics_notes": []
+      }
+    },
+    {
+      "receipt_id": "sha256:d96101599b8fb5c5cb61fb378854f02a5b0c3ebb88967be6e41f95c25ee83cc9",
+      "identity": {
+        "flow": "flot-self-check",
+        "step_id": "build",
+        "step_key": "sha256:25971efd6851b07b6ca9a6b3c5c0a33b1b25633990a838a82e88c1665510fc61",
+        "command": "cargo build --all-targets",
+        "status": "ok",
+        "exit_code": 0,
+        "stdout_digest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_digest": "sha256:c233b69c85159f775af8791a1449ae968c0b20b465c62c47eeb99697f8b92e65",
+        "inputs": [
+          {
+            "path": "Cargo.lock",
+            "digest": "sha256:e8e928c2e666b2d97702acb6325d4b3dfde662611fad1a4f3f85ca62e7307cd0"
+          },
+          {
+            "path": "Cargo.toml",
+            "digest": "sha256:5eb24598c947052cc05a6db8eb3d9d949d696e8c011467ec6ef6d86a0c9bb03f"
+          },
+          {
+            "path": "src/adapters/cli.rs",
+            "digest": "sha256:60d3b8d2abc0289eb1bf0639dff8e11601646d1581f528b70d064b46e6802179"
+          },
+          {
+            "path": "src/adapters/mcp.rs",
+            "digest": "sha256:2bdb7d50bb0f394f40d74253b8e05562831cceb4ce58557a4b2b39f980e4d6ab"
+          },
+          {
+            "path": "src/adapters/mod.rs",
+            "digest": "sha256:2305acb0c4b63bc1bfc993a31ecba153c2b95c99141052fb97f8aac9651990ed"
+          },
+          {
+            "path": "src/core/attest.rs",
+            "digest": "sha256:5015111f2a7771186280d279cfeb057cb25582ac1e65f9eed78b3370d27fc643"
+          },
+          {
+            "path": "src/core/compare.rs",
+            "digest": "sha256:4d7570455f4118d4992aa3a9b70cf3ee626d47e05aab04accf2af7c5eaf12a81"
+          },
+          {
+            "path": "src/core/digest.rs",
+            "digest": "sha256:6396d50610171415e43c10ba1c541fb8b094ef59a774520e36307dbb8a9e4e27"
+          },
+          {
+            "path": "src/core/fault.rs",
+            "digest": "sha256:0a35676337719eec6005c3f203b5364a702941ed73e0b17a37bfde1cd7cc2f42"
+          },
+          {
+            "path": "src/core/flow.rs",
+            "digest": "sha256:79e04dbba4d362daac8edf8ed8cdd29fee542bc8687ab87d5ee4bf7b9c807528"
+          },
+          {
+            "path": "src/core/metrics.rs",
+            "digest": "sha256:ba809d9be9c3d532205a7efd6ce6c48a51ec0a7b203a4fa64d42a37c44f4cb0c"
+          },
+          {
+            "path": "src/core/mod.rs",
+            "digest": "sha256:e49a5033e8856653cdd86c5d0983d9ddb88e5c807e2a2f5f9ab29ff2ecc33c47"
+          },
+          {
+            "path": "src/core/powershell.rs",
+            "digest": "sha256:bf04b85c824a92d2df2fd3bb97bc86947d2d275de7043dd5fd984dacc57257b5"
+          },
+          {
+            "path": "src/core/receipt.rs",
+            "digest": "sha256:95b3017c4b7d4701726bde0c49091b78925c553f2e2ff5b2c8cb2e827ae925fa"
+          },
+          {
+            "path": "src/core/secrets.rs",
+            "digest": "sha256:dd8ac5ec7744e88e6d2795dddb499b1b1233f1ae983217ec9512de23193a6ee2"
+          },
+          {
+            "path": "src/core/shell.rs",
+            "digest": "sha256:25405917f53a7d83a2cb5fb151b5b348d54b9bb2d7901d2e65489fdf150019c1"
+          },
+          {
+            "path": "src/engine/baseline.rs",
+            "digest": "sha256:7427e1c8746038c928008e62d7b49a3b32c516bded1d96feca28686fb4984407"
+          },
+          {
+            "path": "src/engine/claims.rs",
+            "digest": "sha256:12b15334156ffe6cd1fb4e4e8027399dca69fb83a703c29532a9ed965401a70d"
+          },
+          {
+            "path": "src/engine/exec.rs",
+            "digest": "sha256:5fb4cf90c11ee864728090d54e7fe0f1e6389874c2f943f230a93a18df442ec0"
+          },
+          {
+            "path": "src/engine/git.rs",
+            "digest": "sha256:be64199bc3e7bc6cda052bf3e2eca2d3e73b54e4fafe5239f561cfadc9034173"
+          },
+          {
+            "path": "src/engine/keying.rs",
+            "digest": "sha256:c96dfd0ce319f3e4c884dedacb2cff5d800bec40655137ca977138539f434122"
+          },
+          {
+            "path": "src/engine/mod.rs",
+            "digest": "sha256:0508d93b324886261827e1de5fdb660863fccdc16dd3f1b053d0348fd413b675"
+          },
+          {
+            "path": "src/engine/runner.rs",
+            "digest": "sha256:85d0964c8fed30eb048395c76ec2f6794208495f40b771dc71580861cbbbd9b9"
+          },
+          {
+            "path": "src/engine/sandbox.rs",
+            "digest": "sha256:b8045a08346fd9683c72ea5ca82c10855ac29756c58988db5dd22d3e0f1f31af"
+          },
+          {
+            "path": "src/engine/scheduler.rs",
+            "digest": "sha256:61793c339544dd259738b4dd0aa1292557c2bd109eb810a5b38dafec16d86d22"
+          },
+          {
+            "path": "src/lib.rs",
+            "digest": "sha256:c477511aad556e416ef2e1fedee887a663dcb66372a50c6a4ac39aa92f0e9cb9"
+          },
+          {
+            "path": "src/main.rs",
+            "digest": "sha256:426249f89a22bf66be9d41e21f558c4efa193000a5e3cbdaa2ff98b52578eb82"
+          },
+          {
+            "path": "src/service/audit.rs",
+            "digest": "sha256:bb4f188fd99166c85d33fd314dbee55117621625b3b7e704d8e37f238dd69f2a"
+          },
+          {
+            "path": "src/service/bundle.rs",
+            "digest": "sha256:56931dc5ad85405122bca384b9f0cd68e756849fcc7155b146761e203a9b7f3a"
+          },
+          {
+            "path": "src/service/doctor.rs",
+            "digest": "sha256:76adbf0443b118dcb85f6b4532f6f7646acfab6d9acc2040f263a9d6d295cfa4"
+          },
+          {
+            "path": "src/service/flaky.rs",
+            "digest": "sha256:ea7521eb4a1ffc4ab148724ad5c5d185fb7cb9734b9f7aeb108610dde3ca2a11"
+          },
+          {
+            "path": "src/service/keys.rs",
+            "digest": "sha256:d61271815e9b311dcae85a18722709ebabcd5654a7907cff532ca835212b6d0b"
+          },
+          {
+            "path": "src/service/mod.rs",
+            "digest": "sha256:492d79c3255c6a1b9e77de1663cccbe443458b9356aad6b0210cd3c6836760a0"
+          },
+          {
+            "path": "src/service/search.rs",
+            "digest": "sha256:ef86399f28db12cc5be57330c659063d6801989c7dbccd350accc58a66bc840a"
+          },
+          {
+            "path": "src/service/share.rs",
+            "digest": "sha256:63f27be8ee57e035886c1aafccccc50a1e3da59c1882bfde0385654ff426c573"
+          },
+          {
+            "path": "src/store.rs",
+            "digest": "sha256:c89a52a75bd3af495a3e714c5ced1339f392bfbf4620fc40df6037ef5a66152a"
+          },
+          {
+            "path": "tests/architecture.rs",
+            "digest": "sha256:09bb7032ecadf80f37c82e1361d9c409e1688541db82443f2949af61d9e6e81a"
+          },
+          {
+            "path": "tests/cli.rs",
+            "digest": "sha256:07bfda261db5c742e4c1f3abca26db5d29a52808ed0e8b608fbab8278c58cacb"
+          },
+          {
+            "path": "tests/readme.rs",
+            "digest": "sha256:6eb4c57de48203a208b96ca987a8176abcea168b7c6ff086621f3c9b5a9ea610"
+          }
+        ],
+        "verify_inputs": [],
+        "outputs": [],
+        "deps": [
+          {
+            "step_id": "format",
+            "receipt_id": "sha256:75c14019f18bf0fba1616103d17117dae2221d2d9924db610259a3db0db2fc55"
+          }
+        ],
+        "claims": [
+          {
+            "text": "the library, binary and test targets compile",
+            "status": "verified",
+            "verify_command": "cargo build --all-targets --quiet",
+            "verify_exit": 0,
+            "verify_output_digest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "reason": null
+          }
+        ],
+        "limitations": [],
+        "tool": {
+          "name": "flot",
+          "version": "0.2.6",
+          "schema": 5
+        }
+      },
+      "observed": {
+        "started_at_ms": 1795598342071,
+        "duration_ms": 847,
+        "host_os": "linux",
+        "stdout_inline": "",
+        "stdout_truncated": false,
+        "stderr_inline": "    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.81s\n",
+        "stderr_truncated": false,
+        "stdout_bytes": 0,
+        "stderr_bytes": 72,
+        "metrics": null,
+        "metrics_notes": []
+      }
+    },
+    {
+      "receipt_id": "sha256:fd98588a3c98202b184d4f156e7922e3f595e21cdd14e5b0321ea18bce624344",
+      "identity": {
+        "flow": "flot-self-check",
+        "step_id": "lint",
+        "step_key": "sha256:d0d840e89dc0303355375eca84b967c2a3a067a154299d90ad8e2174142467b9",
+        "command": "cargo clippy --all-targets -- -D warnings",
+        "status": "ok",
+        "exit_code": 0,
+        "stdout_digest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_digest": "sha256:3819f5a7ceecd9222e0fbd258fbc5b3461b920ebd412d521eff393866d195f71",
+        "inputs": [
+          {
+            "path": "src/adapters/cli.rs",
+            "digest": "sha256:60d3b8d2abc0289eb1bf0639dff8e11601646d1581f528b70d064b46e6802179"
+          },
+          {
+            "path": "src/adapters/mcp.rs",
+            "digest": "sha256:2bdb7d50bb0f394f40d74253b8e05562831cceb4ce58557a4b2b39f980e4d6ab"
+          },
+          {
+            "path": "src/adapters/mod.rs",
+            "digest": "sha256:2305acb0c4b63bc1bfc993a31ecba153c2b95c99141052fb97f8aac9651990ed"
+          },
+          {
+            "path": "src/core/attest.rs",
+            "digest": "sha256:5015111f2a7771186280d279cfeb057cb25582ac1e65f9eed78b3370d27fc643"
+          },
+          {
+            "path": "src/core/compare.rs",
+            "digest": "sha256:4d7570455f4118d4992aa3a9b70cf3ee626d47e05aab04accf2af7c5eaf12a81"
+          },
+          {
+            "path": "src/core/digest.rs",
+            "digest": "sha256:6396d50610171415e43c10ba1c541fb8b094ef59a774520e36307dbb8a9e4e27"
+          },
+          {
+            "path": "src/core/fault.rs",
+            "digest": "sha256:0a35676337719eec6005c3f203b5364a702941ed73e0b17a37bfde1cd7cc2f42"
+          },
+          {
+            "path": "src/core/flow.rs",
+            "digest": "sha256:79e04dbba4d362daac8edf8ed8cdd29fee542bc8687ab87d5ee4bf7b9c807528"
+          },
+          {
+            "path": "src/core/metrics.rs",
+            "digest": "sha256:ba809d9be9c3d532205a7efd6ce6c48a51ec0a7b203a4fa64d42a37c44f4cb0c"
+          },
+          {
+            "path": "src/core/mod.rs",
+            "digest": "sha256:e49a5033e8856653cdd86c5d0983d9ddb88e5c807e2a2f5f9ab29ff2ecc33c47"
+          },
+          {
+            "path": "src/core/powershell.rs",
+            "digest": "sha256:bf04b85c824a92d2df2fd3bb97bc86947d2d275de7043dd5fd984dacc57257b5"
+          },
+          {
+            "path": "src/core/receipt.rs",
+            "digest": "sha256:95b3017c4b7d4701726bde0c49091b78925c553f2e2ff5b2c8cb2e827ae925fa"
+          },
+          {
+            "path": "src/core/secrets.rs",
+            "digest": "sha256:dd8ac5ec7744e88e6d2795dddb499b1b1233f1ae983217ec9512de23193a6ee2"
+          },
+          {
+            "path": "src/core/shell.rs",
+            "digest": "sha256:25405917f53a7d83a2cb5fb151b5b348d54b9bb2d7901d2e65489fdf150019c1"
+          },
+          {
+            "path": "src/engine/baseline.rs",
+            "digest": "sha256:7427e1c8746038c928008e62d7b49a3b32c516bded1d96feca28686fb4984407"
+          },
+          {
+            "path": "src/engine/claims.rs",
+            "digest": "sha256:12b15334156ffe6cd1fb4e4e8027399dca69fb83a703c29532a9ed965401a70d"
+          },
+          {
+            "path": "src/engine/exec.rs",
+            "digest": "sha256:5fb4cf90c11ee864728090d54e7fe0f1e6389874c2f943f230a93a18df442ec0"
+          },
+          {
+            "path": "src/engine/git.rs",
+            "digest": "sha256:be64199bc3e7bc6cda052bf3e2eca2d3e73b54e4fafe5239f561cfadc9034173"
+          },
+          {
+            "path": "src/engine/keying.rs",
+            "digest": "sha256:c96dfd0ce319f3e4c884dedacb2cff5d800bec40655137ca977138539f434122"
+          },
+          {
+            "path": "src/engine/mod.rs",
+            "digest": "sha256:0508d93b324886261827e1de5fdb660863fccdc16dd3f1b053d0348fd413b675"
+          },
+          {
+            "path": "src/engine/runner.rs",
+            "digest": "sha256:85d0964c8fed30eb048395c76ec2f6794208495f40b771dc71580861cbbbd9b9"
+          },
+          {
+            "path": "src/engine/sandbox.rs",
+            "digest": "sha256:b8045a08346fd9683c72ea5ca82c10855ac29756c58988db5dd22d3e0f1f31af"
+          },
+          {
+            "path": "src/engine/scheduler.rs",
+            "digest": "sha256:61793c339544dd259738b4dd0aa1292557c2bd109eb810a5b38dafec16d86d22"
+          },
+          {
+            "path": "src/lib.rs",
+            "digest": "sha256:c477511aad556e416ef2e1fedee887a663dcb66372a50c6a4ac39aa92f0e9cb9"
+          },
+          {
+            "path": "src/main.rs",
+            "digest": "sha256:426249f89a22bf66be9d41e21f558c4efa193000a5e3cbdaa2ff98b52578eb82"
+          },
+          {
+            "path": "src/service/audit.rs",
+            "digest": "sha256:bb4f188fd99166c85d33fd314dbee55117621625b3b7e704d8e37f238dd69f2a"
+          },
+          {
+            "path": "src/service/bundle.rs",
+            "digest": "sha256:56931dc5ad85405122bca384b9f0cd68e756849fcc7155b146761e203a9b7f3a"
+          },
+          {
+            "path": "src/service/doctor.rs",
+            "digest": "sha256:76adbf0443b118dcb85f6b4532f6f7646acfab6d9acc2040f263a9d6d295cfa4"
+          },
+          {
+            "path": "src/service/flaky.rs",
+            "digest": "sha256:ea7521eb4a1ffc4ab148724ad5c5d185fb7cb9734b9f7aeb108610dde3ca2a11"
+          },
+          {
+            "path": "src/service/keys.rs",
+            "digest": "sha256:d61271815e9b311dcae85a18722709ebabcd5654a7907cff532ca835212b6d0b"
+          },
+          {
+            "path": "src/service/mod.rs",
+            "digest": "sha256:492d79c3255c6a1b9e77de1663cccbe443458b9356aad6b0210cd3c6836760a0"
+          },
+          {
+            "path": "src/service/search.rs",
+            "digest": "sha256:ef86399f28db12cc5be57330c659063d6801989c7dbccd350accc58a66bc840a"
+          },
+          {
+            "path": "src/service/share.rs",
+            "digest": "sha256:63f27be8ee57e035886c1aafccccc50a1e3da59c1882bfde0385654ff426c573"
+          },
+          {
+            "path": "src/store.rs",
+            "digest": "sha256:c89a52a75bd3af495a3e714c5ced1339f392bfbf4620fc40df6037ef5a66152a"
+          },
+          {
+            "path": "tests/architecture.rs",
+            "digest": "sha256:09bb7032ecadf80f37c82e1361d9c409e1688541db82443f2949af61d9e6e81a"
+          },
+          {
+            "path": "tests/cli.rs",
+            "digest": "sha256:07bfda261db5c742e4c1f3abca26db5d29a52808ed0e8b608fbab8278c58cacb"
+          },
+          {
+            "path": "tests/readme.rs",
+            "digest": "sha256:6eb4c57de48203a208b96ca987a8176abcea168b7c6ff086621f3c9b5a9ea610"
+          }
+        ],
+        "verify_inputs": [],
+        "outputs": [],
+        "deps": [
+          {
+            "step_id": "build",
+            "receipt_id": "sha256:d96101599b8fb5c5cb61fb378854f02a5b0c3ebb88967be6e41f95c25ee83cc9"
+          }
+        ],
+        "claims": [
+          {
+            "text": "clippy reports no warnings on any target",
+            "status": "verified",
+            "verify_command": "cargo clippy --all-targets -- -D warnings",
+            "verify_exit": 0,
+            "verify_output_digest": "sha256:d9533554809e0846c6113df1671caf5d74f2a7b9763b0232786a0b652704164a",
+            "reason": null
+          }
+        ],
+        "limitations": [],
+        "tool": {
+          "name": "flot",
+          "version": "0.2.6",
+          "schema": 5
+        }
+      },
+      "observed": {
+        "started_at_ms": 1795598344180,
+        "duration_ms": 805,
+        "host_os": "linux",
+        "stdout_inline": "",
+        "stdout_truncated": false,
+        "stderr_inline": "    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.75s\n",
+        "stderr_truncated": false,
+        "stdout_bytes": 0,
+        "stderr_bytes": 72,
+        "metrics": null,
+        "metrics_notes": []
+      }
+    },
+    {
+      "receipt_id": "sha256:2bbbb994dad5d97fce71d2ad9bda17b7a6958634a5ad7f738f5db0b87555e1aa",
+      "identity": {
+        "flow": "flot-self-check",
+        "step_id": "test",
+        "step_key": "sha256:e186b86dcea134ffa6483dbb18d1e6727f0f809088e5bbe5a635ec50eb4de64a",
+        "command": "cargo test",
+        "status": "ok",
+        "exit_code": 0,
+        "stdout_digest": "sha256:c0c3b4b3a4e6f0266c7db0e4fe3609d30895db81ed880d91d297c9b83db23513",
+        "stderr_digest": "sha256:0b482c200a3d6857a8c2e74ff15827629265c0160cbe75f68619a57b176010ea",
+        "inputs": [
+          {
+            "path": ".claude-plugin/marketplace.json",
+            "digest": "sha256:b044ca8fe8b2fd7d65245b1bb899461fe50027c0d67903215888c56253e99a85"
+          },
+          {
+            "path": "Cargo.toml",
+            "digest": "sha256:5eb24598c947052cc05a6db8eb3d9d949d696e8c011467ec6ef6d86a0c9bb03f"
+          },
+          {
+            "path": "README.md",
+            "digest": "sha256:f42186d8c316036472890abbd56c1aee1e2d8e4e10fde5181d4b0facf8b6f5bb"
+          },
+          {
+            "path": "action.yml",
+            "digest": "sha256:eeb63ac959377ee865dea05c7e43d337e9c64909d48465942ec6318f512f3d56"
+          },
+          {
+            "path": "docs/ci.md",
+            "digest": "sha256:d43ba7630868c1f85da5b186f47ef58747ac8e2ac87daecc1b3081e5380fa832"
+          },
+          {
+            "path": "docs/readme/README_ko.md",
+            "digest": "sha256:66393b2b5846f4d3359da40ca4eeec4064e92603e2f8c0df5385479459022964"
+          },
+          {
+            "path": "docs/readme/README_zh.md",
+            "digest": "sha256:bba2ade444b51976269b10faccdf9c2a2f970277286f8043f8d39e45b78599ea"
+          },
+          {
+            "path": "plugins/claude-code/.claude-plugin/plugin.json",
+            "digest": "sha256:070735080abedc9277b4f3bdd0d38fa19869f1bf9da2be7eb18fcd408a1ceb74"
+          },
+          {
+            "path": "src/adapters/cli.rs",
+            "digest": "sha256:60d3b8d2abc0289eb1bf0639dff8e11601646d1581f528b70d064b46e6802179"
+          },
+          {
+            "path": "src/adapters/mcp.rs",
+            "digest": "sha256:2bdb7d50bb0f394f40d74253b8e05562831cceb4ce58557a4b2b39f980e4d6ab"
+          },
+          {
+            "path": "src/adapters/mod.rs",
+            "digest": "sha256:2305acb0c4b63bc1bfc993a31ecba153c2b95c99141052fb97f8aac9651990ed"
+          },
+          {
+            "path": "src/core/attest.rs",
+            "digest": "sha256:5015111f2a7771186280d279cfeb057cb25582ac1e65f9eed78b3370d27fc643"
+          },
+          {
+            "path": "src/core/compare.rs",
+            "digest": "sha256:4d7570455f4118d4992aa3a9b70cf3ee626d47e05aab04accf2af7c5eaf12a81"
+          },
+          {
+            "path": "src/core/digest.rs",
+            "digest": "sha256:6396d50610171415e43c10ba1c541fb8b094ef59a774520e36307dbb8a9e4e27"
+          },
+          {
+            "path": "src/core/fault.rs",
+            "digest": "sha256:0a35676337719eec6005c3f203b5364a702941ed73e0b17a37bfde1cd7cc2f42"
+          },
+          {
+            "path": "src/core/flow.rs",
+            "digest": "sha256:79e04dbba4d362daac8edf8ed8cdd29fee542bc8687ab87d5ee4bf7b9c807528"
+          },
+          {
+            "path": "src/core/metrics.rs",
+            "digest": "sha256:ba809d9be9c3d532205a7efd6ce6c48a51ec0a7b203a4fa64d42a37c44f4cb0c"
+          },
+          {
+            "path": "src/core/mod.rs",
+            "digest": "sha256:e49a5033e8856653cdd86c5d0983d9ddb88e5c807e2a2f5f9ab29ff2ecc33c47"
+          },
+          {
+            "path": "src/core/powershell.rs",
+            "digest": "sha256:bf04b85c824a92d2df2fd3bb97bc86947d2d275de7043dd5fd984dacc57257b5"
+          },
+          {
+            "path": "src/core/receipt.rs",
+            "digest": "sha256:95b3017c4b7d4701726bde0c49091b78925c553f2e2ff5b2c8cb2e827ae925fa"
+          },
+          {
+            "path": "src/core/secrets.rs",
+            "digest": "sha256:dd8ac5ec7744e88e6d2795dddb499b1b1233f1ae983217ec9512de23193a6ee2"
+          },
+          {
+            "path": "src/core/shell.rs",
+            "digest": "sha256:25405917f53a7d83a2cb5fb151b5b348d54b9bb2d7901d2e65489fdf150019c1"
+          },
+          {
+            "path": "src/engine/baseline.rs",
+            "digest": "sha256:7427e1c8746038c928008e62d7b49a3b32c516bded1d96feca28686fb4984407"
+          },
+          {
+            "path": "src/engine/claims.rs",
+            "digest": "sha256:12b15334156ffe6cd1fb4e4e8027399dca69fb83a703c29532a9ed965401a70d"
+          },
+          {
+            "path": "src/engine/exec.rs",
+            "digest": "sha256:5fb4cf90c11ee864728090d54e7fe0f1e6389874c2f943f230a93a18df442ec0"
+          },
+          {
+            "path": "src/engine/git.rs",
+            "digest": "sha256:be64199bc3e7bc6cda052bf3e2eca2d3e73b54e4fafe5239f561cfadc9034173"
+          },
+          {
+            "path": "src/engine/keying.rs",
+            "digest": "sha256:c96dfd0ce319f3e4c884dedacb2cff5d800bec40655137ca977138539f434122"
+          },
+          {
+            "path": "src/engine/mod.rs",
+            "digest": "sha256:0508d93b324886261827e1de5fdb660863fccdc16dd3f1b053d0348fd413b675"
+          },
+          {
+            "path": "src/engine/runner.rs",
+            "digest": "sha256:85d0964c8fed30eb048395c76ec2f6794208495f40b771dc71580861cbbbd9b9"
+          },
+          {
+            "path": "src/engine/sandbox.rs",
+            "digest": "sha256:b8045a08346fd9683c72ea5ca82c10855ac29756c58988db5dd22d3e0f1f31af"
+          },
+          {
+            "path": "src/engine/scheduler.rs",
+            "digest": "sha256:61793c339544dd259738b4dd0aa1292557c2bd109eb810a5b38dafec16d86d22"
+          },
+          {
+            "path": "src/lib.rs",
+            "digest": "sha256:c477511aad556e416ef2e1fedee887a663dcb66372a50c6a4ac39aa92f0e9cb9"
+          },
+          {
+            "path": "src/main.rs",
+            "digest": "sha256:426249f89a22bf66be9d41e21f558c4efa193000a5e3cbdaa2ff98b52578eb82"
+          },
+          {
+            "path": "src/service/audit.rs",
+            "digest": "sha256:bb4f188fd99166c85d33fd314dbee55117621625b3b7e704d8e37f238dd69f2a"
+          },
+          {
+            "path": "src/service/bundle.rs",
+            "digest": "sha256:56931dc5ad85405122bca384b9f0cd68e756849fcc7155b146761e203a9b7f3a"
+          },
+          {
+            "path": "src/service/doctor.rs",
+            "digest": "sha256:76adbf0443b118dcb85f6b4532f6f7646acfab6d9acc2040f263a9d6d295cfa4"
+          },
+          {
+            "path": "src/service/flaky.rs",
+            "digest": "sha256:ea7521eb4a1ffc4ab148724ad5c5d185fb7cb9734b9f7aeb108610dde3ca2a11"
+          },
+          {
+            "path": "src/service/keys.rs",
+            "digest": "sha256:d61271815e9b311dcae85a18722709ebabcd5654a7907cff532ca835212b6d0b"
+          },
+          {
+            "path": "src/service/mod.rs",
+            "digest": "sha256:492d79c3255c6a1b9e77de1663cccbe443458b9356aad6b0210cd3c6836760a0"
+          },
+          {
+            "path": "src/service/search.rs",
+            "digest": "sha256:ef86399f28db12cc5be57330c659063d6801989c7dbccd350accc58a66bc840a"
+          },
+          {
+            "path": "src/service/share.rs",
+            "digest": "sha256:63f27be8ee57e035886c1aafccccc50a1e3da59c1882bfde0385654ff426c573"
+          },
+          {
+            "path": "src/store.rs",
+            "digest": "sha256:c89a52a75bd3af495a3e714c5ced1339f392bfbf4620fc40df6037ef5a66152a"
+          },
+          {
+            "path": "tests/architecture.rs",
+            "digest": "sha256:09bb7032ecadf80f37c82e1361d9c409e1688541db82443f2949af61d9e6e81a"
+          },
+          {
+            "path": "tests/cli.rs",
+            "digest": "sha256:07bfda261db5c742e4c1f3abca26db5d29a52808ed0e8b608fbab8278c58cacb"
+          },
+          {
+            "path": "tests/readme.rs",
+            "digest": "sha256:6eb4c57de48203a208b96ca987a8176abcea168b7c6ff086621f3c9b5a9ea610"
+          }
+        ],
+        "verify_inputs": [],
+        "outputs": [],
+        "deps": [
+          {
+            "step_id": "build",
+            "receipt_id": "sha256:d96101599b8fb5c5cb61fb378854f02a5b0c3ebb88967be6e41f95c25ee83cc9"
+          }
+        ],
+        "claims": [
+          {
+            "text": "the unit suite passes",
+            "status": "verified",
+            "verify_command": "cargo test --quiet",
+            "verify_exit": 0,
+            "verify_output_digest": "sha256:d12389cf5b7d8ff7318e8f0294359f6194310ee63b6405ac0ae85d9e50aeaf96",
+            "reason": null
+          },
+          {
+            "text": "the end-to-end CLI suite passes",
+            "status": "verified",
+            "verify_command": "cargo test --quiet",
+            "verify_exit": 0,
+            "verify_output_digest": "sha256:d12389cf5b7d8ff7318e8f0294359f6194310ee63b6405ac0ae85d9e50aeaf96",
+            "reason": null
+          }
+        ],
+        "limitations": [],
+        "tool": {
+          "name": "flot",
+          "version": "0.2.6",
+          "schema": 5
+        }
+      },
+      "observed": {
+        "started_at_ms": 1795598346167,
+        "duration_ms": 6162,
+        "host_os": "linux",
+        "stdout_inline": "\nrunning 206 tests\ntest adapters::cli::tests::control_sequences_and_bidi_overrides_are_made_visible ... ok\ntest adapters::mcp::tests::notifications_get_no_reply ... ok\ntest adapters::mcp::tests::an_unknown_method_is_a_jsonrpc_error ... ok\ntest core::attest::tests::a_fingerprint_of_any_text_never_panics ... ok\ntest adapters::mcp::tests::initialize_accepts_a_supported_protocol_and_names_the_server ... ok\n[... output omitted here; the complete stream is in the store ...]\ntest readers_who_trust_a_key_follow_its_handover_to_the_next ... ok\ntest why_a_receipt_was_passed_over_is_not_sealed_into_the_next_one ... ok\ntest search_finds_what_runs_recorded_and_names_where ... ok\ntest a_step_over_budget_is_a_timeout_not_a_success ... ok\ntest when_no_candidate_holds_the_first_is_kept_and_the_run_fails ... ok\ntest the_next_run_records_what_the_guard_refused ... ok\ntest runs_travel_through_a_git_remote_and_a_signed_one_stands_in ... ok\ntest verify_names_the_changes_no_step_read ... ok\ntest stopping_flot_stops_the_step_and_still_records_the_run ... ok\ntest where_git_ignores_the_executable_bit_the_key_uses_the_recorded_one ... ok\ntest independent_steps_overlap_only_when_concurrency_is_allowed ... ok\ntest a_step_that_changes_files_outside_may_change_fails ... ok\ntest a_proof_that_passes_before_the_change_proves_nothing ... ok\ntest concurrency_does_not_change_receipts_or_the_run_root ... ok\n\ntest result: ok. 141 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.53s\n\n\nrunning 4 tests\ntest the_github_action_installs_the_release_being_built ... ok\ntest the_claude_code_plugin_names_the_release_being_built ... ok\ntest every_readme_links_the_other_two ... ok\ntest every_readme_names_the_release_being_built ... ok\n\ntest result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n\n\nrunning 0 tests\n\ntest result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n\n",
+        "stdout_truncated": true,
+        "stderr_inline": "    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.83s\n     Running unittests src/lib.rs (target/debug/deps/flot-01f394f276b8535a)\n     Running unittests src/main.rs (target/debug/deps/flot-38eb00f65c050272)\n     Running tests/architecture.rs (target/debug/deps/architecture-c5d6c505a6ea2fbd)\n     Running tests/cli.rs (target/debug/deps/cli-129cd1de254806b8)\n     Running tests/readme.rs (target/debug/deps/readme-8d0a05c815f49684)\n   Doc-tests flot\n",
+        "stderr_truncated": false,
+        "stdout_bytes": 26159,
+        "stderr_bytes": 469,
+        "metrics": null,
+        "metrics_notes": []
+      }
+    }
+  ],
+  "objects": {
+    "sha256:0b482c200a3d6857a8c2e74ff15827629265c0160cbe75f68619a57b176010ea": "ICAgIEZpbmlzaGVkIGB0ZXN0YCBwcm9maWxlIFt1bm9wdGltaXplZCArIGRlYnVnaW5mb10gdGFyZ2V0KHMpIGluIDAuODNzCiAgICAgUnVubmluZyB1bml0dGVzdHMgc3JjL2xpYi5ycyAodGFyZ2V0L2RlYnVnL2RlcHMvZmxvdC0wMWYzOTRmMjc2Yjg1MzVhKQogICAgIFJ1bm5pbmcgdW5pdHRlc3RzIHNyYy9tYWluLnJzICh0YXJnZXQvZGVidWcvZGVwcy9mbG90LTM4ZWIwMGY2NWMwNTAyNzIpCiAgICAgUnVubmluZyB0ZXN0cy9hcmNoaXRlY3R1cmUucnMgKHRhcmdldC9kZWJ1Zy9kZXBzL2FyY2hpdGVjdHVyZS1jNWQ2YzUwNWE2ZWEyZmJkKQogICAgIFJ1bm5pbmcgdGVzdHMvY2xpLnJzICh0YXJnZXQvZGVidWcvZGVwcy9jbGktMTI5Y2QxZGUyNTQ4MDZiOCkKICAgICBSdW5uaW5nIHRlc3RzL3JlYWRtZS5ycyAodGFyZ2V0L2RlYnVnL2RlcHMvcmVhZG1lLThkMGEwNWM4MTVmNDk2ODQpCiAgIERvYy10ZXN0cyBmbG90Cg==",
+    "sha256:3819f5a7ceecd9222e0fbd258fbc5b3461b920ebd412d521eff393866d195f71": "ICAgIEZpbmlzaGVkIGBkZXZgIHByb2ZpbGUgW3Vub3B0aW1pemVkICsgZGVidWdpbmZvXSB0YXJnZXQocykgaW4gMC43NXMK",
+    "sha256:444242e7f3178a20b522690bae3c4a9bf986763410acfcf3d4431d77cacc285a": "eyJkdXJhdGlvbl9tcyI6MjczLCJob3N0X29zIjoibGludXgiLCJtZXRyaWNzIjpudWxsLCJtZXRyaWNzX25vdGVzIjpbXSwic3RhcnRlZF9hdF9tcyI6MTc5NTU5ODM0MTEzOCwic3RkZXJyX2J5dGVzIjowLCJzdGRlcnJfaW5saW5lIjoiIiwic3RkZXJyX3RydW5jYXRlZCI6ZmFsc2UsInN0ZG91dF9ieXRlcyI6MCwic3Rkb3V0X2lubGluZSI6IiIsInN0ZG91dF90cnVuY2F0ZWQiOmZhbHNlfQ==",
+    "sha256:554637b296eca882cfcd1058c2999d328c995ab61f75bc837beb0e7ab42c7c91": "eyJkdXJhdGlvbl9tcyI6NjE2MiwiaG9zdF9vcyI6ImxpbnV4IiwibWV0cmljcyI6bnVsbCwibWV0cmljc19ub3RlcyI6W10sInN0YXJ0ZWRfYXRfbXMiOjE3OTU1OTgzNDYxNjcsInN0ZGVycl9ieXRlcyI6NDY5LCJzdGRlcnJfaW5saW5lIjoiICAgIEZpbmlzaGVkIGB0ZXN0YCBwcm9maWxlIFt1bm9wdGltaXplZCArIGRlYnVnaW5mb10gdGFyZ2V0KHMpIGluIDAuODNzXG4gICAgIFJ1bm5pbmcgdW5pdHRlc3RzIHNyYy9saWIucnMgKHRhcmdldC9kZWJ1Zy9kZXBzL2Zsb3QtMDFmMzk0ZjI3NmI4NTM1YSlcbiAgICAgUnVubmluZyB1bml0dGVzdHMgc3JjL21haW4ucnMgKHRhcmdldC9kZWJ1Zy9kZXBzL2Zsb3QtMzhlYjAwZjY1YzA1MDI3MilcbiAgICAgUnVubmluZyB0ZXN0cy9hcmNoaXRlY3R1cmUucnMgKHRhcmdldC9kZWJ1Zy9kZXBzL2FyY2hpdGVjdHVyZS1jNWQ2YzUwNWE2ZWEyZmJkKVxuICAgICBSdW5uaW5nIHRlc3RzL2NsaS5ycyAodGFyZ2V0L2RlYnVnL2RlcHMvY2xpLTEyOWNkMWRlMjU0ODA2YjgpXG4gICAgIFJ1bm5pbmcgdGVzdHMvcmVhZG1lLnJzICh0YXJnZXQvZGVidWcvZGVwcy9yZWFkbWUtOGQwYTA1YzgxNWY0OTY4NClcbiAgIERvYy10ZXN0cyBmbG90XG4iLCJzdGRlcnJfdHJ1bmNhdGVkIjpmYWxzZSwic3Rkb3V0X2J5dGVzIjoyNjE1OSwic3Rkb3V0X2lubGluZSI6IlxucnVubmluZyAyMDYgdGVzdHNcbnRlc3QgYWRhcHRlcnM6OmNsaTo6dGVzdHM6OmNvbnRyb2xfc2VxdWVuY2VzX2FuZF9iaWRpX292ZXJyaWRlc19hcmVfbWFkZV92aXNpYmxlIC4uLiBva1xudGVzdCBhZGFwdGVyczo6bWNwOjp0ZXN0czo6bm90aWZpY2F0aW9uc19nZXRfbm9fcmVwbHkgLi4uIG9rXG50ZXN0IGFkYXB0ZXJzOjptY3A6OnRlc3RzOjphbl91bmtub3duX21ldGhvZF9pc19hX2pzb25ycGNfZXJyb3IgLi4uIG9rXG50ZXN0IGNvcmU6OmF0dGVzdDo6dGVzdHM6OmFfZmluZ2VycHJpbnRfb2ZfYW55X3RleHRfbmV2ZXJfcGFuaWNzIC4uLiBva1xudGVzdCBhZGFwdGVyczo6bWNwOjp0ZXN0czo6aW5pdGlhbGl6ZV9hY2NlcHRzX2Ffc3VwcG9ydGVkX3Byb3RvY29sX2FuZF9uYW1lc190aGVfc2VydmVyIC4uLiBva1xuWy4uLiBvdXRwdXQgb21pdHRlZCBoZXJlOyB0aGUgY29tcGxldGUgc3RyZWFtIGlzIGluIHRoZSBzdG9yZSAuLi5dXG50ZXN0IHJlYWRlcnNfd2hvX3RydXN0X2Ffa2V5X2ZvbGxvd19pdHNfaGFuZG92ZXJfdG9fdGhlX25leHQgLi4uIG9rXG50ZXN0IHdoeV9hX3JlY2VpcHRfd2FzX3Bhc3NlZF9vdmVyX2lzX25vdF9zZWFsZWRfaW50b190aGVfbmV4dF9vbmUgLi4uIG9rXG50ZXN0IHNlYXJjaF9maW5kc193aGF0X3J1bnNfcmVjb3JkZWRfYW5kX25hbWVzX3doZXJlIC4uLiBva1xudGVzdCBhX3N0ZXBfb3Zlcl9idWRnZXRfaXNfYV90aW1lb3V0X25vdF9hX3N1Y2Nlc3MgLi4uIG9rXG50ZXN0IHdoZW5fbm9fY2FuZGlkYXRlX2hvbGRzX3RoZV9maXJzdF9pc19rZXB0X2FuZF90aGVfcnVuX2ZhaWxzIC4uLiBva1xudGVzdCB0aGVfbmV4dF9ydW5fcmVjb3Jkc193aGF0X3RoZV9ndWFyZF9yZWZ1c2VkIC4uLiBva1xudGVzdCBydW5zX3RyYXZlbF90aHJvdWdoX2FfZ2l0X3JlbW90ZV9hbmRfYV9zaWduZWRfb25lX3N0YW5kc19pbiAuLi4gb2tcbnRlc3QgdmVyaWZ5X25hbWVzX3RoZV9jaGFuZ2VzX25vX3N0ZXBfcmVhZCAuLi4gb2tcbnRlc3Qgc3RvcHBpbmdfZmxvdF9zdG9wc190aGVfc3RlcF9hbmRfc3RpbGxfcmVjb3Jkc190aGVfcnVuIC4uLiBva1xudGVzdCB3aGVyZV9naXRfaWdub3Jlc190aGVfZXhlY3V0YWJsZV9iaXRfdGhlX2tleV91c2VzX3RoZV9yZWNvcmRlZF9vbmUgLi4uIG9rXG50ZXN0IGluZGVwZW5kZW50X3N0ZXBzX292ZXJsYXBfb25seV93aGVuX2NvbmN1cnJlbmN5X2lzX2FsbG93ZWQgLi4uIG9rXG50ZXN0IGFfc3RlcF90aGF0X2NoYW5nZXNfZmlsZXNfb3V0c2lkZV9tYXlfY2hhbmdlX2ZhaWxzIC4uLiBva1xudGVzdCBhX3Byb29mX3RoYXRfcGFzc2VzX2JlZm9yZV90aGVfY2hhbmdlX3Byb3Zlc19ub3RoaW5nIC4uLiBva1xudGVzdCBjb25jdXJyZW5jeV9kb2VzX25vdF9jaGFuZ2VfcmVjZWlwdHNfb3JfdGhlX3J1bl9yb290IC4uLiBva1xuXG50ZXN0IHJlc3VsdDogb2suIDE0MSBwYXNzZWQ7IDAgZmFpbGVkOyAwIGlnbm9yZWQ7IDAgbWVhc3VyZWQ7IDAgZmlsdGVyZWQgb3V0OyBmaW5pc2hlZCBpbiAyLjUzc1xuXG5cbnJ1bm5pbmcgNCB0ZXN0c1xudGVzdCB0aGVfZ2l0aHViX2FjdGlvbl9pbnN0YWxsc190aGVfcmVsZWFzZV9iZWluZ19idWlsdCAuLi4gb2tcbnRlc3QgdGhlX2NsYXVkZV9jb2RlX3BsdWdpbl9uYW1lc190aGVfcmVsZWFzZV9iZWluZ19idWlsdCAuLi4gb2tcbnRlc3QgZXZlcnlfcmVhZG1lX2xpbmtzX3RoZV9vdGhlcl90d28gLi4uIG9rXG50ZXN0IGV2ZXJ5X3JlYWRtZV9uYW1lc190aGVfcmVsZWFzZV9iZWluZ19idWlsdCAuLi4gb2tcblxudGVzdCByZXN1bHQ6IG9rLiA0IHBhc3NlZDsgMCBmYWlsZWQ7IDAgaWdub3JlZDsgMCBtZWFzdXJlZDsgMCBmaWx0ZXJlZCBvdXQ7IGZpbmlzaGVkIGluIDAuMDBzXG5cblxucnVubmluZyAwIHRlc3RzXG5cbnRlc3QgcmVzdWx0OiBvay4gMCBwYXNzZWQ7IDAgZmFpbGVkOyAwIGlnbm9yZWQ7IDAgbWVhc3VyZWQ7IDAgZmlsdGVyZWQgb3V0OyBmaW5pc2hlZCBpbiAwLjAwc1xuXG4iLCJzdGRvdXRfdHJ1bmNhdGVkIjp0cnVlfQ==",
+    "sha256:b745e30a8a2c8e1ea7db0cfbea3817ccdf0dd6235d3b595c492a3dffb61bdd72": "eyJkdXJhdGlvbl9tcyI6ODQ3LCJob3N0X29zIjoibGludXgiLCJtZXRyaWNzIjpudWxsLCJtZXRyaWNzX25vdGVzIjpbXSwic3RhcnRlZF9hdF9tcyI6MTc5NTU5ODM0MjA3MSwic3RkZXJyX2J5dGVzIjo3Miwic3RkZXJyX2lubGluZSI6IiAgICBGaW5pc2hlZCBgZGV2YCBwcm9maWxlIFt1bm9wdGltaXplZCArIGRlYnVnaW5mb10gdGFyZ2V0KHMpIGluIDAuODFzXG4iLCJzdGRlcnJfdHJ1bmNhdGVkIjpmYWxzZSwic3Rkb3V0X2J5dGVzIjowLCJzdGRvdXRfaW5saW5lIjoiIiwic3Rkb3V0X3RydW5jYXRlZCI6ZmFsc2V9",
+    "sha256:c0c3b4b3a4e6f0266c7db0e4fe3609d30895db81ed880d91d297c9b83db23513": "CnJ1bm5pbmcgMjA2IHRlc3RzCnRlc3QgYWRhcHRlcnM6OmNsaTo6dGVzdHM6OmNvbnRyb2xfc2VxdWVuY2VzX2FuZF9iaWRpX292ZXJyaWRlc19hcmVfbWFkZV92aXNpYmxlIC4uLiBvawp0ZXN0IGFkYXB0ZXJzOjptY3A6OnRlc3RzOjpub3RpZmljYXRpb25zX2dldF9ub19yZXBseSAuLi4gb2sKdGVzdCBhZGFwdGVyczo6bWNwOjp0ZXN0czo6YW5fdW5rbm93bl9tZXRob2RfaXNfYV9qc29ucnBjX2Vycm9yIC4uLiBvawp0ZXN0IGNvcmU6OmF0dGVzdDo6dGVzdHM6OmFfZmluZ2VycHJpbnRfb2ZfYW55X3RleHRfbmV2ZXJfcGFuaWNzIC4uLiBvawp0ZXN0IGFkYXB0ZXJzOjptY3A6OnRlc3RzOjppbml0aWFsaXplX2FjY2VwdHNfYV9zdXBwb3J0ZWRfcHJvdG9jb2xfYW5kX25hbWVzX3RoZV9zZXJ2ZXIgLi4uIG9rCnRlc3QgYWRhcHRlcnM6Om1jcDo6dGVzdHM6OmFuX3Vua25vd25fcHJvdG9jb2xfZmFsbHNfYmFja190b190aGVfcHJlZmVycmVkX3JldmlzaW9uIC4uLiBvawp0ZXN0IGFkYXB0ZXJzOjptY3A6OnRlc3RzOjpldmVyeV9jYXRhbG9nX3Rvb2xfZGVjbGFyZXNfYW5fb2JqZWN0X3NjaGVtYSAuLi4gb2sKdGVzdCBhZGFwdGVyczo6bWNwOjp0ZXN0czo6b25seV9ydW5uaW5nX3RoZV9mbG93X2lzX2Fubm91bmNlZF9hc19oYXZpbmdfZWZmZWN0cyAuLi4gb2sKdGVzdCBhZGFwdGVyczo6bWNwOjp0ZXN0czo6bWFsZm9ybWVkX2VudmVsb3Blc19nZXRfYW5fZXJyb3JfYW5kX3RoZV9zdHJlYW1fY29udGludWVzIC4uLiBvawp0ZXN0IGFkYXB0ZXJzOjptY3A6OnRlc3RzOjphX21hbGZvcm1lZF9saW5lX2dldHNfYV9wYXJzZV9lcnJvcl9hbmRfdGhlX3N0cmVhbV9jb250aW51ZXMgLi4uIG9rCnRlc3QgYWRhcHRlcnM6Om1jcDo6dGVzdHM6OmFfYmF0Y2hfb3Jfbm9uX29iamVjdF9nZXRzX2FuX2ludmFsaWRfcmVxdWVzdF9pbnN0ZWFkX29mX3NpbGVuY2UgLi4uIG9rCnRlc3QgY29yZTo6YXR0ZXN0Ojp0ZXN0czo6YV93ZWFrX2tleV9pc19yZWZ1c2VkX2JlZm9yZV9hbnlfc2lnbmF0dXJlX2NoZWNrIC4uLiBvawp0ZXN0IGNvcmU6OmF0dGVzdDo6dGVzdHM6OmFfaGFuZG92ZXJfdG9faXRzZWxmX29yX29mX2Fub3RoZXJfa2luZF9pc19yZWZ1c2VkIC4uLiBvawp0ZXN0IGFkYXB0ZXJzOjptY3A6OnRlc3RzOjphbl91bmtub3duX3Rvb2xfb3JfYV9iYWRfYXJndW1lbnRfaXNfYW5faW52YWxpZF9wYXJhbXNfZXJyb3IgLi4uIG9rCnRlc3QgY29yZTo6YXR0ZXN0Ojp0ZXN0czo6Y2Fub25pY2FsX2tleV9ub3JtYWxpemVzX2Nhc2VfYW5kX3doaXRlc3BhY2UgLi4uIG9rCnRlc3QgY29yZTo6YXR0ZXN0Ojp0ZXN0czo6YW5fYXR0ZXN0YXRpb25fZG9lc19ub3RfdHJhbnNmZXJfdG9fYW5vdGhlcl9ydW4gLi4uIG9rCnRlc3QgY29yZTo6YXR0ZXN0Ojp0ZXN0czo6bWFsZm9ybWVkX2tleXNfYW5kX3NpZ25hdHVyZXNfYXJlX25hbWVkIC4uLiBvawp0ZXN0IGNvcmU6OmF0dGVzdDo6dGVzdHM6OnNpZ25pbmdfaXNfZGV0ZXJtaW5pc3RpYyAuLi4gb2sKdGVzdCBjb3JlOjphdHRlc3Q6OnRlc3RzOjpzd2FwcGluZ19pbl9hbm90aGVyX2tleV9icmVha3NfdGhlX3NpZ25hdHVyZSAuLi4gb2sKdGVzdCBjb3JlOjphdHRlc3Q6OnRlc3RzOjphX2ZsaXBwZWRfc2lnbmF0dXJlX2JpdF9pc19yZWZ1c2VkIC4uLiBvawp0ZXN0IGNvcmU6OmF0dGVzdDo6dGVzdHM6OnJldGFyZ2V0aW5nX3RoZV9zaWduZWRfZGlnZXN0X2JyZWFrc190aGVfc2lnbmF0dXJlIC4uLiBvawp0ZXN0IGNvcmU6OmNvbXBhcmU6OnRlc3RzOjphX2NoYW5nZWRfcmVjZWlwdF9pc19yZXBvcnRlZF9wZXJfc3RlcCAuLi4gb2sKdGVzdCBjb3JlOjpjb21wYXJlOjp0ZXN0czo6YWRkZWRfYW5kX3JlbW92ZWRfc3RlcHNfYXJlX2JvdGhfcmVwb3J0ZWQgLi4uIG9rCnRlc3QgY29yZTo6Y29tcGFyZTo6dGVzdHM6OmFfc3RhdHVzX2NoYW5nZV9pc19uYW1lZF9pbl90aGVfZGlmZiAuLi4gb2sKdGVzdCBjb3JlOjpkaWdlc3Q6OnRlc3RzOjphcnJheV9vcmRlcl9kb2VzX2NoYW5nZV90aGVfZGlnZXN0IC4uLiBvawp0ZXN0IGNvcmU6OmNvbXBhcmU6OnRlc3RzOjppZGVudGljYWxfcnVuc19yZXBvcnRfaWRlbnRpY2FsIC4uLiBvawp0ZXN0IGNvcmU6OmRpZ2VzdDo6dGVzdHM6OmZvbGRfaXNfb3JkZXJfc2Vuc2l0aXZlX2FuZF9sYWJlbF9zY29wZWQgLi4uIG9rCnRlc3QgY29yZTo6YXR0ZXN0Ojp0ZXN0czo6YV9mcmVzaF9hdHRlc3RhdGlvbl9jaGVja3Nfb3V0IC4uLiBvawp0ZXN0IGNvcmU6OmF0dGVzdDo6dGVzdHM6OmFfc2lnbmVyX2lzX2NvbmZpcm1lZF9vbmx5X2J5X2FfcnVuX2l0X3NpZ25lZF90aGF0X2tlcHRfdGhlX3NhbWVfcmVjZWlwdCAuLi4gb2sKdGVzdCBjb3JlOjpkaWdlc3Q6OnRlc3RzOjpzaG9ydF9zdHJpcHNfdGhlX2FsZ29yaXRobV9wcmVmaXggLi4uIG9rCnRlc3QgY29yZTo6ZGlnZXN0Ojp0ZXN0czo6bWFjX21hdGNoZXNfcmZjXzQyMzFfc3R5bGVfdmVjdG9ycyAuLi4gb2sKdGVzdCBjb3JlOjpkaWdlc3Q6OnRlc3RzOjprZXlfb3JkZXJfZG9lc19ub3RfY2hhbmdlX3RoZV9kaWdlc3QgLi4uIG9rCnRlc3QgY29yZTo6Zmxvdzo6dGVzdHM6OmFfc3RlcF9kZWNsYXJlc19vbmx5X2ZpbGVzX2l0c19wYXR0ZXJuc19tYXRjaCAuLi4gb2sKdGVzdCBjb3JlOjpmbG93Ojp0ZXN0czo6YV9taXNzcGVsbGVkX2tleV9pc19yZWZ1c2VkX25vdF9pZ25vcmVkIC4uLiBvawp0ZXN0IGNvcmU6OmZsb3c6OnRlc3RzOjpmYWlsc19iZWZvcmVfbmVlZHNfYV9wcm9vZl9hbmRfbm9fY2FuZGlkYXRlcyAuLi4gb2sKdGVzdCBjb3JlOjpmbG93Ojp0ZXN0czo6YnVkZ2V0X2ZhbGxzX2JhY2tfdG9fZmxvd190aGVuX2RlZmF1bHQgLi4uIG9rCnRlc3QgY29yZTo6Zmxvdzo6dGVzdHM6Om9ubHlfcGxhaW5fcmVsYXRpdmVfcGF0aHNfYXJlX2NvbnRhaW5lZCAuLi4gb2sKdGVzdCBjb3JlOjpmbG93Ojp0ZXN0czo6b3JkZXJzX2RlcGVuZGVuY2llc19iZWZvcmVfZGVwZW5kZW50cyAuLi4gb2sKdGVzdCBjb3JlOjpmbG93Ojp0ZXN0czo6Zmxvd19kaWdlc3RfaWdub3Jlc19kZWNsYXJhdGlvbl9vcmRlciAuLi4gb2sKdGVzdCBjb3JlOjpmbG93Ojp0ZXN0czo6cmVqZWN0c19jeWNsZXMgLi4uIG9rCnRlc3QgY29yZTo6Zmxvdzo6dGVzdHM6OnJlamVjdHNfZHVwbGljYXRlX2lkcyAuLi4gb2sKdGVzdCBjb3JlOjpmbG93Ojp0ZXN0czo6cmVqZWN0c191bmtub3duX25lZWQgLi4uIG9rCnRlc3QgY29yZTo6Zmxvdzo6dGVzdHM6OmNsb3N1cmVfa2VlcHNfb25seV90cmFuc2l0aXZlX2RlcGVuZGVuY2llcyAuLi4gb2sKdGVzdCBjb3JlOjptZXRyaWNzOjp0ZXN0czo6YV9tYWxmb3JtZWRfdmFsdWVfaXNfYW5fZXJyb3Jfbm90X3plcm9fc3BlbmQgLi4uIG9rCnRlc3QgY29yZTo6bWV0cmljczo6dGVzdHM6OmRvbGxhcnNfcm91bmRfdG9fdGhlX25lYXJlc3RfbWljcm9fZG9sbGFyIC4uLiBvawp0ZXN0IGNvcmU6Om1ldHJpY3M6OnRlc3RzOjpmb3JtYXRzX21pY3JvX2RvbGxhcnNfZXhhY3RseSAuLi4gb2sKdGVzdCBjb3JlOjpmbG93Ojp0ZXN0czo6cmVwb3J0c19jbGFpbXNfdGhhdF9oYXZlX25vX3ZlcmlmeV9jb21tYW5kIC4uLiBvawp0ZXN0IGNvcmU6Om1ldHJpY3M6OnRlc3RzOjptaXNzaW5nX2tleXNfcmVhZF9hc196ZXJvX2Zvcl90aGF0X2tleV9vbmx5IC4uLiBvawp0ZXN0IGNvcmU6Om1ldHJpY3M6OnRlc3RzOjpyZWFkc19ldmVyeV9rbm93bl9rZXkgLi4uIG9rCnRlc3QgY29yZTo6bWV0cmljczo6dGVzdHM6OnNwZW5kX3NlcGFyYXRlc19yZXBvcnRlZF9zaWxlbnRfYW5kX3JldXNlZF9jb3N0IC4uLiBvawp0ZXN0IGNvcmU6Om1ldHJpY3M6OnRlc3RzOjp1bmtub3duX2tleXNfYXJlX2lnbm9yZWRfb3V0X2xvdWQgLi4uIG9rCnRlc3QgY29yZTo6Zmxvdzo6dGVzdHM6OmZsb3dfZGlnZXN0X3RyYWNrc19jb21tYW5kX2NoYW5nZXMgLi4uIG9rCnRlc3QgY29yZTo6cG93ZXJzaGVsbDo6dGVzdHM6OmFfaGVyZV9zdHJpbmdfaXNfZGF0YSAuLi4gb2sKdGVzdCBjb3JlOjpwb3dlcnNoZWxsOjp0ZXN0czo6cmVkaXJlY3Rpb25zX25hbWVfdGhlX2ZpbGVfdGhleV93cml0ZSAuLi4gb2sKdGVzdCBjb3JlOjpwb3dlcnNoZWxsOjp0ZXN0czo6ZG93bmxvYWRlZF9jb2RlX2hhbmRlZF90b19pbnZva2VfZXhwcmVzc2lvbiAuLi4gb2sKdGVzdCBjb3JlOjpwb3dlcnNoZWxsOjp0ZXN0czo6cmVhZGluZ192YXJpYWJsZXNfYW5kX2RhdGFfbmFtZV9ub3RoaW5nIC4uLiBvawp0ZXN0IGNvcmU6OnJlY2VpcHQ6OnRlc3RzOjphX2NsYWltX2ZyZWVfcnVuX3RoYXRfc3VjY2VlZHNfcGFzc2VzIC4uLiBvawp0ZXN0IGNvcmU6OnJlY2VpcHQ6OnRlc3RzOjphX3JlZnV0ZWRfY2xhaW1fZmFpbHNfdGhlX3J1bl9ldmVuX3doZW5fZXZlcnlfc3RlcF9leGl0ZWRfemVybyAuLi4gb2sKdGVzdCBjb3JlOjpwb3dlcnNoZWxsOjp0ZXN0czo6Y21kbGV0c19hbmRfdGhlaXJfYWxpYXNlc19uYW1lX3RoZV9wYXRoc190aGV5X2NoYW5nZSAuLi4gb2sKdGVzdCBjb3JlOjphdHRlc3Q6OnRlc3RzOjphX2hhbmRvdmVyX25hbWVzX2JvdGhfa2V5c19hbmRfY2hlY2tzX291dCAuLi4gb2sKdGVzdCBjb3JlOjpyZWNlaXB0Ojp0ZXN0czo6YV9jbGFpbV93aXRob3V0X2FueV9wcm9vZl9jb21tYW5kX2RvZXNfbm90X2Jsb2NrX3JldXNlIC4uLiBvawp0ZXN0IGNvcmU6OnJlY2VpcHQ6OnRlc3RzOjphX3JlZnV0ZWRfb3JfdW5maW5pc2hlZF9wcm9vZl9pc19yZXRyaWVkIC4uLiBvawp0ZXN0IGNvcmU6OnJlY2VpcHQ6OnRlc3RzOjpmYWlsdXJlX291dHJhbmtzX3VudmVyaWZpZWRfY2xhaW1zIC4uLiBvawp0ZXN0IGNvcmU6OnJlY2VpcHQ6OnRlc3RzOjplZGl0aW5nX29ubHlfb2JzZXJ2YXRpb25fa2VlcHNfdGhlX3JlY2VpcHRfYXV0aGVudGljIC4uLiBvawp0ZXN0IGNvcmU6OnJlY2VpcHQ6OnRlc3RzOjpvYmplY3RzX2NvdmVyX2V2ZXJ5X3BpZWNlX29mX2V2aWRlbmNlIC4uLiBvawp0ZXN0IGNvcmU6OnJlY2VpcHQ6OnRlc3RzOjphX21hbmlmZXN0X211c3RfY2FycnlfaXRzX3JlY2VpcHRzX2Zsb3dfYW5kX2xpbWl0YXRpb25zIC4uLiBvawp0ZXN0IGNvcmU6OnJlY2VpcHQ6OnRlc3RzOjphX3JlY2VpcHRfbXVzdF9iZV9hdXRoZW50aWNfYW5kX3BvaW50X2F0X3RoaXNfcnVuc19kZXBlbmRlbmNpZXMgLi4uIG9rCnRlc3QgY29yZTo6cmVjZWlwdDo6dGVzdHM6OnJ1bl9yb290X2lzX29yZGVyX3NlbnNpdGl2ZSAuLi4gb2sKdGVzdCBjb3JlOjpyZWNlaXB0Ojp0ZXN0czo6b25seV9zZXR0bGVkX3N1Y2Nlc3NfaXNfcmV1c2FibGUgLi4uIG9rCnRlc3QgY29yZTo6cmVjZWlwdDo6dGVzdHM6OnJlY2VpcHRfaWRfaWdub3Jlc190aW1pbmdfYnV0X3RyYWNrc19vdXRwdXQgLi4uIG9rCnRlc3QgY29yZTo6cmVjZWlwdDo6dGVzdHM6OnVucHJvdmVuX2NsYWltc19uZXZlcl9yZXBvcnRfcGFzc2VkIC4uLiBvawp0ZXN0IGNvcmU6OnJlY2VpcHQ6OnRlc3RzOjp0YW1wZXJpbmdfd2l0aF90aGVfaGFzaGVkX2JvZHlfaXNfZGV0ZWN0YWJsZSAuLi4gb2sKdGVzdCBjb3JlOjpyZWNlaXB0Ojp0ZXN0czo6dmVyZGljdF9leGl0X2NvZGVzX2FyZV9kaXN0aW5jdCAuLi4gb2sKdGVzdCBjb3JlOjpzZWNyZXRzOjp0ZXN0czo6ZmluZHNfZXZlcnlfdG9rZW5faW5fYmluYXJ5X3RleHQgLi4uIG9rCnRlc3QgY29yZTo6c2VjcmV0czo6dGVzdHM6Om5lYXJfbWlzc2VzX2FuZF9kaWdlc3RzX3Bhc3MgLi4uIG9rCnRlc3QgY29yZTo6c2VjcmV0czo6dGVzdHM6Om9ubHlfdGhlX3ByZWZpeF9pc19ldmVyX3Nob3duIC4uLiBvawp0ZXN0IGNvcmU6OnNlY3JldHM6OnRlc3RzOjpyZWNvZ25pc2VzX3RoZV9zaGFwZXNfaXNzdWVyc19maXhlZCAuLi4gb2sKdGVzdCBjb3JlOjpyZWNlaXB0Ojp0ZXN0czo6ZWFybGllcl9hdHRlbXB0c19hcmVfanVkZ2VkX3dpdGhfdGhlX3J1biAuLi4gb2sKdGVzdCBjb3JlOjpzaGVsbDo6dGVzdHM6OmFfaGVyZV9kb2N1bWVudF9pc19kYXRhX2FuZF9pdHNfdGFyZ2V0X2lzX3dyaXR0ZW4gLi4uIG9rCnRlc3QgY29yZTo6c2hlbGw6OnRlc3RzOjpkb3dubG9hZGVkX2NvZGVfcGlwZWRfaW50b19hbl9pbnRlcnByZXRlciAuLi4gb2sKdGVzdCBjb3JlOjpyZWNlaXB0Ojp0ZXN0czo6b25seV9hX3JldXNlZF9zdGVwX25hbWVzX2l0c19zaWduZXJzX2VhY2hfb25jZV9ieV9rZXkgLi4uIG9rCnRlc3QgY29yZTo6c2hlbGw6OnRlc3RzOjpwcm9ncmFtc190aGF0X2NoYW5nZV90aGVpcl9hcmd1bWVudHNfbmFtZV90aGVtIC4uLiBvawp0ZXN0IGNvcmU6OnNoZWxsOjp0ZXN0czo6cmVkaXJlY3Rpb25zX25hbWVfdGhlX2ZpbGVfdGhleV93cml0ZSAuLi4gb2sKdGVzdCBjb3JlOjpzaGVsbDo6dGVzdHM6OnJlYWRpbmdfYW5kX290aGVyX3Byb2dyYW1zX25hbWVfbm90aGluZyAuLi4gb2sKdGVzdCBlbmdpbmU6OmNsYWltczo6dGVzdHM6OmFfcHJvb2ZfY29tbWFuZF93aXRob3V0X2NsYWltc19pc19yZXBvcnRlZF9hbmRfbmV2ZXJfcnVuIC4uLiBvawp0ZXN0IGVuZ2luZTo6Y2xhaW1zOjp0ZXN0czo6YV9mYWlsZWRfc3RlcF9ydW5zX25vX3Byb29mX2FuZF92ZXJpZmllc19ub3RoaW5nIC4uLiBvawp0ZXN0IGVuZ2luZTo6Y2xhaW1zOjp0ZXN0czo6YV9ub256ZXJvX3Byb29mX3JlZnV0ZXMgLi4uIG9rCnRlc3QgZW5naW5lOjpjbGFpbXM6OnRlc3RzOjphX3Byb29mX2tpbGxlZF9ieV9hX3NpZ25hbF9uZWl0aGVyX3ZlcmlmaWVzX25vcl9yZWZ1dGVzIC4uLiBvawp0ZXN0IGVuZ2luZTo6Y2xhaW1zOjp0ZXN0czo6YV9wcm9vZl93aG9zZV9maWxlc19tb3ZlZF91bmRlcl9pdF92ZXJpZmllc19ub3RoaW5nIC4uLiBvawp0ZXN0IGVuZ2luZTo6Y2xhaW1zOjp0ZXN0czo6YV9zdGVwX3RoYXRfcmV3cm90ZV9pdHNfcHJvb2ZfdmVyaWZpZXNfbm90aGluZyAuLi4gb2sKdGVzdCBlbmdpbmU6OmNsYWltczo6dGVzdHM6OmFfdGltZWRfb3V0X3Byb29mX25laXRoZXJfdmVyaWZpZXNfbm9yX3JlZnV0ZXMgLi4uIG9rCnRlc3QgZW5naW5lOjpjbGFpbXM6OnRlc3RzOjphX3RvbGVyYXRlZF9mYWlsdXJlX3Byb3Zlc19ub3RoaW5nIC4uLiBvawp0ZXN0IGVuZ2luZTo6Y2xhaW1zOjp0ZXN0czo6b25seV9hX3Byb29mX3RoYXRfZmFpbHNfYmVmb3JlX3RoZV9jaGFuZ2VfaG9sZHMgLi4uIG9rCnRlc3QgZW5naW5lOjpjbGFpbXM6OnRlc3RzOjpjbGFpbXNfd2l0aG91dF9hX3Byb29mX2NvbW1hbmRfc3RheV91bnZlcmlmaWVkIC4uLiBvawp0ZXN0IGNvcmU6OnJlY2VpcHQ6OnRlc3RzOjp0aGVfa2VwdF9jYW5kaWRhdGVfbXVzdF9mb2xsb3dfZnJvbV90aGVfb3RoZXJzIC4uLiBvawp0ZXN0IGVuZ2luZTo6Y2xhaW1zOjp0ZXN0czo6b25seV9hX3plcm9fZXhpdF9wcm9vZl9hZnRlcl9zdWNjZXNzX3ZlcmlmaWVzIC4uLiBvawp0ZXN0IGVuZ2luZTo6ZXhlYzo6dGVzdHM6OmFfbG9uZ19zdHJlYW1fa2VlcHNfaXRzX2ZpcnN0X2FuZF9sYXN0X2xpbmVzIC4uLiBvawp0ZXN0IGVuZ2luZTo6ZXhlYzo6dGVzdHM6OmFfc3RyZWFtX3ByZXZpZXdfbmV2ZXJfc3BsaXRzX2FfY2hhcmFjdGVyX29yX2V4Y2VlZHNfaXRzX2J1ZGdldCAuLi4gb2sKdGVzdCBlbmdpbmU6OmV4ZWM6OnRlc3RzOjphX3N0cmVhbV9wYXN0X2l0c19idWRnZXRfc3RvcHNfdGhlX2NvbW1hbmQgLi4uIG9rCnRlc3QgZW5naW5lOjpleGVjOjp0ZXN0czo6YV9zaWduYWxfZGVhdGhfaXNfcmVwb3J0ZWRfYXNfYV9zaWduYWwgLi4uIG9rCnRlc3QgY29yZTo6YXR0ZXN0Ojp0ZXN0czo6YXV0aG9yc2hpcF9jb3VudHNfb25seV92YWxpZF9zaWduYXR1cmVzX2FuZF9vbmx5X3RydXN0ZWRfa2V5cyAuLi4gb2sKdGVzdCBjb3JlOjphdHRlc3Q6OnRlc3RzOjphX2hhbmRvdmVyX25lZWRzX2JvdGhfc2lnbmF0dXJlc19vdmVyX3RoZXNlX3R3b19rZXlzIC4uLiBvawp0ZXN0IGNvcmU6OmF0dGVzdDo6dGVzdHM6OmFfc2lnbmF0dXJlX2J5X3RoaXNfaG9zdHNfa2V5X2lzX2xhYmVsZWRfYW5kX25ldmVyX3RydXN0ZWQgLi4uIG9rCnRlc3QgZW5naW5lOjpleGVjOjp0ZXN0czo6cHJldmlld19jdXRzX2xvbmdfb3V0cHV0X2FuZF9zYXlzX3NvIC4uLiBvawp0ZXN0IGVuZ2luZTo6ZXhlYzo6dGVzdHM6OmJhY2tncm91bmRfcHJvY2Vzc2VzX2FyZV9zdG9wcGVkX3doZW5fdGhlX3N0ZXBfZXhpdHMgLi4uIG9rCnRlc3QgZW5naW5lOjpleGVjOjp0ZXN0czo6Y2FwdHVyZXNfc3RkZXJyX3NlcGFyYXRlbHlfZnJvbV9zdGRvdXQgLi4uIG9rCnRlc3QgZW5naW5lOjpleGVjOjp0ZXN0czo6cHJldmlld19rZWVwc19zaG9ydF9vdXRwdXRfd2hvbGUgLi4uIG9rCnRlc3QgZW5naW5lOjpleGVjOjp0ZXN0czo6YV9mYWlsaW5nX2xpbmVfZmFpbHNfYV9tdWx0aV9saW5lX2NvbW1hbmQgLi4uIG9rCnRlc3QgZW5naW5lOjpleGVjOjp0ZXN0czo6cHJldmlld19uZXZlcl9zcGxpdHNfYV9tdWx0aWJ5dGVfY2hhcmFjdGVyIC4uLiBvawp0ZXN0IGVuZ2luZTo6a2V5aW5nOjp0ZXN0czo6YV9saXRlcmFsX2Jhc2Vfc3RvcHNfYXRfdGhlX2ZpcnN0X3dpbGRjYXJkIC4uLiBvawp0ZXN0IGVuZ2luZTo6ZXhlYzo6dGVzdHM6OmNhcHR1cmVzX3N0ZG91dF9hbmRfZXhpdF9jb2RlIC4uLiBvawp0ZXN0IGVuZ2luZTo6a2V5aW5nOjp0ZXN0czo6YW5fdW5zZXR0bGVkX2RlcGVuZGVuY3lfbWFrZXNfdGhlX2tleV91bmtub3dhYmxlIC4uLiBvawp0ZXN0IGVuZ2luZTo6a2V5aW5nOjp0ZXN0czo6Y2hhbmdlZF9wYXRoc19yZXBvcnRzX2VkaXRzX2NyZWF0aW9uc19hbmRfZGVsZXRpb25zIC4uLiBvawp0ZXN0IGVuZ2luZTo6a2V5aW5nOjp0ZXN0czo6ZGVwZW5kZW5jeV9yZWZlcmVuY2VzX2lnbm9yZV9kZWNsYXJhdGlvbl9vcmRlciAuLi4gb2sKdGVzdCBlbmdpbmU6OmtleWluZzo6dGVzdHM6OnByb29mX2ZpbGVzX2FuZF93b3JrX2ZpbGVzX2FyZV9ub3RfaW50ZXJjaGFuZ2VhYmxlIC4uLiBvawp0ZXN0IGVuZ2luZTo6a2V5aW5nOjp0ZXN0czo6dGhlX2tleV90cmFja3NfaW5wdXRfY29udGVudCAuLi4gb2sKdGVzdCBlbmdpbmU6OmV4ZWM6OnRlc3RzOjpkZWNsYXJlZF9lbnZpcm9ubWVudF9yZWFjaGVzX3RoZV9jb21tYW5kIC4uLiBvawp0ZXN0IGVuZ2luZTo6a2V5aW5nOjp0ZXN0czo6dGhlX2tleV90cmFja3NfdGhlX2NvbnRlbnRfb2ZfdGhlX3Byb29mIC4uLiBvawp0ZXN0IGVuZ2luZTo6a2V5aW5nOjp0ZXN0czo6dGhlX2tleV90cmFja3NfdGhlX3Byb29mX2NvbW1hbmQgLi4uIG9rCnRlc3QgZW5naW5lOjpydW5uZXI6OnRlc3RzOjp6ZXJvX2pvYnNfaXNfcmVmdXNlZF9iZWZvcmVfYW55dGhpbmdfcnVucyAuLi4gb2sKdGVzdCBlbmdpbmU6OmtleWluZzo6dGVzdHM6OnRoZV9rZXlfdHJhY2tzX3Vwc3RyZWFtX3JlY2VpcHRzIC4uLiBvawp0ZXN0IGVuZ2luZTo6c2NoZWR1bGVyOjp0ZXN0czo6YV9ub2RlX2lzX3ByZXBhcmVkX29ubHlfYWZ0ZXJfaXRzX25lZWRzX3NldHRsZWQgLi4uIG9rCnRlc3QgZW5naW5lOjpzY2hlZHVsZXI6OnRlc3RzOjphX3dvcmtlcl9lcnJvcl9pc19yZXR1cm5lZF9hbmRfc3RvcHNfbmV3X2xhdW5jaGVzIC4uLiBvawp0ZXN0IGVuZ2luZTo6ZXhlYzo6dGVzdHM6OmxhcmdlX291dHB1dF9kb2VzX25vdF9kZWFkbG9jayAuLi4gb2sKdGVzdCBlbmdpbmU6OnNjaGVkdWxlcjo6dGVzdHM6Om9uZV9qb2JfcnVuc19ub2Rlc19pbl9kZWNsYXJlZF9vcmRlciAuLi4gb2sKdGVzdCBlbmdpbmU6OnNjaGVkdWxlcjo6dGVzdHM6OmFfcGFuaWNraW5nX3dvcmtlcl9mYWlsc190aGVfcnVuX2luc3RlYWRfb2ZfaGFuZ2luZ19pdCAuLi4gb2sKdGVzdCBlbmdpbmU6OmV4ZWM6OnRlc3RzOjpyZXBvcnRzX25vbnplcm9fZXhpdF93aXRob3V0X2NsYWltaW5nX3N1Y2Nlc3MgLi4uIG9rCnRlc3QgZW5naW5lOjpleGVjOjp0ZXN0czo6cnVuc19pbl90aGVfcmVxdWVzdGVkX2RpcmVjdG9yeSAuLi4gb2sKdGVzdCBlbmdpbmU6OmtleWluZzo6dGVzdHM6OmlucHV0c19hcmVfc29ydGVkX2FuZF91bm1hdGNoZWRfcGF0dGVybnNfYXJlX3JlcG9ydGVkIC4uLiBvawp0ZXN0IGVuZ2luZTo6a2V5aW5nOjp0ZXN0czo6YV93aWxkY2FyZF9pbnB1dF9za2lwc193aGF0X2dpdF9pZ25vcmVzX3VubGVzc190aGVfcGF0dGVybl9zcGVsbHNfaXRfb3V0IC4uLiBvawp0ZXN0IGFkYXB0ZXJzOjptY3A6OnRlc3RzOjphbl91bnByb3Zlbl9jbGFpbV9pc19yZXBvcnRlZF9hc191bnZlcmlmaWVkX25vdF9hc19hbl9lcnJvciAuLi4gb2sKdGVzdCBhZGFwdGVyczo6bWNwOjp0ZXN0czo6YV90cmltbWVkX29iamVjdF9zdGF0ZXNfaG93X3RvX3JlYWRfdGhlX3Jlc3QgLi4uIG9rCnRlc3QgYWRhcHRlcnM6Om1jcDo6dGVzdHM6OmFfZmFpbGVkX3Rvb2xfcmVwb3J0c19pc19lcnJvcl93aXRob3V0X2tpbGxpbmdfdGhlX3Nlc3Npb24gLi4uIG9rCnRlc3QgYWRhcHRlcnM6Om1jcDo6dGVzdHM6OnNlYXJjaF9maW5kc19hX3N0ZXBzX291dHB1dF9saW5lIC4uLiBvawp0ZXN0IGFkYXB0ZXJzOjptY3A6OnRlc3RzOjpydW5fcmV0dXJuc190aGVfc2FtZV92ZXJkaWN0X3RoZV9jbGlfd291bGQgLi4uIG9rCnRlc3QgYWRhcHRlcnM6Om1jcDo6dGVzdHM6OmFfcmVjZWlwdF9wcmVmaXhfcmVzb2x2ZXNfYW5kX2l0c19vdXRwdXRfb2JqZWN0X2lzX3JlYWRhYmxlIC4uLiBvawp0ZXN0IGFkYXB0ZXJzOjptY3A6OnRlc3RzOjphX3Rvb2xfZXJyb3JfbmFtZXNfaXRzX2tpbmQgLi4uIG9rCnRlc3QgYWRhcHRlcnM6Om1jcDo6dGVzdHM6OmFfc3RlcHNfb3V0cHV0X2lzX3JlYWRfYnlfc3RlcF9pZF93aXRob3V0X2FfZGlnZXN0IC4uLiBvawp0ZXN0IGFkYXB0ZXJzOjptY3A6OnRlc3RzOjpkaWZmX292ZXJfbWNwX21hdGNoZXNfdGhlX2NsaV9jb250cmFjdCAuLi4gb2sKdGVzdCBhZGFwdGVyczo6bWNwOjp0ZXN0czo6dmVyaWZ5X2F1dGhlbnRpY2F0ZXNfdGhlX3J1bl90aGVfc2VydmVyX2p1c3RfcmVjb3JkZWQgLi4uIG9rCnRlc3Qgc2VydmljZTo6YnVuZGxlOjp0ZXN0czo6YV9idW5kbGVfY2Fycmllc19ldmVyeV9yZWNlaXB0X2FuZF9vYmplY3Rfb2ZfaXRzX3J1biAuLi4gb2sKdGVzdCBzZXJ2aWNlOjpidW5kbGU6OnRlc3RzOjphX2J1bmRsZV9jYW5ub3Rfc211Z2dsZV9vYmplY3RzX2l0c19ydW5fZG9lc19ub3RfbmFtZSAuLi4gb2sKdGVzdCBzZXJ2aWNlOjpidW5kbGU6OnRlc3RzOjphX2J1bmRsZV9mcm9tX2Fub3RoZXJfc2NoZW1hX2lzX25hbWVkX2FzX3N1Y2hfd2hhdGV2ZXJfaXRzX3NoYXBlIC4uLiBvawp0ZXN0IHNlcnZpY2U6OmJ1bmRsZTo6dGVzdHM6OmFfYnVuZGxlX21pc3NpbmdfYW5fb2JqZWN0X2lzX3JlZnVzZWQgLi4uIG9rCnRlc3Qgc2VydmljZTo6YnVuZGxlOjp0ZXN0czo6YV9idW5kbGVfcm91bmRfdHJpcHNfdGhyb3VnaF9hX2ZpbGUgLi4uIG9rCnRlc3Qgc2VydmljZTo6YnVuZGxlOjp0ZXN0czo6YV9mb3JnZWRfcHJldmlld19vcl9zcGVuZF9pc19yZWZ1c2VkIC4uLiBvawp0ZXN0IHNlcnZpY2U6OmJ1bmRsZTo6dGVzdHM6OmFfbWFuaWZlc3RfdGhhdF9taXNzdGF0ZXNfaXRzX3JlY2VpcHRzX2lzX3JlZnVzZWQgLi4uIG9rCnRlc3Qgc2VydmljZTo6YnVuZGxlOjp0ZXN0czo6YW5fb3ZlcnNpemVkX2J1bmRsZV9pc19yZWZ1c2VkX2JlZm9yZV9pdF9pc19yZWFkIC4uLiBvawp0ZXN0IGVuZ2luZTo6c2NoZWR1bGVyOjp0ZXN0czo6Y29uY3VycmVuY3lfbmV2ZXJfZXhjZWVkc190aGVfam9iX2xpbWl0IC4uLiBvawp0ZXN0IHNlcnZpY2U6OmJ1bmRsZTo6dGVzdHM6OmJhc2U2NF9tYXRjaGVzX2tub3duX2VuY29kaW5ncyAuLi4gb2sKdGVzdCBzZXJ2aWNlOjpidW5kbGU6OnRlc3RzOjpiYXNlNjRfcm91bmRfdHJpcHNfYXJiaXRyYXJ5X2J5dGVzIC4uLiBvawp0ZXN0IHNlcnZpY2U6OmJ1bmRsZTo6dGVzdHM6OmFfc2lnbmF0dXJlX2Zvcl9hbm90aGVyX3J1bl9pc19yZWZ1c2VkX2F0X2V4cG9ydCAuLi4gb2sKdGVzdCBzZXJ2aWNlOjpidW5kbGU6OnRlc3RzOjphX3Jld3JpdHRlbl9ydW5fcm9vdF9pc19yZWZ1c2VkIC4uLiBvawp0ZXN0IHNlcnZpY2U6OmJ1bmRsZTo6dGVzdHM6OmFfdGFtcGVyZWRfb2JqZWN0X2lzX3JlZnVzZWRfd2hvbGUgLi4uIG9rCnRlc3Qgc2VydmljZTo6YnVuZGxlOjp0ZXN0czo6YV90YW1wZXJlZF9yZWNlaXB0X2lzX3JlZnVzZWQgLi4uIG9rCnRlc3Qgc2VydmljZTo6YnVuZGxlOjp0ZXN0czo6YV9yZWNlaXB0c19vd25fb2JzZXJ2YXRpb25faW5fYV9idW5kbGVfaXNfbmV2ZXJfYmVsaWV2ZWQgLi4uIG9rCnRlc3QgZW5naW5lOjpleGVjOjp0ZXN0czo6YV9zdGVwX292ZXJfaXRzX2J1ZGdldF9pc19zdG9wcGVkX2FuZF9tYXJrZWRfdGltZWRfb3V0IC4uLiBvawp0ZXN0IHNlcnZpY2U6OmJ1bmRsZTo6dGVzdHM6OmFfcnVuX2FsdGVyZWRfYWZ0ZXJfc2lnbmluZ19pc19yZWZ1c2VkX2V2ZW5fd2l0aF92YWxpZF9yZWNlaXB0cyAuLi4gb2sKdGVzdCBzZXJ2aWNlOjpidW5kbGU6OnRlc3RzOjphX3NpZ25lZF9vYnNlcnZhdGlvbl9jYW5ub3RfYmVfZWRpdGVkIC4uLiBvawp0ZXN0IHNlcnZpY2U6OmtleXM6OnRlc3RzOjphX21pc3Npbmdfb3JfZ2FyYmxlZF9rZXlfaXNfbmFtZWQgLi4uIG9rCnRlc3Qgc2VydmljZTo6a2V5czo6dGVzdHM6OmFfZ2VuZXJhdGVkX2tleV9sb2Fkc19iYWNrX3RvX3RoZV9zYW1lX2lkZW50aXR5IC4uLiBvawp0ZXN0IHNlcnZpY2U6OmtleXM6OnRlc3RzOjphX3JvdGF0aW9uX3RoYXRfY2Fubm90X2tlZXBfdGhlX29sZF9zZWNyZXRfY2hhbmdlc19ub3RoaW5nIC4uLiBvawp0ZXN0IHNlcnZpY2U6OmtleXM6OnRlc3RzOjpjb25jdXJyZW50X2NyZWF0b3JzX25ldmVyX3NlZV9hX3Rvcm5fc2VjcmV0IC4uLiBvawp0ZXN0IHNlcnZpY2U6OmtleXM6OnRlc3RzOjp0aGVfa2V5X2ZpbGVfaXNfb3duZXJfb25seV9hbmRfYV9zaGFyZWRfb25lX2lzX3JlZnVzZWQgLi4uIG9rCnRlc3Qgc2VydmljZTo6c2VhcmNoOjp0ZXN0czo6YV9sb25nX2xpbmVfaXNfY3V0X2Fyb3VuZF90aGVfbWF0Y2ggLi4uIG9rCnRlc3Qgc2VydmljZTo6YnVuZGxlOjp0ZXN0czo6YV9zdHJhbmdlcl9jYW5ub3RfY2xhaW1fYV90cnVzdGVkX2lkZW50aXR5X2J5X3N3YXBwaW5nX3RoZV9rZXkgLi4uIG9rCnRlc3Qgc2VydmljZTo6YnVuZGxlOjp0ZXN0czo6YV9idW5kbGVfc2lnbmVkX2J5X2FfdHJ1c3RlZF9rZXlfaW1wb3J0c19hc190cnVzdGVkIC4uLiBvawp0ZXN0IHNlcnZpY2U6OnRlc3RzOjpmaW5kX2Zsb3dfcm9vdF9mYWxsc19iYWNrX3RvX3RoZV9zdGFydF9kaXJlY3RvcnkgLi4uIG9rCnRlc3Qgc2VydmljZTo6dGVzdHM6OmFfbmFtZWRfZmxvd19maWxlX2hhc19pdHNfc3RvcmVfYmVzaWRlX2l0X2hvd2V2ZXJfaXRfaXNfbmFtZWQgLi4uIG9rCnRlc3Qgc2VydmljZTo6dGVzdHM6OmZpbmRfZmxvd19yb290X3dhbGtzX3Vwd2FyZCAuLi4gb2sKdGVzdCBzZXJ2aWNlOjp0ZXN0czo6aW5pdF9uZXZlcl93cml0ZXNfYWJvdmVfdGhlX2RpcmVjdG9yeV9pdF9ydW5zX2luIC4uLiBvawp0ZXN0IHNlcnZpY2U6OnRlc3RzOjppbml0X3JlZnVzZXNfdG9fb3ZlcndyaXRlX3dpdGhvdXRfZm9yY2UgLi4uIG9rCnRlc3Qgc2VydmljZTo6a2V5czo6dGVzdHM6OmFuX2V4aXN0aW5nX2tleV9pc19uZXZlcl9yZXBsYWNlZCAuLi4gb2sKdGVzdCBzZXJ2aWNlOjprZXlzOjp0ZXN0czo6dHdvX2dlbmVyYXRlZF9rZXlzX2RpZmZlciAuLi4gb2sKdGVzdCBzdG9yZTo6dGVzdHM6OmFfcnVuX2lkX2Nhbl9uZXZlcl9uYW1lX2FfZmlsZV9vdXRzaWRlX3RoZV9zdG9yZSAuLi4gb2sKdGVzdCBzdG9yZTo6dGVzdHM6OmFfY29ycnVwdGVkX29iamVjdF9maWxlX2lzX3JlcG9ydGVkX25vdF9yZXR1cm5lZCAuLi4gb2sKdGVzdCBzZXJ2aWNlOjprZXlzOjp0ZXN0czo6YV9yb3RhdGlvbl9jaGFuZ2VzX25vdGhpbmdfdW50aWxfY29tbWl0dGVkX3RoZW5fa2VlcHNfdGhlX29sZF9zZWNyZXQgLi4uIG9rCnRlc3Qgc3RvcmU6OnRlc3RzOjphX2NvcnJ1cHRfb2JqZWN0X2lzX3JlcGxhY2VkX3doZW5fd3JpdHRlbl9hZ2FpbiAuLi4gb2sKdGVzdCBzdG9yZTo6dGVzdHM6OmFfc3RvcmVfaW5fYW5vdGhlcl9mb3JtYXRfaXNfcmVmdXNlZF9ub3RfbWlzcmVhZCAuLi4gb2sKdGVzdCBzdG9yZTo6dGVzdHM6OmNhY2hlX21pc3Nlc19vbl9hbl91bmtub3duX2tleSAuLi4gb2sKdGVzdCBzZXJ2aWNlOjpidW5kbGU6OnRlc3RzOjphbl91bnN1cHBvcnRlZF9zY2hlbWFfaXNfcmVmdXNlZCAuLi4gb2sKdGVzdCBzdG9yZTo6dGVzdHM6OmFfZmFpbGVkX3JlY2VpcHRfaXNfbmV2ZXJfYV9jYWNoZV9oaXQgLi4uIG9rCnRlc3Qgc3RvcmU6OnRlc3RzOjpub3RoaW5nX2lzX2NyZWF0ZWRfdW50aWxfc29tZXRoaW5nX2lzX3dyaXR0ZW4gLi4uIG9rCnRlc3Qgc3RvcmU6OnRlc3RzOjphX2NhY2hlX2VudHJ5X29yX3RydXN0X2xpc3RfZnJvbV9hbm90aGVyX2hvc3RfaXNfbm90X2JlbGlldmVkIC4uLiBvawp0ZXN0IHN0b3JlOjp0ZXN0czo6Z2Nfd2FpdHNfZm9yX25vX29uZV9hbmRfbmV2ZXJfcnVuc191bmRlcl9hX3dyaXRlciAuLi4gb2sKdGVzdCBzZXJ2aWNlOjpidW5kbGU6OnRlc3RzOjphX3RydXN0ZWRfZmFpbHVyZV9pc19ldmlkZW5jZV9ub3RfY2FjaGUgLi4uIG9rCnRlc3Qgc3RvcmU6OnRlc3RzOjpnY19kcnlfcnVuX3JlcG9ydHNfd2l0aG91dF9kZWxldGluZyAuLi4gb2sKdGVzdCBzdG9yZTo6dGVzdHM6OmNhY2hlX21pc3Nlc193aGVuX3RoZV9vdXRwdXRfb2JqZWN0X3dhc19wcnVuZWQgLi4uIG9rCnRlc3Qgc3RvcmU6OnRlc3RzOjpvYmplY3RzX3JvdW5kX3RyaXBfdW5kZXJfdGhlaXJfZGlnZXN0IC4uLiBvawp0ZXN0IHN0b3JlOjp0ZXN0czo6Y2FjaGVfaGl0X3JlcXVpcmVzX2F1dGhlbnRpY19yZWNlaXB0X2FuZF9wcmVzZW50X291dHB1dHMgLi4uIG9rCnRlc3Qgc3RvcmU6OnRlc3RzOjp1bmtub3duX2RpZ2VzdF9mb3Jtc19hcmVfcmVqZWN0ZWQgLi4uIG9rCnRlc3Qgc3RvcmU6OnRlc3RzOjp0YW1wZXJlZF9yZWNlaXB0c19hcmVfcmVmdXNlZF9hdF93cml0ZV90aW1lIC4uLiBvawp0ZXN0IHN0b3JlOjp0ZXN0czo6c3RvcmluZ190aGVfc2FtZV9ieXRlc190d2ljZV9pc19pZGVtcG90ZW50IC4uLiBvawp0ZXN0IHN0b3JlOjp0ZXN0czo6Z2NfcmVtb3Zlc19ldmlkZW5jZV90aGF0X25vX3J1bl9yZWZlcmVuY2VzIC4uLiBvawp0ZXN0IHNlcnZpY2U6OmJ1bmRsZTo6dGVzdHM6OmFuX2ltcG9ydGVkX3J1bl9pc19yZWFkYWJsZV9hbmRfYXVkaXRhYmxlX29uX2FfZnJlc2hfc3RvcmUgLi4uIG9rCnRlc3Qgc2VydmljZTo6YnVuZGxlOjp0ZXN0czo6aW1wb3J0aW5nX3R3aWNlX2lzX2lkZW1wb3RlbnQgLi4uIG9rCnRlc3Qgc2VydmljZTo6YnVuZGxlOjp0ZXN0czo6YV92YWxpZF9zaWduYXR1cmVfYnlfYW5fdW5rbm93bl9rZXlfaXNfdW50cnVzdGVkX25vdF90cnVzdGVkIC4uLiBvawp0ZXN0IHNlcnZpY2U6OmJ1bmRsZTo6dGVzdHM6OmFfdHJ1c3RlZF9zaWduZXJzX3JlY2VpcHRzX3N0YW5kX2luX2Zvcl9sb2NhbF93b3JrIC4uLiBvawp0ZXN0IHNlcnZpY2U6OmJ1bmRsZTo6dGVzdHM6OnJlcXVpcmluZ190cnVzdF9yZWZ1c2VzX3Vuc2lnbmVkX2FuZF91bnRydXN0ZWRfYnVuZGxlc193aG9sZSAuLi4gb2sKdGVzdCBzZXJ2aWNlOjpidW5kbGU6OnRlc3RzOjpyZV9leHBvcnRpbmdfYW5faW1wb3J0ZWRfcnVuX2NhcnJpZXNfZXZlcnlfc2lnbmF0dXJlX2ZvcndhcmQgLi4uIG9rCnRlc3Qgc2VydmljZTo6YnVuZGxlOjp0ZXN0czo6YW5faW1wb3J0X25ldmVyX3JlcGxhY2VzX3doYXRfdGhlX3N0b3JlX2hvbGRzIC4uLiBvawp0ZXN0IHNlcnZpY2U6OmJ1bmRsZTo6dGVzdHM6OnJldm9raW5nX2Ffc2lnbmVyX3Jldm9rZXNfdGhlX3JldXNlX2l0c19idW5kbGVfZWFybmVkIC4uLiBvawp0ZXN0IHNlcnZpY2U6OmJ1bmRsZTo6dGVzdHM6OmFuX2VudHJ5X29ubHlfYV9yZXZva2VkX3NpZ25lcl92b3VjaGVkX2Zvcl9naXZlc193YXlfdG9fYV90cnVzdGVkX29uZSAuLi4gb2sKdGVzdCBhZGFwdGVyczo6bWNwOjp0ZXN0czo6YV9sb25nX2NhbGxfc3RpbGxfYW5zd2Vyc19waW5nX2FuZF9hX2NhbmNlbGxlZF9vbmVfc3RvcHNfYW5kX2lzX3JlY29yZGVkIC4uLiBvawp0ZXN0IHNlcnZpY2U6OmJ1bmRsZTo6dGVzdHM6OnJlY2VpcHRzX25vYm9keV90cnVzdGVkX3NpZ25lZF9hcmVfZXZpZGVuY2Vfbm90X2NhY2hlIC4uLiBvawp0ZXN0IGVuZ2luZTo6ZXhlYzo6dGVzdHM6OmFfcHJvY2Vzc190aGF0X2xlYXZlc190aGVfZ3JvdXBfY2Fubm90X2hvbGRfdGhlX3N0ZXBfb3BlbiAuLi4gb2sKCnRlc3QgcmVzdWx0OiBvay4gMjA2IHBhc3NlZDsgMCBmYWlsZWQ7IDAgaWdub3JlZDsgMCBtZWFzdXJlZDsgMCBmaWx0ZXJlZCBvdXQ7IGZpbmlzaGVkIGluIDIuMDVzCgoKcnVubmluZyAwIHRlc3RzCgp0ZXN0IHJlc3VsdDogb2suIDAgcGFzc2VkOyAwIGZhaWxlZDsgMCBpZ25vcmVkOyAwIG1lYXN1cmVkOyAwIGZpbHRlcmVkIG91dDsgZmluaXNoZWQgaW4gMC4wMHMKCgpydW5uaW5nIDUgdGVzdHMKdGVzdCB0aGVfZ3VhcmRfaXRzZWxmX2RldGVjdHNfdXB3YXJkX2FuZF91bmtub3duX3JlZmVyZW5jZXMgLi4uIG9rCnRlc3QgYWRhcHRlcnNfZG9fbm90X2tub3dfYWJvdXRfZWFjaF9vdGhlciAuLi4gb2sKdGVzdCBldmVyeV9zb3VyY2VfZmlsZV9iZWxvbmdzX3RvX2Ffa25vd25fbGF5ZXIgLi4uIG9rCnRlc3QgZGVwZW5kZW5jaWVzX29ubHlfcG9pbnRfZG93bl90aGVfbGF5ZXJzIC4uLiBvawp0ZXN0IGNvcmVfcGVyZm9ybXNfbm9faW8gLi4uIG9rCgp0ZXN0IHJlc3VsdDogb2suIDUgcGFzc2VkOyAwIGZhaWxlZDsgMCBpZ25vcmVkOyAwIG1lYXN1cmVkOyAwIGZpbHRlcmVkIG91dDsgZmluaXNoZWQgaW4gMC4wM3MKCgpydW5uaW5nIDE0MSB0ZXN0cwp0ZXN0IGFfZmFpbGluZ19saW5lX2luX2FfbXVsdGlfbGluZV9zdGVwX2ZhaWxzX3RoZV9zdGVwIC4uLiBvawp0ZXN0IGFfY2xhaW1fd2l0aG91dF9hX3ZlcmlmeV9jb21tYW5kX2Nhbl9uZXZlcl9wYXNzIC4uLiBvawp0ZXN0IGFfY2VpbGluZ19uYW1lc19zdGVwc193aG9zZV9zcGVuZF9pdF9jYW5ub3Rfc2VlIC4uLiBvawp0ZXN0IGFfZmFpbGVkX3N0ZXBfY2FuY2Vsc19pdHNfZGVwZW5kZW50c19iZWZvcmVfdGhleV9ydW4gLi4uIG9rCnRlc3QgYV9taXNzaW5nX2ZpbGVfbmFtZWRfaW5fYV9yZXF1ZXN0X2lzX2FfYmFkX3JlcXVlc3QgLi4uIG9rCnRlc3QgYV9mYWlsaW5nX2JyYW5jaF9jYW5jZWxzX2l0c19vd25fZGVwZW5kZW50c193aGlsZV90aGVfb3RoZXJfYnJhbmNoX2NvbXBsZXRlcyAuLi4gb2sKdGVzdCBhX2hhbmRvdmVyX3JlZGlyZWN0ZWRfdG9fYW5vdGhlcl9rZXlfb3JfZnJvbV9hX3N0cmFuZ2VyX2NoYW5nZXNfbm9fdHJ1c3QgLi4uIG9rCnRlc3QgYV9mYWlsaW5nX2NvbW1hbmRfaXNfdHJpZWRfYWdhaW5fdG9vIC4uLiBvawp0ZXN0IGFfZmlsZV9naXRfcmVjb3Jkc19hc19leGVjdXRhYmxlX2lzX2tleWVkX3NvIC4uLiBvawp0ZXN0IGFfYnVuZGxlX2Nhbm5vdF9uYW1lX2FfcnVuX291dHNpZGVfdGhlX3N0b3JlIC4uLiBvawp0ZXN0IGFfZm9yZ2VkX2J1bmRsZV9pc19yZWZ1c2VkX2FuZF9sZWF2ZXNfdGhlX3N0b3JlX2VtcHR5IC4uLiBvawp0ZXN0IGFfZmFpbGVkX3N0ZXBfaXNfcmV0cmllZF9pbnN0ZWFkX29mX3JlcGxheWVkX2Zyb21fdGhlX2NhY2hlIC4uLiBvawp0ZXN0IGFfbGltaXRhdGlvbl9zaGFyZWRfYnlfc2V2ZXJhbF9zdGVwc19pc19vbmVfbGluZSAuLi4gb2sKdGVzdCBhX21hbGZvcm1lZF9tZXRyaWNzX2ZpbGVfaXNfcmVwb3J0ZWRfYW5kX3RyZWF0ZWRfYXNfdW5rbm93bl9zcGVuZCAuLi4gb2sKdGVzdCBhX2ZhaWxlZF9hdHRlbXB0X2RvZXNfbm90X2V2aWN0X2FuX2VhcmxpZXJfc3VjY2VzcyAuLi4gb2sKdGVzdCBhX2NoYW5nZWRfb3V0cHV0X2lzX25laXRoZXJfb3ZlcndyaXR0ZW5fbm9yX3ZvdWNoZWRfZm9yIC4uLiBvawp0ZXN0IGFfbWFya2Rvd25fcmVwb3J0X3JlbmRlcnNfd2hhdF9hX2Zsb3dfc2F5c19hc190ZXh0IC4uLiBvawp0ZXN0IGFfcHJvb2Zfa2lsbGVkX2J5X2Ffc2lnbmFsX2lzX3VudmVyaWZpZWRfbm90X3JlZnV0ZWQgLi4uIG9rCnRlc3QgYV9wcm9vZl90aGF0X2NoYW5nZXNfd2hhdF9pdF9qdWRnZXNfdmVyaWZpZXNfbm90aGluZyAuLi4gb2sKdGVzdCBhX25ld19zdG9yZV9rZWVwc19pdHNlbGZfb3V0X29mX2dpdCAuLi4gb2sKdGVzdCBhX3Byb3Zlbl9jbGFpbV9wYXNzZXNfd2l0aF9leGl0X3plcm8gLi4uIG9rCnRlc3QgYV9jYW5kaWRhdGVfd29ya3NfaW5zaWRlX3RoZV9zdG9yZV9hbmRfY2Fubm90X3JlYWNoX3RoZV9yZXBvc2l0b3J5IC4uLiBvawp0ZXN0IGFfcmVmdXRlZF9jbGFpbV9mYWlsc190aGVfcnVuIC4uLiBvawp0ZXN0IGFfcm90YXRpb25fdGhhdF9jYW5ub3Rfd3JpdGVfaXRzX2hhbmRvdmVyX2tlZXBzX3RoZV9vbGRfa2V5IC4uLiBvawp0ZXN0IGFfbmFtZWRfZmxvd19maWxlX2lzX2ZvdW5kX3RoZV9zYW1lX3dheV9ob3dldmVyX2l0X2lzX3dyaXR0ZW4gLi4uIG9rCnRlc3QgYV9jb3BpZWRfc3RvcmVfYnJpbmdzX2V2aWRlbmNlX2J1dF9ub3RfZGVjaXNpb25zIC4uLiBvawp0ZXN0IGFfcmVjZWlwdF9maWxlX2hvbGRpbmdfYW5vdGhlcl9yZWNlaXB0X2ZhaWxzX3ZlcmlmeSAuLi4gb2sKdGVzdCBhX2NvbmZpbmVkX3N0ZXBfd3JpdGVzX29ubHlfd2hlcmVfaXRfbWF5IC4uLiBvawp0ZXN0IGFfYnVuZGxlX21vdmVzX2FfcnVuX3RvX2Fub3RoZXJfaG9zdF9hbmRfc3RpbGxfYXV0aGVudGljYXRlcyAuLi4gb2sKdGVzdCBhX2NhbmRpZGF0ZV93aG9zZV9hdHRlbXB0X3JlcG9ydGVkX25vX2Nvc3RfcmFua3NfYWZ0ZXJfYV9rbm93bl9jb3N0IC4uLiBvawp0ZXN0IGFfcmVmdXRlZF9jbGFpbV9pc19yZV9wcm92ZWRfb25fdGhlX25leHRfcnVuIC4uLiBvawp0ZXN0IGFfcmVjZWlwdF9uYW1pbmdfYW5fdW5kZWNsYXJlZF9maWxlX2lzX25ldmVyX3JldXNlZCAuLi4gb2sKaGkKdGVzdCBhX3Jlc3RvcmVkX291dHB1dF9rZWVwc19pdHNfZXhlY3V0YWJsZV9iaXQgLi4uIG9rCnRlc3QgYV9yZXVzZWRfcmVjZWlwdF9wdXRzX2JhY2tfdGhlX2ZpbGVzX2l0X3Byb3ZlZCAuLi4gb2sKdGVzdCBhX3JldXNlZF9zdGVwX2lzX29uZV9saW5lX2l0c19vdXRwdXRfc3RheXNfaW5fdGhlX3N0b3JlIC4uLiBvawp0ZXN0IGFfc3RlcF90aGF0X2Nhbm5vdF9ydW5faXNfcmVjb3JkZWRfYW5kX3RoZV9ydW5fc3RpbGxfY2xvc2VzIC4uLiBvawp0ZXN0IGFfc3RlcF90aGF0X2JhY2tncm91bmRzX3dvcmtfZG9lc19ub3RfaG9sZF90aGVfcnVuX29wZW4gLi4uIG9rCnRlc3QgYV9ydW5faXNfbmFtZWRfYnlfaXRzX2lkX29yX2FfcHJlZml4X25ldmVyX2J5X2FfZnJhZ21lbnQgLi4uIG9rCnRlc3QgYV9zdGVwX21ha2VzX29uZV9hdHRlbXB0X3VubGVzc19pdF9hbGxvd3NfbW9yZSAuLi4gb2sKdGVzdCBhX3N0ZXBfdGhhdF9lZGl0c19pdHNfZGVjbGFyZWRfaW5wdXRfaXNfcmVwb3J0ZWQgLi4uIG9rCnRlc3QgYV9ydW5fd2hvc2VfZXZpZGVuY2Vfd2FzX2FsdGVyZWRfaXNfbmV2ZXJfc2lnbmVkIC4uLiBvawp0ZXN0IGFfdXNhZ2VfZXJyb3JfZXhpdHNfd2l0aF90aGVfaW52YWxpZF9yZXF1ZXN0X2NvZGVfbm90X3VudmVyaWZpZWQgLi4uIG9rCnRlc3QgYV93ZWFrX29yX21hbGZvcm1lZF9rZXlfY2Fubm90X2JlX3RydXN0ZWQgLi4uIG9rCnRlc3QgYV9zdGVwX3RoYXRfcmV3cml0ZXNfaXRzX293bl9wcm9vZl9jYW5ub3RfdmVyaWZ5IC4uLiBvawp0ZXN0IGFfcmVwb3J0X3dpdGhvdXRfYV9jb3N0X2lzX3Vua25vd25fbm90X2ZyZWUgLi4uIG9rCnRlc3QgYV9ydW5fZmlsZV9ob2xkaW5nX2Fub3RoZXJfcnVuX2lzX3JlZnVzZWQgLi4uIG9rCnRlc3QgYV9zdWNjZXNzX3RoYXRfc2tpcHNfYV9kZWNsYXJlZF9vdXRwdXRfZmFpbHMgLi4uIG9rCnRlc3QgYW5faW52YWxpZF9jb3N0X2NlaWxpbmdfaXNfcmVmdXNlZCAuLi4gb2sKdGVzdCBhbl9pbnZhbGlkX2Zsb3dfaXNfcmVmdXNlZF93aXRoX3RoZV9yZXF1ZXN0X2V4aXRfY29kZSAuLi4gb2sKdGVzdCBhbGxvd19mYWlsdXJlX2tlZXBzX3RoZV9ydW5fZ29pbmdfYnV0X3Byb3Zlc19ub3RoaW5nIC4uLiBvawp0ZXN0IGF0dGVtcHRzX211c3RfYWxsb3dfYXRfbGVhc3Rfb25lIC4uLiBvawp0ZXN0IGFfcnVuX3NpZ25lZF9oZXJlX2NhcnJpZXNfaXRzX3NpZ25hdHVyZV9pbnRvX3ZlcmlmeV9hbmRfYnVuZGxlcyAuLi4gb2sKdGVzdCBhX3NpZ25lcl9hX3J1bl9uYW1lc193aXRob3V0X3RoZWlyX3NpZ25hdHVyZV9pc19ub3RfY29uZmlybWVkIC4uLiBvawp0ZXN0IGFfdGFtcGVyZWRfcmVjZWlwdF9pc19yZWZ1c2VkX2J5X25hbWVfbm90X3ByaW50ZWQgLi4uIG9rCnRlc3QgY2FuZGlkYXRlc19hcmVfdHdvX29yX21vcmVfZGlzdGluY3RfbmFtZXMgLi4uIG9rCnRlc3QgYWRkaW5nX2FfY2xhaW1fdG9fYV9jYWNoZWRfc3RlcF9ydW5zX2l0c19wcm9vZiAuLi4gb2sKdGVzdCBhbl91bnByb3Zlbl9kZXBlbmRlbmN5X2RvZXNfbm90X2Jsb2NrX2l0c19kZXBlbmRlbnRzIC4uLiBvawp0ZXN0IGFuX291dF9vZl9yYW5nZV90aW1lc3RhbXBfaXNfcmVmdXNlZF9ub3RfYV9jcmFzaCAuLi4gb2sKdGVzdCBhX3N0ZXBfdGhhdF9uZXZlcl9ob2xkc19mYWlsc19hZnRlcl9pdHNfbGFzdF9hdHRlbXB0IC4uLiBvawp0ZXN0IGFfcnVuX3RoYXRfY2Fycmllc19hX2NyZWRlbnRpYWxfZG9lc19ub3RfbGVhdmVfdGhlX2hvc3QgLi4uIG9rCnRlc3QgYV9zdGVwX3RyaWVzX2FnYWluX3dpdGhfd2hhdF93ZW50X3dyb25nX3VudGlsX2l0X2hvbGRzIC4uLiBvawp0ZXN0IGFfdHJ1c3RlZF9idW5kbGVfcmVzdG9yZXNfdGhlX2ZpbGVzX2l0X3Byb3ZlZCAuLi4gb2sKdGVzdCBhX3RydXN0ZWRfc2lnbmVyX2lzX25hbWVkX29uX2ltcG9ydF9hbmRfb25fZXZlcnlfbGF0ZXJfdmVyaWZ5IC4uLiBvawp0ZXN0IGFuX2Vudmlyb25tZW50X2ZhdWx0X2V4aXRzXzRfbm90X2FzX2FfYmFkX3JlcXVlc3QgLi4uIG9rCnRlc3QgY29tcGxldGVfb3V0cHV0X3N0YXlzX3JldHJpZXZhYmxlX3doZW5fdGhlX2lubGluZV92aWV3X2lzX3RyaW1tZWQgLi4uIG9rCnRlc3QgYW5fdW5yZWFkYWJsZV9ydW5faXNfbmFtZWRfYW5kX2RvZXNfbm90X2hpZGVfdGhlX290aGVycyAuLi4gb2sKdGVzdCBjaGFuZ2luZ19hX2RlY2xhcmVkX2lucHV0X2ludmFsaWRhdGVzX3RoZV9jYWNoZSAuLi4gb2sKdGVzdCBndWFyZF9uYW1lc190aGVfZmlsZXNfdGhhdF9wcm92ZV90aGVfd29yayAuLi4gb2sKdGVzdCBlZGl0aW5nX2Ffc2lnbmVkX2J1bmRsZV9pc19kZXRlY3RlZF9ldmVuX3doZW5fZXZlcnlfZGlnZXN0X3N0aWxsX21hdGNoZXMgLi4uIG9rCnRlc3QgZ2Nfc3dlZXBzX3doYXRfb25seV9kZXNjcmliZXNfYV9yZW1vdmVkX3J1biAuLi4gb2sKdGVzdCBndWFyZF9wcm90ZWN0c193aGF0X2RlY2lkZXNfd2hldGhlcl9wcm9vZnNfYXJlX2NoZWNrZWQgLi4uIG9rCnRlc3QgZGlmZl9yZXBvcnRzX2lkZW50aWNhbF9ydW5zX2FuZF9yZWFsX2NoYW5nZXMgLi4uIG9rCnRlc3QgaW5pdF9pbl9hX3N1YmRpcmVjdG9yeV9sZWF2ZXNfdGhlX3BhcmVudF9wcm9qZWN0X2Fsb25lIC4uLiBvawp0ZXN0IGd1YXJkX3JlYWRzX2FfcG93ZXJzaGVsbF9jb21tYW5kX2Zvcl90aGVfZmlsZXNfaXRfbmFtZXMgLi4uIG9rCnRlc3QgZm9yY2VfcmVfcnVuc19hX3N0ZXBfdGhhdF93b3VsZF9oYXZlX2JlZW5fcmV1c2VkIC4uLiBvawp0ZXN0IGRpZmZfY29tcGFyZXNfdGhlX2xhdGVzdF9ydW5fd2l0aF90aGVfb25lX2JlZm9yZV9ieV9kZWZhdWx0IC4uLiBvawp0ZXN0IGtleV9pbml0X2lzX2lkZW1wb3RlbnRfYW5kX25ldmVyX3ByaW50c190aGVfc2VjcmV0IC4uLiBvawp0ZXN0IGd1YXJkX3JlYWRzX2Ffc2hlbGxfY29tbWFuZF9mb3JfdGhlX2ZpbGVzX2l0X25hbWVzIC4uLiBvawp0ZXN0IGpzb25fb3V0cHV0X2lzX3ZhbGlkX2pzb25fd2hhdGV2ZXJfYV9zdGVwX3ByaW50cyAuLi4gb2sKdGVzdCBhX2NhbmRpZGF0ZV9yZXVzZWRfZnJvbV9hX3NpZ25lZF9ydW5fc3RheXNfaXRzX3NpZ25lcnNfYWZ0ZXJfdGhlX3J1biAuLi4gb2sKdGVzdCBsb2dfcHJpbnRzX2Ffc3RlcHNfY29tcGxldGVfb3V0cHV0X2FuZF9zaG93X3BvaW50c19hX2ZhaWx1cmVfYXRfaXQgLi4uIG9rCnRlc3QgaG9zdGlsZV9tZXRyaWNzX25ldmVyX2NyYXNoX29yX2hhbmdfYV9ydW4gLi4uIG9rCnRlc3QgZG9jdG9yX25hbWVzX3doYXRfd2Vha2Vuc190aGVfZXZpZGVuY2VfYW5kX2NoYW5nZXNfbm90aGluZyAuLi4gb2sKdGVzdCBlYXJsaWVyX2F0dGVtcHRzX3RyYXZlbF9pbl9hX2J1bmRsZV9hbmRfc3Vydml2ZV9nYyAuLi4gb2sKdGVzdCBvdXRwdXRzX211c3Rfc3RheV9pbnNpZGVfdGhlX2Zsb3dfYW5kX29mZl90aGVfcHJvb2YgLi4uIG9rCnRlc3QgaW5pdF93cml0ZXNfYV9ydW5uYWJsZV9zdGFydGVyX2Zsb3cgLi4uIG9rCnRlc3QgcGxhbl9uYW1lc19zdGVwc190aGF0X2NsYWltX3dpdGhvdXRfcHJvb2ZfYW5kX3J1bnNfbm90aGluZyAuLi4gb2sKdGVzdCBwbGFuX3NheXNfd2hlbl9hX3N0ZXBfZGVjbGFyZXNfbm9faW5wdXRzIC4uLiBvawp0ZXN0IG1heF9wYXJhbGxlbF9pbl90aGVfZmxvd19maWxlX2VuYWJsZXNfb3ZlcmxhcF93aXRob3V0X2FfZmxhZyAuLi4gb2sKdGVzdCBlYWNoX2NhbmRpZGF0ZV9tYWtlc19pdHNfb3duX2F0dGVtcHRzIC4uLiBvawp0ZXN0IG9ubHlfcnVuc190aGVfcmVxdWVzdGVkX3N0ZXBfYW5kX2l0c19kZXBlbmRlbmNpZXMgLi4uIG9rCnRlc3QgcmVhZGluZ19hX3Byb2plY3RfbGVhdmVzX25vX3N0b3JlX2JlaGluZCAuLi4gb2sKdGVzdCBydW5fc2lnbl93aXRob3V0X2Ffa2V5X3J1bnNfbm90aGluZyAuLi4gb2sKdGVzdCBhX3BhcmFsbGVsX3J1bl9zdGF0ZXNfd2hhdF9jb25jdXJyZW5jeV9kb2VzX25vdF9wcm92ZSAuLi4gb2sKdGVzdCBhX3Byb29mX3RoYXRfZGlmZmVyc19mcm9tX3RoZV9iYXNlbGluZV9wcm92ZXNfbm90aGluZyAuLi4gb2sKdGVzdCBldmVyeV9yZXBvcnRfbmFtZXNfd2hvX3ZvdWNoZWRfZm9yX2Ffc3RlcF9yZXVzZWRfZnJvbV9hX3NpZ25lZF9ydW4gLi4uIG9rCnRlc3QgY2FuZGlkYXRlc19ydW5fYXBhcnRfYW5kX3RoZV9jaGVhcGVzdF90aGF0X2hvbGRzX2lzX2tlcHQgLi4uIG9rCnRlc3Qgb3V0cHV0c19hcmVfbmV2ZXJfcmVhZF9vcl93cml0dGVuX3Rocm91Z2hfYV9zeW1ib2xpY19saW5rIC4uLiBvawp0ZXN0IHNoYXJpbmdfbmVlZHNfYV9naXRfcmVwb3NpdG9yeSAuLi4gb2sKdGVzdCByZXF1aXJlX3RydXN0ZWRfcmVmdXNlc19hbl91bmtub3duX3NpZ25lcl9hbmRfbGVhdmVzX25vdGhpbmdfYmVoaW5kIC4uLiBvawp0ZXN0IHNob3dfanNvbl9rZWVwc19jbGFpbV90b3RhbHNfYW5kX2NsYWltc19wZXJfc3RlcF9hcGFydCAuLi4gb2sKdGVzdCByZXVzZWRfcmVjZWlwdHNfY29zdF9ub3RoaW5nX2FuZF9wYXNzX3VuZGVyX2FueV9jZWlsaW5nIC4uLiBvawp0ZXN0IHN0ZXBfb3V0cHV0X2Nhbm5vdF9kcml2ZV90aGVfdGVybWluYWwgLi4uIG9rCnRlc3QgcGxhbl9zZWVzX3RoZV9maWxlc19yZXVzZV93aWxsX3Jlc3RvcmUgLi4uIG9rCnRlc3Qgb3V0cHV0c190cmF2ZWxfd2l0aF9hX2J1bmRsZSAuLi4gb2sKdGVzdCBzaWduaW5nX3dpdGhvdXRfYV9rZXlfZXhwbGFpbnNfaG93X3RvX21ha2Vfb25lIC4uLiBvawp0ZXN0IHRoZV9mbG93X2ZpbGVfaXNfZm91bmRfZnJvbV9hX3N1YmRpcmVjdG9yeSAuLi4gb2sKdGVzdCB0aGVfbWNwX3NlcnZlcl9oYW5kc2hha2VzX2FuZF9ydW5zX3RoZV9mbG93X292ZXJfc3RkaW8gLi4uIG9rCnRlc3QgcmVfZXhlY3V0aW5nX3RoZV9zYW1lX3dvcmtfbGVhdmVzX2VhcmxpZXJfcnVuc192ZXJpZmlhYmxlIC4uLiBvawp0ZXN0IHRoZV9jb3N0X2NlaWxpbmdfc3RvcHNfbmV3X3N0ZXBzX29uY2VfcmVwb3J0ZWRfc3BlbmRfcmVhY2hlc19pdCAuLi4gb2sKdGVzdCB0aGVfY29zdF9jZWlsaW5nX3N0b3BzX2Z1cnRoZXJfYXR0ZW1wdHMgLi4uIG9rCnRlc3QgdGhlX2Nvc3RfY2VpbGluZ19zdG9wc19zdGFydGluZ19jYW5kaWRhdGVzIC4uLiBvawp0ZXN0IHRoZV90cnVuY2F0aW9uX2hpbnRfbmFtZXNfYV9jb21tYW5kX3RoYXRfcHJpbnRzX2FsbF9vZl9pdCAuLi4gb2sKdGVzdCBzdGVwc19yZXBvcnRfc3BlbmRfdGhyb3VnaF9mbG90X21ldHJpY3MgLi4uIG9rCnRlc3QgdmVyaWZ5X2lucHV0c193aXRob3V0X2FfdmVyaWZ5X2NvbW1hbmRfaXNfcmVmdXNlZCAuLi4gb2sKdGVzdCB0aGVfc3RvcmVfaXNfbmV2ZXJfYV9zdGVwX2lucHV0X2FuZF90aGVfcm9vdF9pc19ub3RfYV9wYXR0ZXJuIC4uLiBvawp0ZXN0IGZsYWt5X25hbWVzX3doYXRfY2hhbmdlZF9pdHNfcmVzdWx0X29uX3RoZV9zYW1lX2lucHV0cyAuLi4gb2sKdGVzdCB1bmNoYW5nZWRfaW5wdXRzX3JldXNlX3RoZV9yZWNlaXB0X2FuZF9yZXByb2R1Y2VfdGhlX3Jvb3QgLi4uIG9rCnRlc3QgbG9nX3JlYWRzX2FfY2FuZGlkYXRlX25vdF9rZXB0X2FuZF9hbl9hdHRlbXB0X3RoYXRfZGlkX25vdF9ob2xkIC4uLiBvawp0ZXN0IHZlcmlmeV9hdXRoZW50aWNhdGVzX2FfcmVjb3JkZWRfcnVuIC4uLiBvawp0ZXN0IHZlcmlmeV9kZXRlY3RzX2FuX2VkaXRlZF9yZWNlaXB0IC4uLiBvawp0ZXN0IHplcm9fam9ic19pc19yZWZ1c2VkIC4uLiBvawp0ZXN0IHRpZ2h0ZW5pbmdfdGhlX3Byb29mX3JlX3Byb3Zlc19pbnN0ZWFkX29mX3JldXNpbmdfYW5fb2xkX3ZlcmRpY3QgLi4uIG9rCnRlc3QgdW5vcmRlcmVkX3N0ZXBzX3Byb2R1Y2luZ19vbmVfZmlsZV9hcmVfcmVwb3J0ZWQgLi4uIG9rCnRlc3QgdmVyaWZ5X3JlY29tcHV0ZXNfdGhlX3ZlcmRpY3RfaW5zdGVhZF9vZl9yZWFkaW5nX2l0IC4uLiBvawp0ZXN0IHZlcmlmeV9yZWFkc19ldmVyeV9ldmlkZW5jZV9vYmplY3Rfbm90X2p1c3RfaXRzX25hbWUgLi4uIG9rCnRlc3Qgd29ya19idWlsdF9vbl9hX3JlZnV0ZWRfY2xhaW1faXNfbm90X3J1biAuLi4gb2sKdGVzdCByZWFkZXJzX3dob190cnVzdF9hX2tleV9mb2xsb3dfaXRzX2hhbmRvdmVyX3RvX3RoZV9uZXh0IC4uLiBvawp0ZXN0IHdoeV9hX3JlY2VpcHRfd2FzX3Bhc3NlZF9vdmVyX2lzX25vdF9zZWFsZWRfaW50b190aGVfbmV4dF9vbmUgLi4uIG9rCnRlc3Qgc2VhcmNoX2ZpbmRzX3doYXRfcnVuc19yZWNvcmRlZF9hbmRfbmFtZXNfd2hlcmUgLi4uIG9rCnRlc3QgYV9zdGVwX292ZXJfYnVkZ2V0X2lzX2FfdGltZW91dF9ub3RfYV9zdWNjZXNzIC4uLiBvawp0ZXN0IHdoZW5fbm9fY2FuZGlkYXRlX2hvbGRzX3RoZV9maXJzdF9pc19rZXB0X2FuZF90aGVfcnVuX2ZhaWxzIC4uLiBvawp0ZXN0IHRoZV9uZXh0X3J1bl9yZWNvcmRzX3doYXRfdGhlX2d1YXJkX3JlZnVzZWQgLi4uIG9rCnRlc3QgcnVuc190cmF2ZWxfdGhyb3VnaF9hX2dpdF9yZW1vdGVfYW5kX2Ffc2lnbmVkX29uZV9zdGFuZHNfaW4gLi4uIG9rCnRlc3QgdmVyaWZ5X25hbWVzX3RoZV9jaGFuZ2VzX25vX3N0ZXBfcmVhZCAuLi4gb2sKdGVzdCBzdG9wcGluZ19mbG90X3N0b3BzX3RoZV9zdGVwX2FuZF9zdGlsbF9yZWNvcmRzX3RoZV9ydW4gLi4uIG9rCnRlc3Qgd2hlcmVfZ2l0X2lnbm9yZXNfdGhlX2V4ZWN1dGFibGVfYml0X3RoZV9rZXlfdXNlc190aGVfcmVjb3JkZWRfb25lIC4uLiBvawp0ZXN0IGluZGVwZW5kZW50X3N0ZXBzX292ZXJsYXBfb25seV93aGVuX2NvbmN1cnJlbmN5X2lzX2FsbG93ZWQgLi4uIG9rCnRlc3QgYV9zdGVwX3RoYXRfY2hhbmdlc19maWxlc19vdXRzaWRlX21heV9jaGFuZ2VfZmFpbHMgLi4uIG9rCnRlc3QgYV9wcm9vZl90aGF0X3Bhc3Nlc19iZWZvcmVfdGhlX2NoYW5nZV9wcm92ZXNfbm90aGluZyAuLi4gb2sKdGVzdCBjb25jdXJyZW5jeV9kb2VzX25vdF9jaGFuZ2VfcmVjZWlwdHNfb3JfdGhlX3J1bl9yb290IC4uLiBvawoKdGVzdCByZXN1bHQ6IG9rLiAxNDEgcGFzc2VkOyAwIGZhaWxlZDsgMCBpZ25vcmVkOyAwIG1lYXN1cmVkOyAwIGZpbHRlcmVkIG91dDsgZmluaXNoZWQgaW4gMi41M3MKCgpydW5uaW5nIDQgdGVzdHMKdGVzdCB0aGVfZ2l0aHViX2FjdGlvbl9pbnN0YWxsc190aGVfcmVsZWFzZV9iZWluZ19idWlsdCAuLi4gb2sKdGVzdCB0aGVfY2xhdWRlX2NvZGVfcGx1Z2luX25hbWVzX3RoZV9yZWxlYXNlX2JlaW5nX2J1aWx0IC4uLiBvawp0ZXN0IGV2ZXJ5X3JlYWRtZV9saW5rc190aGVfb3RoZXJfdHdvIC4uLiBvawp0ZXN0IGV2ZXJ5X3JlYWRtZV9uYW1lc190aGVfcmVsZWFzZV9iZWluZ19idWlsdCAuLi4gb2sKCnRlc3QgcmVzdWx0OiBvay4gNCBwYXNzZWQ7IDAgZmFpbGVkOyAwIGlnbm9yZWQ7IDAgbWVhc3VyZWQ7IDAgZmlsdGVyZWQgb3V0OyBmaW5pc2hlZCBpbiAwLjAwcwoKCnJ1bm5pbmcgMCB0ZXN0cwoKdGVzdCByZXN1bHQ6IG9rLiAwIHBhc3NlZDsgMCBmYWlsZWQ7IDAgaWdub3JlZDsgMCBtZWFzdXJlZDsgMCBmaWx0ZXJlZCBvdXQ7IGZpbmlzaGVkIGluIDAuMDBzCgo=",
+    "sha256:c233b69c85159f775af8791a1449ae968c0b20b465c62c47eeb99697f8b92e65": "ICAgIEZpbmlzaGVkIGBkZXZgIHByb2ZpbGUgW3Vub3B0aW1pemVkICsgZGVidWdpbmZvXSB0YXJnZXQocykgaW4gMC44MXMK",
+    "sha256:c2f66001ad3351a936b2d61cf1b5f923670ec2f5acf4c04529fb8a44ac9684e1": "eyJkdXJhdGlvbl9tcyI6ODA1LCJob3N0X29zIjoibGludXgiLCJtZXRyaWNzIjpudWxsLCJtZXRyaWNzX25vdGVzIjpbXSwic3RhcnRlZF9hdF9tcyI6MTc5NTU5ODM0NDE4MCwic3RkZXJyX2J5dGVzIjo3Miwic3RkZXJyX2lubGluZSI6IiAgICBGaW5pc2hlZCBgZGV2YCBwcm9maWxlIFt1bm9wdGltaXplZCArIGRlYnVnaW5mb10gdGFyZ2V0KHMpIGluIDAuNzVzXG4iLCJzdGRlcnJfdHJ1bmNhdGVkIjpmYWxzZSwic3Rkb3V0X2J5dGVzIjowLCJzdGRvdXRfaW5saW5lIjoiIiwic3Rkb3V0X3RydW5jYXRlZCI6ZmFsc2V9",
+    "sha256:d12389cf5b7d8ff7318e8f0294359f6194310ee63b6405ac0ae85d9e50aeaf96": "CnJ1bm5pbmcgMjA2IHRlc3RzCi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLiA4Ny8yMDYKLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uIDE3NC8yMDYKLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4KdGVzdCByZXN1bHQ6IG9rLiAyMDYgcGFzc2VkOyAwIGZhaWxlZDsgMCBpZ25vcmVkOyAwIG1lYXN1cmVkOyAwIGZpbHRlcmVkIG91dDsgZmluaXNoZWQgaW4gMi4wNXMKCgpydW5uaW5nIDAgdGVzdHMKCnRlc3QgcmVzdWx0OiBvay4gMCBwYXNzZWQ7IDAgZmFpbGVkOyAwIGlnbm9yZWQ7IDAgbWVhc3VyZWQ7IDAgZmlsdGVyZWQgb3V0OyBmaW5pc2hlZCBpbiAwLjAwcwoKCnJ1bm5pbmcgNSB0ZXN0cwouLi4uLgp0ZXN0IHJlc3VsdDogb2suIDUgcGFzc2VkOyAwIGZhaWxlZDsgMCBpZ25vcmVkOyAwIG1lYXN1cmVkOyAwIGZpbHRlcmVkIG91dDsgZmluaXNoZWQgaW4gMC4wM3MKCgpydW5uaW5nIDE0MSB0ZXN0cwouLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uaGkKLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4gODcvMTQxCi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLgp0ZXN0IHJlc3VsdDogb2suIDE0MSBwYXNzZWQ7IDAgZmFpbGVkOyAwIGlnbm9yZWQ7IDAgbWVhc3VyZWQ7IDAgZmlsdGVyZWQgb3V0OyBmaW5pc2hlZCBpbiAyLjUxcwoKCnJ1bm5pbmcgNCB0ZXN0cwouLi4uCnRlc3QgcmVzdWx0OiBvay4gNCBwYXNzZWQ7IDAgZmFpbGVkOyAwIGlnbm9yZWQ7IDAgbWVhc3VyZWQ7IDAgZmlsdGVyZWQgb3V0OyBmaW5pc2hlZCBpbiAwLjAwcwoKCnJ1bm5pbmcgMCB0ZXN0cwoKdGVzdCByZXN1bHQ6IG9rLiAwIHBhc3NlZDsgMCBmYWlsZWQ7IDAgaWdub3JlZDsgMCBtZWFzdXJlZDsgMCBmaWx0ZXJlZCBvdXQ7IGZpbmlzaGVkIGluIDAuMDBzCgo=",
+    "sha256:d9533554809e0846c6113df1671caf5d74f2a7b9763b0232786a0b652704164a": "ICAgIEZpbmlzaGVkIGBkZXZgIHByb2ZpbGUgW3Vub3B0aW1pemVkICsgZGVidWdpbmZvXSB0YXJnZXQocykgaW4gMC43M3MK",
+    "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855": ""
+  },
+  "attestations": [
+    {
+      "key": "ed25519:3a9f3136fc4fc8b7d3d96d45cf987653063fbf0ca394dcc75cac2424da9097c9",
+      "manifest_digest": "sha256:61361646c99b6750bf1f5e6bb7dacb06ea4f2b6cc6f8cf41c070190026b4c209",
+      "signature": "3a1a8a509cc19bfb4e85049ebcbc1325033a96077e9ddb1ff2eedf044abae6849249307fbf9b18c9b25baee25b739d0b928185cf302bf5fd637bb023ac2b4d04"
+    }
+  ]
+}

@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.4
 
 - Release archives carry a GitHub build provenance attestation, made by the
   release workflow for the tag. The action checks it with

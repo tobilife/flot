@@ -20,7 +20,7 @@
 
 <code>cargo install flot-cli</code>
 
-Latest release **0.2.3**: proofs held to a git revision, scope and sandbox for steps, attempts and candidates, run search, sharing through git, a GitHub action, a Claude Code plugin, and Windows · [changelog](CHANGELOG.md)
+Latest release **0.2.4**: proofs that must fail before the change, changes no step read, flaky proofs, a guard that reads shell commands and records what it refused, credentials kept out of shared runs, `flot doctor`, and attested release archives · [changelog](CHANGELOG.md)
 
 </div>
 

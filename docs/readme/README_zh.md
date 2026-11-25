@@ -20,7 +20,7 @@
 
 <code>cargo install flot-cli</code>
 
-最新版本 **0.2.3**：固定到 git 修订的证明、步骤的变更范围与沙箱、重试与候选比较、运行搜索、通过 git 共享、GitHub Action、Claude Code 插件，以及 Windows 支持 · [更新日志](../../CHANGELOG.md)
+最新版本 **0.2.4**：改动之前必须失败的证明、标出没有任何步骤读取的改动、检测结果会变的证明、能读懂 shell 命令并记录所拒绝内容的守卫、共享的运行中拦截凭据、`flot doctor`，以及带构建来源证明的发布压缩包 · [更新日志](../../CHANGELOG.md)
 
 </div>
 

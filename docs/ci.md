@@ -125,45 +125,63 @@ executable there and as not executable in the clone. Inputs git tracks are
 now keyed by the bit git records where git does not trust the file system
 ([step keys](flows.md#step-keys)).
 
-CI does the same on `main`: in run
-[45541197932](https://github.com/tobilife/flot/actions/runs/45541197932), the
-`action` job printed `trusting ed25519:3a9f…97c9 as tobilife` (key shortened
-here), imported
-`1795577803940-a32a34000eec  root a32a34000eec  trusted  reusable` (and an
-older run, `1795534848392-65ee8029fb2c`), and printed all four steps as
-`cached`, then `PASSED 1795577843953-a32a34000eec  root a32a34000eec  120ms`:
-the root is the signed run's.
-
-CI's own run is unsigned, so its report reads `Authorship: unsigned`; it names
-who vouched for each step it reused, by the name the trust list gives the
-signer (real output: a project that trusts a key as `alice` imports a run
-signed with it, then runs):
+CI does the same on `main`. In run
+[45550616858](https://github.com/tobilife/flot/actions/runs/45550616858), for
+the 0.2.5 release commit, the `action` job printed (key shortened here):
 
 ```text
-$ flot run
-cached   write                ok        11ms  claims 1v/0u/0r  receipt a139217922cb  vouched for by alice
+trusting ed25519:3a9f…97c9 as tobilife
+imported run 1795534848392-65ee8029fb2c  root 65ee8029fb2c  trusted  reusable
+imported run 1795577803940-a32a34000eec  root a32a34000eec  trusted  reusable
+imported run 1795582620687-f43861278255  root f43861278255  trusted  reusable
+origin of flow flot-self-check: 3 imported, 0 already here, 0 refused
+cached   format               ok        242ms  claims 1v/0u/0r  receipt 86de9db3ae30  vouched for by tobilife
+cached   build                ok        7184ms  claims 1v/0u/0r  receipt 522282d58cd5  vouched for by tobilife
+cached   lint                 ok        3321ms  claims 1v/0u/0r  receipt c8a8d5c3299c  vouched for by tobilife
+cached   test                 ok        5955ms  claims 2v/0u/0r  receipt 728a01c3b463  vouched for by tobilife
 
-PASSED 1795582190590-413e607aac3c  root 413e607aac3c  12ms
+PASSED 1795582863394-f43861278255  root f43861278255  64ms
+limitations:
+  - proofs checked against origin/main (ea2e1bd60799)
+```
+
+The root is the signed run's, and each step names who vouched for it, by the
+name the trust list gives the signer. The job writes `flot verify --markdown`
+to the job summary rather than the log; the same commands in a fresh clone of
+that commit, with flot 0.2.5 from crates.io, print:
+
+```text
 $ flot verify --markdown
 ### flot: passed
 
-Run `1795582190590-413e607aac3c` of flow proven, root `413e607aac3c`; recorded verdict passed.
+Run `1795589241230-f43861278255` of flow flot\-self\-check, root `f43861278255`; recorded verdict passed.
 
 - Integrity: intact
+- Proofs: as at origin/main \(ea2e1bd60799\)
 - Authorship: unsigned
-- Reused from signed runs: 1 step(s), vouched for by alice
-- Claims: 1 verified, 0 unverified, 0 refuted
+- Reused from signed runs: 4 step(s), vouched for by tobilife
+- Claims: 5 verified, 0 unverified, 0 refuted
 
 | Step | Status | Claim | |
 |---|---|---|---|
-| `write` | ok, reused, vouched for by alice | artifact\.txt contains flot | verified |
+| `format` | ok, reused, vouched for by tobilife | every source file is rustfmt\-clean | verified |
+| `build` | ok, reused, vouched for by tobilife | the library, binary and test targets compile | verified |
+| `lint` | ok, reused, vouched for by tobilife | clippy reports no warnings on any target | verified |
+| `test` | ok, reused, vouched for by tobilife | the unit suite passes | verified |
+|  |  | the end\-to\-end CLI suite passes | verified |
+
+<details><summary>Limitations</summary>
+
+- proofs checked against origin/main \(ea2e1bd60799\)
+
+</details>
 ```
 
-`flot show` and `flot verify` name the signer too. The run records only the
-signer's key, and CI's run is unsigned, so nothing covers that record: a
-signer is named only when the store also holds a run the signer signed that
-kept the same receipt for the step, here the pulled run, and only while the
-trust list still holds the key. Otherwise the key is shown and marked, as in
+CI's own run is unsigned, so its report reads `Authorship: unsigned`, and
+nothing covers the signer keys its steps record. A signer is therefore named
+only when the store also holds a run the signer signed that kept the same
+receipt for the step, here the pulled run, and only while the trust list
+still holds the key. Otherwise the key is shown and marked, as in
 `vouched for by ed25519:a4929b56a758611c (not trusted here)` once the signer
 was removed, or `vouched for by ed25519:343ff0b6dc243ffa (not confirmed here)`
 for a run that names a signer whose signature this store does not hold.

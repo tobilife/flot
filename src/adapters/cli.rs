@@ -1612,9 +1612,6 @@ fn render_detail(detail: &RunDetail) {
         manifest.claims.refuted,
         manifest.max_parallel
     );
-    if !detail.signers.is_empty() {
-        render_authorship(detail.authorship, &detail.signers);
-    }
     render_spend(manifest);
     render_limitations(manifest);
     render_refusals(manifest);

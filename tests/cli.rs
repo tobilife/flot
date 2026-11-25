@@ -2278,6 +2278,35 @@ fn a_run_signed_here_carries_its_signature_into_verify_and_bundles() {
     assert_eq!(run.json()["signed"]["added"], true);
     project.flot(&["sign"]).ok().has("already signed");
 
+    // Not on the trust list yet: named as this host's own key, not trusted.
+    let fingerprint = &key[..24];
+    project
+        .flot(&["verify"])
+        .ok()
+        .has("authorship: this host's key")
+        .has(&format!(
+            "~ {fingerprint}  this host's key, not on the trust list"
+        ))
+        .lacks("untrusted");
+    let audit = project.flot(&["verify", "--json"]).json();
+    assert_eq!(audit["authorship"], "this_host", "{audit}");
+    assert_eq!(audit["signers"][0]["this_host"], true, "{audit}");
+    assert_eq!(audit["signers"][0]["trusted_as"], serde_json::Value::Null);
+    project
+        .flot(&["verify", "--markdown"])
+        .ok()
+        .has("- Authorship: this host's key");
+
+    // Without the key at hand, the same signature is just untrusted.
+    let away = project.key_path().with_extension("away");
+    std::fs::rename(project.key_path(), &away).unwrap();
+    project
+        .flot(&["verify"])
+        .ok()
+        .has("authorship: untrusted")
+        .has(&format!("? {fingerprint}  not on the trust list"));
+    std::fs::rename(&away, project.key_path()).unwrap();
+
     project.flot(&["trust", "add", "me", &key]).ok();
     let audit = project.flot(&["verify", "--json"]).json();
     assert_eq!(audit["authorship"], "trusted", "{audit}");

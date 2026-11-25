@@ -132,9 +132,18 @@ every later bundle of the run carries it; a CI job can sign each run as it
 records it and export only the runs someone asks for. flot signs only a run
 executed on this host whose evidence still authenticates: an imported run, or
 one whose receipts or objects were altered, is refused. Whether to believe the
-signer is the reader's decision, kept in their own trust list; even your own
-signature reads as `untrusted` in your own `flot verify` until you trust your
-own key:
+signer is the reader's decision, kept in their own trust list. Your own key is
+not on it either until you add it; `flot verify` names its signature as this
+host's key rather than as an unknown one, and that is a label, not trust
+(real output):
+
+```
+$ flot verify
+authorship: this host's key
+  ~ ed25519:e2a40fd09e3422ab  this host's key, not on the trust list
+```
+
+Another host reading the same run sees `untrusted`, as here:
 
 ```
 host A $ flot key init
@@ -151,7 +160,7 @@ host B $ flot import --require-trusted demo.json
 - A signature that does not verify refuses the bundle whole: something changed
   after signing, even if every receipt and digest still checks out.
 - A valid signature by a key you have not trusted is reported as `untrusted`,
-  never upgraded. Without `--require-trusted` it still imports, labelled.
+  or as `this host's key` when this host holds that key, and never upgraded. Without `--require-trusted` it still imports, labelled.
 - `flot verify` and MCP `flot_verify` re-judge stored signatures against the
   current trust list, so revoking a signer changes the authorship they report
   for runs already imported (the exit code still reflects integrity), and stops

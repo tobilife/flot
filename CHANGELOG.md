@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- `flot verify` names a run signed by this host's own key, while that key is
+  not on the trust list, as `authorship: this host's key` (`this_host` in
+  `--json`, with `this_host: true` on the signer) instead of `untrusted`. It
+  is a label only: `--require-trusted`, import and cache reuse still count
+  only keys on the trust list, and another host reading the run still sees
+  `untrusted`.
+
 ## 0.2.5
 
 - The guard reads PowerShell: the Claude Code hook now covers the

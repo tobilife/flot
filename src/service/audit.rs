@@ -21,7 +21,8 @@ pub struct Audit {
     pub verdict: Verdict,
     pub checked_receipts: usize,
     pub findings: Vec<String>,
-    /// Who vouched for this run, judged against this store's trust list.
+    /// Who vouched for this run, judged against this store's trust list. A
+    /// signature by this host's own key is labeled as such, never trusted.
     pub authorship: Authorship,
     pub signers: Vec<SignerCheck>,
     /// Steps the run reused from imported runs, with who vouched for each,
@@ -100,6 +101,8 @@ pub fn anchor(store: &Store, manifest: &RunManifest, baseline: &Baseline) -> Res
 /// own id, the dependency references must agree with the manifest, every
 /// evidence object must still be present, and everything the manifest derives
 /// from its receipts (statuses, counts, verdict, root, run id) must follow.
+/// This host's signing key, read from outside the store, only labels a
+/// signature it made.
 pub fn audit(store: &Store, manifest: &RunManifest) -> Result<Audit> {
     let mut findings = Vec::new();
     let evidence = manifest.evidence();
@@ -161,7 +164,12 @@ pub fn audit(store: &Store, manifest: &RunManifest) -> Result<Audit> {
         .collect();
     let recomputed_root = RunManifest::root_of(&pairs);
 
-    let (signers, authorship) = authorship(store, manifest)?;
+    let (signers, authorship) = attest::assess(
+        &store.attestations(&manifest.run_id)?,
+        manifest,
+        &store.trusted_keys()?,
+        keys::host_public_key().as_deref(),
+    );
     for signer in signers.iter().filter(|signer| !signer.is_valid()) {
         findings.push(format!(
             "attestation by {} does not hold: {}",
@@ -183,18 +191,6 @@ pub fn audit(store: &Store, manifest: &RunManifest) -> Result<Audit> {
         vouched: vouched(store, manifest)?,
         anchor: None,
     })
-}
-
-/// Who signed `manifest`, judged against this store's trust list and the
-/// signing key this host holds. The host key only labels its own signature;
-/// it is never a reason to trust or reuse a run.
-pub fn authorship(store: &Store, manifest: &RunManifest) -> Result<(Vec<SignerCheck>, Authorship)> {
-    Ok(attest::assess(
-        &store.attestations(&manifest.run_id)?,
-        manifest,
-        &store.trusted_keys()?,
-        keys::host_public_key().as_deref(),
-    ))
 }
 
 /// Who vouched for each step `manifest` reused from an imported run. The

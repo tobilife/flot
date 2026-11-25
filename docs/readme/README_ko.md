@@ -330,8 +330,9 @@ CLI가 있는 모든 에이전트입니다. Claude Code와 Codex 등록 방법�
 단계와 그 단계가 시작한 모든 프로세스는 Windows 작업 개체(job object)에 묶이므로, 시간 초과나
 Ctrl-C가 전부를 멈춥니다. 테스트 스위트를 Windows에서도 실행합니다. 설치는
 `cargo install flot-cli`로 합니다. Windows에는 시그널과 실행 권한 비트가 없어서, 강제 종료된
-증명은 받은 종료 코드로 판정되고, Linux나 macOS에서 실행 권한이 있는 파일은 키가 달라져
-그런 영수증은 두 환경 사이에서 재사용되지 않습니다.
+증명은 받은 종료 코드로 판정되고, git이 추적하는 입력 파일은 Linux와 macOS에서처럼 git에
+기록된 실행 권한 비트로 키를 만듭니다. git이 추적하지 않는 파일은 Linux나 macOS에서 실행
+권한이 있으면 Windows에서 키가 달라집니다.
 
 </details>
 

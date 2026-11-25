@@ -22,8 +22,8 @@ verify = "cargo build --all-targets --quiet"
 
 ## Step keys
 
-Digest over the command, the declared environment, the content of
-every declared input file and proof input, the verify command, the declared
+Digest over the command, the declared environment, the content and
+executable bit of every declared input file and proof input, the verify command, the declared
 output patterns, and the receipt ids of upstream steps. Equal key ⇒ the same work over the same facts ⇒ the receipt is reused.
 Declaring inputs is what makes a cache hit trustworthy; a step with none carries
 a limitation saying so, in `flot plan` and in its receipt.
@@ -35,6 +35,14 @@ project's sources, not `target/` or `node_modules/`; it never enters `.git` or
 `.flot`. A path the pattern spells out is always followed: `target/gen/*.rs`
 and `.env` are inputs even when git ignores them. Output patterns reach ignored
 files too, because products usually are ignored build output.
+
+Where git does not trust the file system's executable bit (`core.fileMode`
+is false: Git for Windows, and WSL's `/mnt` drives, where every file reads as
+executable), an input git tracks is keyed by the bit git records, the one a
+Linux or macOS checkout has. Without that, a key computed on such a drive
+never matched one computed in CI, so a run signed there could not be reused
+there. A file git does not track, and an output, keep the bit the file system
+shows.
 
 ## Receipts
 

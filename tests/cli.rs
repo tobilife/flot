@@ -2615,6 +2615,30 @@ inputs = ["answer"]
 run = "echo using $(cat answer)"
 "#;
 
+/// On any platform, a file git records as executable is keyed so where git
+/// does not trust the file system, as a Linux or macOS checkout keys it.
+#[test]
+fn a_file_git_records_as_executable_is_keyed_so() {
+    let project = Project::new(
+        "[flow]\nname = \"modes\"\n\n[[step]]\nid = \"plain\"\ninputs = [\"run.sh\"]\nrun = \"true\"\n",
+    );
+    project.write("run.sh", "true\n");
+    project.write(".gitignore", ".flot/\n");
+    git_in(project.path(), &["init", "-q"]);
+    git_in(project.path(), &["config", "core.fileMode", "false"]);
+    git_in(project.path(), &["add", "-A"]);
+    git_in(project.path(), &["update-index", "--chmod=+x", "run.sh"]);
+    project.flot(&["run"]).ok();
+    let show = project.flot(&["--json", "show"]).json();
+    let receipt_id = show["steps"][0]["receipt_id"].as_str().unwrap().to_string();
+    let receipt = project.flot(&["receipt", &receipt_id]).json();
+    assert_eq!(
+        receipt["identity"]["inputs"][0]["executable"],
+        serde_json::json!(true),
+        "{receipt}"
+    );
+}
+
 /// Where git does not trust the file system's executable bit (Windows, WSL's
 /// `/mnt` drives, where every file looks executable), a step is keyed by the
 /// bit git records, so its key matches a Linux or macOS checkout's.

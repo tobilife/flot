@@ -13,6 +13,13 @@
   outside the allowed paths and, without `network`, every network operation.
   The receipt's mechanism reads `seatbelt file writes, seatbelt network`.
   Elsewhere than Linux and macOS a confined step is still not run.
+- Where git does not trust the file system's executable bit
+  (`core.fileMode` false: Git for Windows, WSL's `/mnt` drives), an input git
+  tracks is keyed by the bit git records, as a Linux or macOS checkout keys
+  it. A run on such a drive could never be reused in CI before; a candidate's
+  copy is keyed by the workspace's records too.
+- This repository's CI trusts the signers in `.github/flot-signers` on the
+  base branch, pulls their runs and reuses them; `docs/ci.md` shows how.
 - A step whose inline output was trimmed no longer adds a limitation saying
   so: trimming is how the output is shown, not a limit of the evidence, and
   the `complete output: flot log ...` line under the step already says where

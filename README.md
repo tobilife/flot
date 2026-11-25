@@ -359,9 +359,9 @@ written for `sh` on every platform, and flot runs steps in the one Git for
 Windows provides. A step and everything it starts are held in a Windows job
 object, so a timeout or Ctrl-C stops all of them. The test suite runs on
 Windows. Install with `cargo install flot-cli`. Windows has no signals and no
-executable bit: a killed proof is judged by the exit code it was given, and a
-file that is executable on Linux or macOS keys differently there, so such
-receipts are not reused across the two.
+executable bit: a killed proof is judged by the exit code it was given, and an
+input git tracks is keyed by the executable bit git records, as on Linux and
+macOS; an untracked file that is executable there keys differently on Windows.
 
 </details>
 

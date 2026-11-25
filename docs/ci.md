@@ -86,20 +86,44 @@ keys and pull their runs; steps whose key matches a trusted receipt are then
 reused, and anything else runs in CI. Read the keys **from the base branch**
 (here a file of `NAME KEY` lines, as `flot trust add` takes them): a pull
 request that could add its own key could vouch for itself. Protect the file
-on that branch too, for example with a `CODEOWNERS` entry. The action does not
-do this itself; it has not been run in this repository's CI.
+on that branch too, for example with a `CODEOWNERS` entry. The signing key
+never reaches CI: the developer signs on their own host, and CI only checks
+the signature against the public key the base branch names.
 
-In a clone with a fresh host key (real output):
+This repository does so: its [`action` job](../.github/workflows/ci.yml)
+reads [`.github/flot-signers`](../.github/flot-signers) from the base branch
+(from the commit itself on a push to `main`), trusts those keys, runs
+`flot pull --require-trusted`, and then the action. Where the base branch
+has no such file, every step runs in CI. The other jobs still build and test
+every commit themselves.
+
+After the local run, the developer shares it with `flot push --sign`. A
+fresh clone with a fresh store, doing what that job does (real output, on a
+Linux file system, against a run signed on the WSL `/mnt` drive and pushed to
+a local remote):
 
 ```text
-$ git show origin/main:.github/flot-signers | while read -r name key; do flot trust add "$name" "$key"; done
-trusting ed25519:e9a1cf6df83179e7e7bee570fbc6007e3cb9b171e72808988efd902dfbb7e446 as dev
+$ git show HEAD:.github/flot-signers | while read -r name key; do case "$name" in ''|'#'*) continue;; esac; flot trust add "$name" "$key"; done
+trusting ed25519:3a9f3136fc4fc8b7d3d96d45cf987653063fbf0ca394dcc75cac2424da9097c9 as tobilife
 $ flot pull --require-trusted
-imported run 1795532150429-2b2b51cba86d  root 2b2b51cba86d  trusted  reusable
-origin of flow ci: 1 imported, 0 already here, 0 refused
-$ flot run --proofs-from origin/main
-cached   t                    ok        12ms  claims 1v/0u/0r  receipt 5c8d316a79ba
+imported run 1795577477469-c44b96937747  root c44b96937747  trusted  reusable
+store of flow flot-self-check: 1 imported, 0 already here, 0 refused
+$ flot run
+cached   format               ok        243ms  claims 1v/0u/0r  receipt c806d40b7569
+cached   build                ok        5564ms  claims 1v/0u/0r  receipt bfa4474e4b2d
+cached   lint                 ok        725ms  claims 1v/0u/0r  receipt b97c49bccc51
+cached   test                 ok        5815ms  claims 2v/0u/0r  receipt 14a2d4f2eb4a
+
+PASSED 1795577509581-c44b96937747  root c44b96937747  77ms
+limitations:
+  - proofs checked against origin/main (a0dbb7f393be)
 ```
+
+The root is the signed run's. The first attempt reused nothing: on the
+`/mnt` drive every file reads as executable, so every input was keyed as
+executable there and as not executable in the clone. Inputs git tracks are
+now keyed by the bit git records where git does not trust the file system
+([step keys](flows.md#step-keys)).
 
 `flot verify` checks runs executed on the host it runs on, so CI runs the flow
 after the pull, and that run is what it verifies; a pulled run alone is named

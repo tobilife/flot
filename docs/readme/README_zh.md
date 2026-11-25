@@ -303,8 +303,8 @@ macOS 用 Seatbelt 配置）；无法强制的地方，
 编写，flot 用 Git for Windows 自带的 `sh` 运行步骤。步骤及其启动的所有进程都被放进一个
 Windows 作业对象（job object），所以超时或 Ctrl-C 会把它们全部停止。测试套件也在 Windows 上
 运行。用 `cargo install flot-cli` 安装。Windows 没有信号，也没有可执行位：被强制终止的证明按
-它得到的退出码判定；在 Linux 或 macOS 上带可执行位的文件在两边的键不同，这样的收据不会在两者
-之间复用。
+它得到的退出码判定；git 跟踪的输入文件按 git 记录的可执行位计算键，与 Linux 和 macOS 上一致；
+git 不跟踪的文件若在 Linux 或 macOS 上可执行，在 Windows 上的键就不同。
 
 </details>
 

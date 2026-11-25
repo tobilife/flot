@@ -1,0 +1,4 @@
+# Who may vouch for a run that CI then reuses instead of executing again:
+# NAME KEY, as `flot trust add` takes them. CI reads this file from the
+# base branch, so a pull request cannot add its own key.
+tobilife ed25519:3a9f3136fc4fc8b7d3d96d45cf987653063fbf0ca394dcc75cac2424da9097c9

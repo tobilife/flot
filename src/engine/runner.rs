@@ -182,6 +182,9 @@ pub struct Runner<'a> {
     store: &'a Store,
     /// The candidate this runner executes, in a copy of the workspace.
     candidate: Option<String>,
+    /// The workspace `root` is a copy of, or `root` itself: its repository
+    /// says which files are executable where the file system cannot.
+    origin: PathBuf,
     /// The revision proofs must match, when the run checks them against one.
     baseline: Option<&'a Baseline>,
     /// Held shared while a step runs, and alone by a step with `may_change`,
@@ -190,12 +193,22 @@ pub struct Runner<'a> {
 }
 
 impl<'a> Runner<'a> {
+    /// What `step` reads in this runner's workspace, keyed as its origin's.
+    fn facts(&self, step: &Step) -> keying::Facts {
+        if self.root == self.origin {
+            keying::facts_of(&self.root, step)
+        } else {
+            keying::facts_of_copy(&self.root, &self.origin, step)
+        }
+    }
+
     pub fn new(flow: &'a Flow, root: &Path, store: &'a Store) -> Self {
         Runner {
             flow,
             root: root.to_path_buf(),
             store,
             candidate: None,
+            origin: root.to_path_buf(),
             baseline: None,
             scope: RwLock::new(()),
         }
@@ -783,7 +796,7 @@ impl<'a> Runner<'a> {
             deps,
             gate,
         } = work;
-        let facts = keying::facts_of(&self.root, step);
+        let facts = self.facts(step);
         let mut limitations = facts.limitations.clone();
         let step_key = self.step_key(step, &facts, &deps);
         // Facts about this run, such as why a cached receipt was passed over,
@@ -1003,8 +1016,7 @@ impl<'a> Runner<'a> {
             }
             let candidate = step.as_candidate(name);
             // Inside the store, so the copy is on the workspace's own
-            // filesystem and its files read back the same way (a mount that
-            // shows every file as executable shows the copy's so too).
+            // filesystem and its files read back the same way.
             let place = self.store.root().join("tmp").join(format!(
                 "candidate-{}-{}-{name}",
                 std::process::id(),
@@ -1015,13 +1027,14 @@ impl<'a> Runner<'a> {
                 root: place.clone(),
                 store: self.store,
                 candidate: Some(name.clone()),
+                origin: self.root.clone(),
                 baseline: self.baseline,
                 scope: RwLock::new(()),
             };
             let mut said = Vec::new();
             let (receipt, attempts) = match keying::copy_workspace(&self.root, &place, &candidate) {
                 Ok(()) => {
-                    let facts = keying::facts_of(&place, &candidate);
+                    let facts = runner.facts(&candidate);
                     let key = runner.step_key(&candidate, &facts, deps);
                     runner.attempt(&candidate, key, facts, deps.to_vec(), gate, stop, &mut said)?
                 }
@@ -1176,7 +1189,7 @@ impl<'a> Runner<'a> {
             }
             self.store.put_receipt(&receipt)?;
             earlier.push(receipt);
-            facts = keying::facts_of(&self.root, step);
+            facts = self.facts(step);
             step_key = self.step_key(step, &facts, &deps);
         }
     }
@@ -1618,7 +1631,7 @@ impl<'a> Runner<'a> {
         // Re-read what the step declared it reads. A step that edits its own
         // inputs leaves a receipt describing content that no longer exists; one
         // that edits its proof cannot have that proof vouch for it.
-        let after = keying::facts_of(&self.root, step);
+        let after = self.facts(step);
         let edited_inputs = keying::changed_paths(&facts.inputs, &after.inputs);
         if !edited_inputs.is_empty() {
             limitations.push(format!(
@@ -1656,7 +1669,7 @@ impl<'a> Runner<'a> {
                             let mut changed = self.changed_outputs(step, &produced.files);
                             changed.extend(keying::changed_paths(
                                 &after.verify_inputs,
-                                &keying::facts_of(&self.root, step).verify_inputs,
+                                &self.facts(step).verify_inputs,
                             ));
                             if changed.is_empty() {
                                 ProofOutcome::Ran(proof)

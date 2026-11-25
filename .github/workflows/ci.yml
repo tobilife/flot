@@ -37,6 +37,28 @@ jobs:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
       - run: cargo build && echo "$PWD/target/debug" >> "$GITHUB_PATH"
+      # Runs a trusted developer signed and pushed are reused, not executed
+      # again. The signers come from the base branch: a pull request must not
+      # choose whom CI trusts.
+      - name: Trust the signers on the base branch and pull their runs
+        env:
+          BASE: ${{ github.base_ref }}
+        run: |
+          set -euo pipefail
+          rev=HEAD
+          if [ -n "$BASE" ]; then
+            git fetch --no-tags --depth=1 origin "+refs/heads/${BASE}:refs/remotes/origin/${BASE}"
+            rev="origin/$BASE"
+          fi
+          if ! signers=$(git show "$rev:.github/flot-signers"); then
+            echo "::notice::no .github/flot-signers on $rev; every step runs here"
+            exit 0
+          fi
+          printf '%s\n' "$signers" | while read -r name key; do
+            case "$name" in ''|'#'*) continue ;; esac
+            flot trust add "$name" "$key"
+          done
+          flot pull --require-trusted || echo "::notice::flot pull refused some runs; their steps run here instead"
       - uses: ./
         with:
           version: path

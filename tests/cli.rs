@@ -2615,6 +2615,62 @@ inputs = ["answer"]
 run = "echo using $(cat answer)"
 "#;
 
+/// Where git does not trust the file system's executable bit (Windows, WSL's
+/// `/mnt` drives, where every file looks executable), a step is keyed by the
+/// bit git records, so its key matches a Linux or macOS checkout's.
+#[cfg(unix)]
+#[test]
+fn where_git_ignores_the_executable_bit_the_key_uses_the_recorded_one() {
+    use std::os::unix::fs::PermissionsExt;
+    let project = Project::new(&format!(
+        "{CANDIDATES}\n[[step]]\nid = \"plain\"\ninputs = [\"question\"]\nrun = \"true\"\n"
+    ));
+    project.write("question", "life\n");
+    project.write(".gitignore", ".flot/\n");
+    git_in(project.path(), &["init", "-q"]);
+    commit(project.path(), "start");
+    let key = |project: &Project| {
+        let plan = project.flot(&["--json", "plan"]).json();
+        let steps = plan["steps"].as_array().unwrap().clone();
+        let plain = steps
+            .iter()
+            .find(|step| step["step_id"] == "plain")
+            .unwrap();
+        plain["step_key"].as_str().unwrap().to_string()
+    };
+    let chmod = |mode: u32| {
+        for file in ["question", "flot.toml", ".gitignore"] {
+            std::fs::set_permissions(
+                project.path().join(file),
+                std::fs::Permissions::from_mode(mode),
+            )
+            .unwrap();
+        }
+    };
+    let checkout = key(&project);
+    // Trusted, the file system's bit keys the step.
+    chmod(0o777);
+    assert_ne!(key(&project), checkout);
+    // Not trusted, the recorded one does, as in the checkout.
+    git_in(project.path(), &["config", "core.fileMode", "false"]);
+    assert_eq!(key(&project), checkout);
+    git_in(project.path(), &["update-index", "--chmod=+x", "question"]);
+    assert_ne!(key(&project), checkout);
+    git_in(project.path(), &["update-index", "--chmod=-x", "question"]);
+    // A candidate's copy has no history: it is keyed by the workspace's, so
+    // the receipt it made is reused.
+    project
+        .flot(&["run"])
+        .ok()
+        .has("kept cheap")
+        .lacks("changed its own declared inputs");
+    project
+        .flot(&["run"])
+        .ok()
+        .has("cached   solve")
+        .lacks("kept");
+}
+
 #[test]
 fn candidates_run_apart_and_the_cheapest_that_holds_is_kept() {
     let project = Project::new(CANDIDATES);

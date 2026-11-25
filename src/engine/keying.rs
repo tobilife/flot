@@ -28,6 +28,49 @@ pub fn facts_of(root: &Path, step: &Step) -> Facts {
     facts_with(root, step, &[])
 }
 
+/// [`facts_of`] a copy of the project at `root`, such as a candidate's,
+/// with the executable bits `root`'s repository records: the copy has no
+/// history of its own, and its key must be the one `root` computes.
+pub fn facts_of_copy(copy: &Path, root: &Path, step: &Step) -> Facts {
+    let mut facts = facts_of(copy, step);
+    if let Some(modes) = recorded_modes(root) {
+        for file in facts
+            .inputs
+            .iter_mut()
+            .chain(facts.verify_inputs.iter_mut())
+        {
+            if let Some(executable) = modes.get(&file.path) {
+                file.executable = *executable;
+            }
+        }
+    }
+    facts
+}
+
+/// Whether git records each file it tracks under `root` as executable, when
+/// git does not trust the file system's executable bit (`core.fileMode` is
+/// false: on Windows, and on WSL's `/mnt` drives, where every file looks
+/// executable). There the recorded bit is the one a fresh checkout on Linux
+/// or macOS has, so a key computed here matches one computed there. `None`
+/// where the file system's bit stands, or where git cannot say.
+pub fn recorded_modes(root: &Path) -> Option<BTreeMap<String, bool>> {
+    let git = crate::engine::git::Git::open(root).ok()?;
+    if git.run(&["config", "--bool", "core.fileMode"], None).ok()? != "false" {
+        return None;
+    }
+    let listed = git.output(&["ls-files", "-s", "-z"], None, false).ok()?;
+    Some(
+        listed
+            .split(|&byte| byte == 0)
+            .filter_map(|entry| {
+                let entry = String::from_utf8_lossy(entry);
+                let (meta, path) = entry.split_once('\t')?;
+                Some((path.to_string(), meta.starts_with("100755 ")))
+            })
+            .collect(),
+    )
+}
+
 /// Like `facts_of`, as the files will be once `pending` are in place: files
 /// that are missing now but that reusing an upstream receipt will restore.
 /// `plan` needs this to predict what `run` will see.
@@ -174,6 +217,13 @@ pub fn scan_globs<E>(
 ) -> Result<Scan, E> {
     let mut files: BTreeMap<String, (String, bool)> = BTreeMap::new();
     let mut scan = Scan::default();
+    // What a step reads is keyed as git records it where git does not trust
+    // the file system; what it produces keeps the bit it was written with,
+    // which reuse restores.
+    let recorded = match reach {
+        Reach::Tracked => recorded_modes(root),
+        Reach::Everything => None,
+    };
     for pattern in patterns {
         let entries = match candidates(root, pattern, reach) {
             Ok(entries) => entries,
@@ -203,7 +253,11 @@ pub fn scan_globs<E>(
             }
             match std::fs::read(&entry) {
                 Ok(bytes) => {
-                    files.insert(relative, (keep(&bytes)?, is_executable(&entry)));
+                    let executable = recorded
+                        .as_ref()
+                        .and_then(|modes| modes.get(&relative).copied())
+                        .unwrap_or_else(|| is_executable(&entry));
+                    files.insert(relative, (keep(&bytes)?, executable));
                     matched += 1;
                 }
                 Err(error) => scan

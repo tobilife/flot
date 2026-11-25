@@ -4136,7 +4136,7 @@ name = "confined"
 
 [[step]]
 id = "inside"
-run = "echo a > src/a.txt; echo t > \"$TMPDIR/t\"; echo n > /dev/null"
+run = "echo a > src/a.txt; ln src/a.txt src/linked.txt; echo t > \"$TMPDIR/t\"; echo n > /dev/null"
 sandbox = { write = ["src"] }
 claims = ["src/a.txt was written"]
 verify = "grep -q a src/a.txt"
@@ -4195,9 +4195,10 @@ fn a_confined_step_writes_only_where_it_may() {
         // A host that does not let an unprivileged process have a network
         // namespace must not run the step at all; any other host must run it
         // offline.
-        if !run
-            .stdout
-            .contains("offline: could not run: its sandbox cannot be enforced here")
+        if cfg!(target_os = "macos")
+            || !run
+                .stdout
+                .contains("offline: could not run: its sandbox cannot be enforced here")
         {
             run.has("ran      offline              ok");
         }

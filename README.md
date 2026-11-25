@@ -60,7 +60,7 @@ It pays off when:
   `flot_run`, for $0.42.
 - **An agent loops: change, check, change again.** Steps whose inputs did not
   change are reused, so the check is cheap to repeat: this repository's gate
-  takes 16 s cold and 0.41 s when nothing changed. A step with `attempts = N`
+  takes 22 s cold and 0.45 s when nothing changed. A step with `attempts = N`
   runs again with what its proof said, until it holds: in a real run the
   check's failure output led Claude Code to a rule the spec never stated, on
   the second attempt, for $0.25.
@@ -165,28 +165,30 @@ This repository gates itself with flot ([`flot.toml`](flot.toml)):
 
 ```
 $ flot run --force
-ran      format               ok        183ms  claims 1v/0u/0r  receipt 7c8c480702e0
-ran      build                ok        876ms  claims 1v/0u/0r  receipt 2f5273d0f500
-ran      lint                 ok        816ms  claims 1v/0u/0r  receipt 48a64dd4723f
-ran      test                 ok        5657ms  claims 2v/0u/0r  receipt 3a0fd0619f68
-    complete output: flot log test 1795521673839-85aac97d67a6
+ran      format               ok        232ms  claims 1v/0u/0r  receipt d3932015a6a2
+ran      build                ok        4659ms  claims 1v/0u/0r  receipt 53b2255d9a34
+ran      lint                 ok        2325ms  claims 1v/0u/0r  receipt cd0187f4dcd0
+ran      test                 ok        5713ms  claims 2v/0u/0r  receipt cf91a5820103
+    complete output: flot log test 1795573222591-9db980a7b19e
 
-PASSED 1795521673839-85aac97d67a6  root 85aac97d67a6  16144ms
+PASSED 1795573222591-9db980a7b19e  root 9db980a7b19e  21568ms
 limitations:
-  - test: inline output trimmed to 2048 bytes per stream; complete streams are in the store
+  - proofs checked against origin/main (919b6dcb3a11)
 
 $ flot run     # nothing changed: receipts are reused and the root is identical
-cached   format               ok        183ms  claims 1v/0u/0r  receipt 7c8c480702e0
-cached   build                ok        876ms  claims 1v/0u/0r  receipt 2f5273d0f500
-cached   lint                 ok        816ms  claims 1v/0u/0r  receipt 48a64dd4723f
-cached   test                 ok        5657ms  claims 2v/0u/0r  receipt 3a0fd0619f68
+cached   format               ok        232ms  claims 1v/0u/0r  receipt d3932015a6a2
+cached   build                ok        4659ms  claims 1v/0u/0r  receipt 53b2255d9a34
+cached   lint                 ok        2325ms  claims 1v/0u/0r  receipt cd0187f4dcd0
+cached   test                 ok        5713ms  claims 2v/0u/0r  receipt cf91a5820103
 
-PASSED 1795521691818-85aac97d67a6  root 85aac97d67a6  412ms
+PASSED 1795573247834-9db980a7b19e  root 9db980a7b19e  454ms
+limitations:
+  - proofs checked against origin/main (919b6dcb3a11)
 ```
 
-Recorded with flot 0.2.2. The second run took 0.41 s instead of 16 s because
-all four receipts were reused; a reused step reports the duration it was
-recorded with and prints nothing else. Under each step that ran, flot also
+Recorded with a build of main after 0.2.4. The second run took 0.45 s
+instead of 22 s because all four receipts were reused; a reused step reports
+the duration it was recorded with and prints nothing else. Under each step that ran, flot also
 prints the first and last lines of its output, left out here; `flot log test`
 prints all of it.
 

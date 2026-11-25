@@ -53,7 +53,7 @@
   中，Claude Code 在新克隆的 `itoa` 仓库里拿到一个失败的流程，从记录的输出中找到失败的测试，
   修正了那个写错的数字，并从 `flot_run` 得到 `passed`，花费 $0.42。
 - **智能体在循环：修改、检查、再修改。** 输入没有变化的步骤会被复用，所以反复检查几乎没有
-  成本：本仓库的把关首次运行需要 16 秒，没有变化时只需 0.41 秒。设置了 `attempts = N` 的步骤
+  成本：本仓库的把关首次运行需要 22 秒，没有变化时只需 0.45 秒。设置了 `attempts = N` 的步骤
   会带着证明给出的失败信息重新运行，直到成立：在一次真实运行中，Claude Code 仅凭检查的失败输出
   找到了规格里没有写明的规则，第二次尝试通过，花费 $0.25。
 - **多个智能体处理同一个变更。** 审阅者在成本上限之下并发运行，并记录每一个的花费：在
@@ -140,26 +140,28 @@ flot show        # 最近一次运行的步骤、声明和局限
 
 ```
 $ flot run --force
-ran      format               ok        183ms  claims 1v/0u/0r  receipt 7c8c480702e0
-ran      build                ok        876ms  claims 1v/0u/0r  receipt 2f5273d0f500
-ran      lint                 ok        816ms  claims 1v/0u/0r  receipt 48a64dd4723f
-ran      test                 ok        5657ms  claims 2v/0u/0r  receipt 3a0fd0619f68
-    complete output: flot log test 1795521673839-85aac97d67a6
+ran      format               ok        232ms  claims 1v/0u/0r  receipt d3932015a6a2
+ran      build                ok        4659ms  claims 1v/0u/0r  receipt 53b2255d9a34
+ran      lint                 ok        2325ms  claims 1v/0u/0r  receipt cd0187f4dcd0
+ran      test                 ok        5713ms  claims 2v/0u/0r  receipt cf91a5820103
+    complete output: flot log test 1795573222591-9db980a7b19e
 
-PASSED 1795521673839-85aac97d67a6  root 85aac97d67a6  16144ms
+PASSED 1795573222591-9db980a7b19e  root 9db980a7b19e  21568ms
 limitations:
-  - test: inline output trimmed to 2048 bytes per stream; complete streams are in the store
+  - proofs checked against origin/main (919b6dcb3a11)
 
 $ flot run     # 没有任何变化：收据被复用，根摘要完全相同
-cached   format               ok        183ms  claims 1v/0u/0r  receipt 7c8c480702e0
-cached   build                ok        876ms  claims 1v/0u/0r  receipt 2f5273d0f500
-cached   lint                 ok        816ms  claims 1v/0u/0r  receipt 48a64dd4723f
-cached   test                 ok        5657ms  claims 2v/0u/0r  receipt 3a0fd0619f68
+cached   format               ok        232ms  claims 1v/0u/0r  receipt d3932015a6a2
+cached   build                ok        4659ms  claims 1v/0u/0r  receipt 53b2255d9a34
+cached   lint                 ok        2325ms  claims 1v/0u/0r  receipt cd0187f4dcd0
+cached   test                 ok        5713ms  claims 2v/0u/0r  receipt cf91a5820103
 
-PASSED 1795521691818-85aac97d67a6  root 85aac97d67a6  412ms
+PASSED 1795573247834-9db980a7b19e  root 9db980a7b19e  454ms
+limitations:
+  - proofs checked against origin/main (919b6dcb3a11)
 ```
 
-以上输出由 flot 0.2.2 记录。第二次运行复用了全部四份收据，用时 0.41 秒而不是 16 秒；
+以上输出由 0.2.4 之后的 main 构建记录。第二次运行复用了全部四份收据，用时 0.45 秒而不是 22 秒；
 被复用的步骤只显示记录时的耗时，不再打印其他内容。对于实际运行的步骤，flot 还会在那一行
 下面打印输出的开头和结尾几行，这里省略了；`flot log test` 可以打印完整输出。
 

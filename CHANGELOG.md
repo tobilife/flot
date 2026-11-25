@@ -8,6 +8,10 @@
   (redirections, cmdlets that change files and their aliases, `[IO.File]`
   methods, `Invoke-WebRequest -OutFile`, and downloaded code handed to
   `Invoke-Expression`).
+- A step whose inline output was trimmed no longer adds a limitation saying
+  so: trimming is how the output is shown, not a limit of the evidence, and
+  the `complete output: flot log ...` line under the step already says where
+  the rest is.
 
 ## 0.2.4
 

@@ -920,6 +920,9 @@ run = "yes flot | head -c 300"
     );
     let run = project.flot(&["run"]);
     run.ok();
+    // Trimming is how the output is shown, not a limit of the evidence: the
+    // hint says where the rest is, and no limitation repeats it.
+    run.lacks("trimmed");
     let hint = run
         .stdout
         .lines()

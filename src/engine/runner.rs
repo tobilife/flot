@@ -502,16 +502,6 @@ impl<'a> Runner<'a> {
             let cached = entry.cached;
             let mut step_limitations = receipt.identity.limitations.clone();
             step_limitations.extend(entry.notes.iter().cloned());
-            if !cached && (receipt.observed.stdout_truncated || receipt.observed.stderr_truncated) {
-                // A delivery choice, not a fact about the work, so it is said
-                // here and never sealed into the receipt.
-                step_limitations.push(format!(
-                    "inline output trimmed to {} bytes per stream; complete streams are in the store",
-                    self.flow
-                        .resolved_budget(self.flow.step(step_id).expect("validated step"))
-                        .max_inline_bytes
-                ));
-            }
             let counts = receipt.claim_counts();
             totals.add(counts);
             let mut attempts = Vec::new();

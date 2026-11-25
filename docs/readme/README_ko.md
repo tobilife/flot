@@ -56,8 +56,8 @@
   플로우를 받아, 기록된 출력에서 실패한 테스트를 찾고 잘못된 숫자 하나를 고쳐 `flot_run`에서
   `passed`를 받았습니다. 비용은 $0.42였습니다.
 - **에이전트가 고치고, 확인하고, 다시 고치는 반복을 할 때.** 입력이 바뀌지 않은 단계는
-  재사용되므로 확인을 반복해도 비용이 거의 없습니다. 이 저장소의 검증은 처음에는 16초, 바뀐
-  것이 없으면 0.41초 걸립니다. `attempts = N`인 단계는 증명이 남긴 실패 내용을 받아 통과할
+  재사용되므로 확인을 반복해도 비용이 거의 없습니다. 이 저장소의 검증은 처음에는 22초, 바뀐
+  것이 없으면 0.45초 걸립니다. `attempts = N`인 단계는 증명이 남긴 실패 내용을 받아 통과할
   때까지 다시 실행됩니다. 실제 실행에서 Claude Code는 검사의 실패 출력만 보고 명세에 없던
   규칙을 찾아 두 번째 시도에서 통과했고, 비용은 $0.25였습니다.
 - **에이전트 여러 개가 한 변경을 맡을 때.** 리뷰어들이 비용 상한 아래에서 동시에 실행되고,
@@ -151,27 +151,29 @@ flot show        # 최근 실행의 단계, 주장, 한계(limitation)
 
 ```
 $ flot run --force
-ran      format               ok        183ms  claims 1v/0u/0r  receipt 7c8c480702e0
-ran      build                ok        876ms  claims 1v/0u/0r  receipt 2f5273d0f500
-ran      lint                 ok        816ms  claims 1v/0u/0r  receipt 48a64dd4723f
-ran      test                 ok        5657ms  claims 2v/0u/0r  receipt 3a0fd0619f68
-    complete output: flot log test 1795521673839-85aac97d67a6
+ran      format               ok        232ms  claims 1v/0u/0r  receipt d3932015a6a2
+ran      build                ok        4659ms  claims 1v/0u/0r  receipt 53b2255d9a34
+ran      lint                 ok        2325ms  claims 1v/0u/0r  receipt cd0187f4dcd0
+ran      test                 ok        5713ms  claims 2v/0u/0r  receipt cf91a5820103
+    complete output: flot log test 1795573222591-9db980a7b19e
 
-PASSED 1795521673839-85aac97d67a6  root 85aac97d67a6  16144ms
+PASSED 1795573222591-9db980a7b19e  root 9db980a7b19e  21568ms
 limitations:
-  - test: inline output trimmed to 2048 bytes per stream; complete streams are in the store
+  - proofs checked against origin/main (919b6dcb3a11)
 
 $ flot run     # 바뀐 것이 없음: 영수증이 재사용되고 루트 다이제스트도 같음
-cached   format               ok        183ms  claims 1v/0u/0r  receipt 7c8c480702e0
-cached   build                ok        876ms  claims 1v/0u/0r  receipt 2f5273d0f500
-cached   lint                 ok        816ms  claims 1v/0u/0r  receipt 48a64dd4723f
-cached   test                 ok        5657ms  claims 2v/0u/0r  receipt 3a0fd0619f68
+cached   format               ok        232ms  claims 1v/0u/0r  receipt d3932015a6a2
+cached   build                ok        4659ms  claims 1v/0u/0r  receipt 53b2255d9a34
+cached   lint                 ok        2325ms  claims 1v/0u/0r  receipt cd0187f4dcd0
+cached   test                 ok        5713ms  claims 2v/0u/0r  receipt cf91a5820103
 
-PASSED 1795521691818-85aac97d67a6  root 85aac97d67a6  412ms
+PASSED 1795573247834-9db980a7b19e  root 9db980a7b19e  454ms
+limitations:
+  - proofs checked against origin/main (919b6dcb3a11)
 ```
 
-flot 0.2.2로 기록한 출력입니다. 두 번째 실행은 영수증 네 개를 모두 재사용해 16초가 아니라
-0.41초 걸렸고, 재사용된 단계는 기록될 때의 소요 시간만 보여 주고 다른 출력은 없습니다.
+0.2.4 이후 main 빌드로 기록한 출력입니다. 두 번째 실행은 영수증 네 개를 모두 재사용해 22초가
+아니라 0.45초 걸렸고, 재사용된 단계는 기록될 때의 소요 시간만 보여 주고 다른 출력은 없습니다.
 실행된 단계 아래에는 출력의 앞과 끝 몇 줄도 찍히는데 여기서는 생략했고, 전체는
 `flot log test`로 볼 수 있습니다.
 

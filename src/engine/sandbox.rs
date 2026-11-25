@@ -107,7 +107,6 @@ pub fn prepare(network: bool, write: Option<&[PathBuf]>, extra: &[PathBuf]) -> R
         mechanism.push("seatbelt file writes");
     }
     if !network {
-        profile.push_str("(deny network*)\n");
         mechanism.push("seatbelt network");
     }
     Ok(Prepared {

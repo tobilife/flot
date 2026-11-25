@@ -39,7 +39,13 @@ run id or of the root digest it ends with.
 and last lines of its output (the middle is marked as omitted when it exceeds
 `max_inline_bytes`) and, when something was left out, the `flot log` command
 that prints all of it. A reused step prints only its line; its output is still
-one `flot log` away. `flot show` points each failed step at its `flot log`.
+one `flot log` away. A step reused from an imported signed run ends its line
+with `vouched for by NAME`: the name this store trusts the signer under, when
+the store holds a run that signer signed that kept the same receipt for the
+step. Otherwise the signer's key is followed by `(not trusted here)`, once
+the trust list no longer holds it, or `(not confirmed here)`, when no such
+run is here. `flot show` and `flot verify` name signers the same way.
+`flot show` points each failed step at its `flot log`.
 
 ## Selecting a flow
 

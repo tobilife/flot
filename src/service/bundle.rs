@@ -439,6 +439,7 @@ pub fn import(store: &Store, bundle: &Bundle, policy: ImportPolicy) -> Result<Im
     // outcome, so only a signer this store trusts earns that, and only for as
     // long as it stays trusted: the entry records who vouched for it.
     let reusable = authorship == Authorship::Trusted;
+    let trusted = store.trusted_keys()?;
     let vouched_by: Vec<String> = signers
         .iter()
         .filter(|signer| signer.trusted_as.is_some())
@@ -461,10 +462,21 @@ pub fn import(store: &Store, bundle: &Bundle, policy: ImportPolicy) -> Result<Im
     }
     for step in &bundle.run.steps {
         let receipt = receipts[step.receipt_id.as_str()];
+        if !reusable || !receipt.is_reusable() {
+            continue;
+        }
         // Only what local work would remember, and never in place of an
-        // entry this store already relies on.
-        if reusable && receipt.is_reusable() && store.recall(&receipt.identity.step_key)?.is_none()
-        {
+        // entry this store still relies on: one this host's own work wrote,
+        // or one a signer it still trusts vouched for. An entry that only
+        // revoked signers vouched for is never reused, and kept, it would
+        // only stop a trusted signer's same work from being reused.
+        let relied_on = store
+            .recall(&receipt.identity.step_key)?
+            .is_some_and(|held| {
+                held.vouched_by.is_empty()
+                    || held.vouched_by.iter().any(|key| trusted.contains_key(key))
+            });
+        if !relied_on {
             store.remember(&receipt.identity.step_key, &receipt.receipt_id, &vouched_by)?;
         }
     }
@@ -872,6 +884,47 @@ verify = "grep -q flot artifact.txt"
             .limitations
             .iter()
             .any(|note| note.contains("no longer trusts")));
+    }
+
+    #[test]
+    fn an_entry_only_a_revoked_signer_vouched_for_gives_way_to_a_trusted_one() {
+        let (_alice_dir, alice_store, alice_run) = recorded();
+        let (_bob_dir, bob_store, bob_run) = recorded();
+        let target = tempfile::tempdir().unwrap();
+        let fresh = Store::open(target.path(), HostSecret::from_bytes([7; 32])).unwrap();
+        let flow = Flow::parse(FLOW).unwrap();
+        let run = || {
+            Runner::new(&flow, target.path(), &fresh)
+                .run(&RunOptions::default())
+                .unwrap()
+        };
+        trust(&fresh, &SIGNER, "alice");
+        import(
+            &fresh,
+            &signed(&alice_store, &alice_run, &SIGNER),
+            ImportPolicy::default(),
+        )
+        .unwrap();
+        assert!(run().steps[0].cached);
+
+        // Alice is revoked; Bob signed the same work.
+        fresh.save_trusted_keys(&BTreeMap::new()).unwrap();
+        trust(&fresh, &STRANGER, "bob");
+        import(
+            &fresh,
+            &signed(&bob_store, &bob_run, &STRANGER),
+            ImportPolicy::default(),
+        )
+        .unwrap();
+        let rerun = run();
+        assert!(
+            rerun.steps[0].cached,
+            "the trusted signer's receipt is reused"
+        );
+        assert_eq!(
+            rerun.manifest.steps[0].vouched_by,
+            vec![attest::public_key_of(&STRANGER)]
+        );
     }
 
     #[test]

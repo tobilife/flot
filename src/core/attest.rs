@@ -11,7 +11,7 @@
 //! the reader's decision, recorded in their own trust list; nothing here
 //! decides it.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 use ed25519_dalek::{Signature, Signer, SigningKey, VerifyingKey};
@@ -289,11 +289,116 @@ pub fn fingerprint(key: &str) -> String {
     )
 }
 
+/// The receipts signers vouched for, as far as a reader can check: each step
+/// of each run it holds, under every key whose attestation of that run holds.
+///
+/// A run records who vouched for a step it reused, but that record is only
+/// the run's word. The run CI executes is unsigned, so nothing covers it, and
+/// an imported run can name any key. Only a signature by the key itself over
+/// a run that kept the same receipt for the step confirms it.
+#[derive(Debug, Clone, Default)]
+pub struct Endorsements {
+    /// Signer key, step id, receipt id.
+    signed: BTreeSet<(String, String, String)>,
+}
+
+impl Endorsements {
+    /// Count the steps of `manifest` as endorsed by each key in
+    /// `attestations` whose signature over it holds. An attestation that does
+    /// not hold endorses nothing.
+    pub fn add(&mut self, attestations: &[Attestation], manifest: &RunManifest) {
+        for attestation in attestations {
+            if check(attestation, manifest).is_err() {
+                continue;
+            }
+            for step in &manifest.steps {
+                self.signed.insert((
+                    attestation.key.clone(),
+                    step.step_id.clone(),
+                    step.receipt_id.clone(),
+                ));
+            }
+        }
+    }
+
+    /// Whether `key` signed a run that kept `receipt_id` for `step_id`.
+    pub fn endorse(&self, key: &str, step_id: &str, receipt_id: &str) -> bool {
+        self.signed
+            .contains(&(key.to_string(), step_id.to_string(), receipt_id.to_string()))
+    }
+}
+
+/// A signer a run names for a step it reused from an imported run, judged by
+/// a reader. Whether to believe the signer is the reader's decision, and may
+/// change, so it is judged when the run is read, never recorded.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Voucher {
+    pub key: String,
+    /// Whether the reader holds a run this key signed that kept the same
+    /// receipt for the step.
+    pub confirmed: bool,
+    /// The name the reader trusts the key under, when it is confirmed.
+    pub trusted_as: Option<String>,
+}
+
+impl Voucher {
+    /// How a report names it: by its trusted name only when it is confirmed
+    /// and trusted, so neither a signer named without a signature nor a
+    /// revoked one ever reads as one this reader believes.
+    pub fn label(&self) -> String {
+        match (self.confirmed, &self.trusted_as) {
+            (false, _) => format!("{} (not confirmed here)", fingerprint(&self.key)),
+            (true, None) => format!("{} (not trusted here)", fingerprint(&self.key)),
+            (true, Some(name)) => name.clone(),
+        }
+    }
+}
+
+/// A step a run reused from an imported run, and who vouched for it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct VouchedStep {
+    pub step_id: String,
+    pub vouched_by: Vec<Voucher>,
+}
+
+/// The steps of `manifest` that name who vouched for them, in run order,
+/// with each signer confirmed by `endorsements` and named by `trusted`.
+pub fn vouched(
+    manifest: &RunManifest,
+    trusted: &BTreeMap<String, String>,
+    endorsements: &Endorsements,
+) -> Vec<VouchedStep> {
+    manifest
+        .steps
+        .iter()
+        .filter(|step| !step.vouched_by.is_empty())
+        .map(|step| VouchedStep {
+            step_id: step.step_id.clone(),
+            vouched_by: step
+                .vouched_by
+                .iter()
+                .map(|key| {
+                    let confirmed = endorsements.endorse(key, &step.step_id, &step.receipt_id);
+                    Voucher {
+                        key: key.clone(),
+                        confirmed,
+                        trusted_as: if confirmed {
+                            trusted.get(key).cloned()
+                        } else {
+                            None
+                        },
+                    }
+                })
+                .collect(),
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::core::metrics::Spend;
-    use crate::core::receipt::{ClaimCounts, Verdict};
+    use crate::core::receipt::{ClaimCounts, RunStep, StepStatus, Verdict};
 
     const SECRET: [u8; 32] = [7; 32];
     const OTHER: [u8; 32] = [9; 32];
@@ -471,6 +576,72 @@ mod tests {
         let mut other_kind = hand_over(&SECRET, &OTHER);
         other_kind.kind = "flot-key-handover-v0".into();
         assert_eq!(check_handover(&other_kind), Err(AttestError::NotAHandover));
+    }
+
+    fn reused(step_id: &str, receipt_id: &str, vouched_by: &[String]) -> RunStep {
+        RunStep {
+            step_id: step_id.into(),
+            receipt_id: receipt_id.into(),
+            status: StepStatus::Ok,
+            cached: true,
+            claims: ClaimCounts::default(),
+            observed_digest: String::new(),
+            attempts: Vec::new(),
+            candidates: Vec::new(),
+            vouched_by: vouched_by.to_vec(),
+        }
+    }
+
+    #[test]
+    fn a_signer_is_confirmed_only_by_a_run_it_signed_that_kept_the_same_receipt() {
+        let alice = public_key_of(&SECRET);
+        let stranger = public_key_of(&OTHER);
+        let mut signed = manifest("sha256:signed");
+        signed.steps = vec![reused("build", "sha256:r1", &[])];
+        let mut ci = manifest("sha256:ci");
+        ci.steps = vec![
+            reused("build", "sha256:r1", &[alice.clone(), stranger.clone()]),
+            // Alice signed this receipt for another step, and this step
+            // with another receipt: neither is what she vouched for.
+            reused("test", "sha256:r1", std::slice::from_ref(&alice)),
+        ];
+        let mut other_receipt = manifest("sha256:other");
+        other_receipt.steps = vec![reused("build", "sha256:r9", std::slice::from_ref(&alice))];
+        let trusted = BTreeMap::from([(alice.clone(), "alice".to_string())]);
+
+        // A run that names alice is not confirmed by naming her, nor by an
+        // attestation of hers that does not hold for the run it came with.
+        let mut endorsements = Endorsements::default();
+        endorsements.add(&[sign(&SECRET, &manifest("sha256:else"))], &signed);
+        let unconfirmed = vouched(&ci, &trusted, &endorsements);
+        assert_eq!(
+            unconfirmed[0].vouched_by[0],
+            Voucher {
+                key: alice.clone(),
+                confirmed: false,
+                trusted_as: None,
+            }
+        );
+        assert_eq!(
+            unconfirmed[0].vouched_by[0].label(),
+            format!("{} (not confirmed here)", fingerprint(&alice))
+        );
+
+        endorsements.add(&[sign(&SECRET, &signed)], &signed);
+        let judged = vouched(&ci, &trusted, &endorsements);
+        assert_eq!(judged.len(), 2);
+        assert_eq!(judged[0].vouched_by[0].label(), "alice");
+        assert!(!judged[0].vouched_by[1].confirmed, "{judged:?}");
+        assert!(!judged[1].vouched_by[0].confirmed, "{judged:?}");
+        let elsewhere = vouched(&other_receipt, &trusted, &endorsements);
+        assert!(!elsewhere[0].vouched_by[0].confirmed, "{elsewhere:?}");
+
+        // Confirmed, then no longer trusted: named by key, and said so.
+        let revoked = vouched(&ci, &BTreeMap::new(), &endorsements);
+        assert_eq!(
+            revoked[0].vouched_by[0].label(),
+            format!("{} (not trusted here)", fingerprint(&alice))
+        );
     }
 
     #[test]

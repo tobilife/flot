@@ -24,7 +24,7 @@ jobs:
       pull-requests: write   # for the comment
     steps:
       - uses: actions/checkout@v4
-      - uses: tobilife/flot@v0.2.4
+      - uses: tobilife/flot@v0.2.5
 ```
 
 The report goes to the job summary and, on a pull request, into one comment
@@ -124,6 +124,49 @@ The root is the signed run's. The first attempt reused nothing: on the
 executable there and as not executable in the clone. Inputs git tracks are
 now keyed by the bit git records where git does not trust the file system
 ([step keys](flows.md#step-keys)).
+
+CI does the same on `main`: in run
+[45541197932](https://github.com/tobilife/flot/actions/runs/45541197932), the
+`action` job printed `trusting ed25519:3a9f…97c9 as tobilife` (key shortened
+here), imported
+`1795577803940-a32a34000eec  root a32a34000eec  trusted  reusable` (and an
+older run, `1795534848392-65ee8029fb2c`), and printed all four steps as
+`cached`, then `PASSED 1795577843953-a32a34000eec  root a32a34000eec  120ms`:
+the root is the signed run's.
+
+CI's own run is unsigned, so its report reads `Authorship: unsigned`; it names
+who vouched for each step it reused, by the name the trust list gives the
+signer (real output: a project that trusts a key as `alice` imports a run
+signed with it, then runs):
+
+```text
+$ flot run
+cached   write                ok        11ms  claims 1v/0u/0r  receipt a139217922cb  vouched for by alice
+
+PASSED 1795582190590-413e607aac3c  root 413e607aac3c  12ms
+$ flot verify --markdown
+### flot: passed
+
+Run `1795582190590-413e607aac3c` of flow proven, root `413e607aac3c`; recorded verdict passed.
+
+- Integrity: intact
+- Authorship: unsigned
+- Reused from signed runs: 1 step(s), vouched for by alice
+- Claims: 1 verified, 0 unverified, 0 refuted
+
+| Step | Status | Claim | |
+|---|---|---|---|
+| `write` | ok, reused, vouched for by alice | artifact\.txt contains flot | verified |
+```
+
+`flot show` and `flot verify` name the signer too. The run records only the
+signer's key, and CI's run is unsigned, so nothing covers that record: a
+signer is named only when the store also holds a run the signer signed that
+kept the same receipt for the step, here the pulled run, and only while the
+trust list still holds the key. Otherwise the key is shown and marked, as in
+`vouched for by ed25519:a4929b56a758611c (not trusted here)` once the signer
+was removed, or `vouched for by ed25519:343ff0b6dc243ffa (not confirmed here)`
+for a run that names a signer whose signature this store does not hold.
 
 `flot verify` checks runs executed on the host it runs on, so CI runs the flow
 after the pull, and that run is what it verifies; a pulled run alone is named

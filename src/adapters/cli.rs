@@ -12,7 +12,7 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use serde::Serialize;
 
-use crate::core::attest::{self, Authorship, SignerCheck};
+use crate::core::attest::{self, Authorship, SignerCheck, VouchedStep, Voucher};
 use crate::core::compare::RunDiff;
 use crate::core::digest;
 use crate::core::receipt::{ClaimStatus, RunManifest, StepStatus, Verdict};
@@ -1386,7 +1386,7 @@ fn render_run(report: &RunReport) {
             "ran"
         };
         say!(
-            "{:<8} {:<20} {:<9} {}ms  claims {}v/{}u/{}r  receipt {}{}{}",
+            "{:<8} {:<20} {:<9} {}ms  claims {}v/{}u/{}r  receipt {}{}{}{}",
             mode,
             step.step_id,
             step.status.label(),
@@ -1403,7 +1403,10 @@ fn render_run(report: &RunReport) {
                 format!("  attempt {}", step.attempts)
             } else {
                 String::new()
-            }
+            },
+            vouched_of(&report.vouched, &step.step_id)
+                .map(vouched_suffix)
+                .unwrap_or_default()
         );
         for output in &step.outputs {
             say!("    > {}  {}", output.path, digest::short(&output.digest));
@@ -1549,11 +1552,14 @@ fn render_detail(detail: &RunDetail) {
     );
     for step in &manifest.steps {
         say!(
-            "  {:<20} {:<9} {}  receipt {}",
+            "  {:<20} {:<9} {}  receipt {}{}",
             step.step_id,
             step.status.label(),
             if step.cached { "cached" } else { "ran   " },
-            digest::short(&step.receipt_id)
+            digest::short(&step.receipt_id),
+            vouched_of(&detail.vouched, &step.step_id)
+                .map(vouched_suffix)
+                .unwrap_or_default()
         );
         for (number, attempt) in step.attempts.iter().enumerate() {
             say!(
@@ -1647,6 +1653,43 @@ fn render_audit(audit: &Audit) {
         }
     }
     render_authorship(audit.authorship, &audit.signers);
+    if !audit.vouched.is_empty() {
+        say!("reused from signed runs: {} step(s)", audit.vouched.len());
+        for step in &audit.vouched {
+            say!(
+                "  - {}: vouched for by {}",
+                step.step_id,
+                named(&step.vouched_by)
+            );
+        }
+    }
+}
+
+/// The signers a reused step rests on, as a report names them.
+fn named(vouched_by: &[Voucher]) -> String {
+    vouched_by
+        .iter()
+        .map(Voucher::label)
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// What a step line ends with when its receipt came from an imported run:
+/// nothing for work this host did.
+fn vouched_suffix(vouched_by: &[Voucher]) -> String {
+    if vouched_by.is_empty() {
+        String::new()
+    } else {
+        format!("  vouched for by {}", named(vouched_by))
+    }
+}
+
+/// Who vouched for `step_id`, when the run reused it from an imported run.
+fn vouched_of<'v>(vouched: &'v [VouchedStep], step_id: &str) -> Option<&'v [Voucher]> {
+    vouched
+        .iter()
+        .find(|step| step.step_id == step_id)
+        .map(|step| step.vouched_by.as_slice())
 }
 
 /// Up to 20 paths, and how many more there are.
@@ -1742,6 +1785,22 @@ fn markdown_report(audit: &Audit, detail: &RunDetail) -> String {
         }
     }
     let _ = writeln!(out, "- Authorship: {}", audit.authorship.label());
+    if !audit.vouched.is_empty() {
+        // Each signer once, in the order the steps name them.
+        let mut signers: Vec<String> = Vec::new();
+        for signer in audit.vouched.iter().flat_map(|step| &step.vouched_by) {
+            let label = signer.label();
+            if !signers.contains(&label) {
+                signers.push(label);
+            }
+        }
+        let _ = writeln!(
+            out,
+            "- Reused from signed runs: {} step(s), vouched for by {}",
+            audit.vouched.len(),
+            md(&signers.join(", "))
+        );
+    }
     let counts = manifest.claims;
     let _ = writeln!(
         out,
@@ -1780,9 +1839,12 @@ fn markdown_report(audit: &Audit, detail: &RunDetail) -> String {
     let _ = writeln!(out, "\n| Step | Status | Claim | |\n|---|---|---|---|");
     for step in &manifest.steps {
         let status = format!(
-            "{}{}",
+            "{}{}{}",
             step.status.label(),
-            if step.cached { ", reused" } else { "" }
+            if step.cached { ", reused" } else { "" },
+            vouched_of(&audit.vouched, &step.step_id)
+                .map(|vouched_by| format!(", vouched for by {}", md(&named(vouched_by))))
+                .unwrap_or_default()
         );
         let claims = detail.step_claims.get(&step.step_id);
         match claims.filter(|claims| !claims.is_empty()) {

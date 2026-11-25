@@ -3,7 +3,7 @@
 use anyhow::Result;
 use serde::Serialize;
 
-use crate::core::attest::{self, Authorship, SignerCheck};
+use crate::core::attest::{self, Authorship, Endorsements, SignerCheck, VouchedStep};
 use crate::core::digest;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -23,6 +23,11 @@ pub struct Audit {
     /// Who vouched for this run, judged against this store's trust list.
     pub authorship: Authorship,
     pub signers: Vec<SignerCheck>,
+    /// Steps the run reused from imported runs, with who vouched for each,
+    /// as [`vouched`] judges them. The run is unsigned when CI reuses a
+    /// developer's signed run; this says whose word it rests on.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub vouched: Vec<VouchedStep>,
     /// How the run's proofs compare with a revision, when checked against one.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub anchor: Option<Anchor>,
@@ -178,6 +183,37 @@ pub fn audit(store: &Store, manifest: &RunManifest) -> Result<Audit> {
         findings,
         authorship,
         signers,
+        vouched: vouched(store, manifest)?,
         anchor: None,
     })
+}
+
+/// Who vouched for each step `manifest` reused from an imported run. The
+/// signers a run records for a step are its own word, which nothing covers in
+/// an unsigned run and which an imported run can make up. So a signer counts
+/// as confirmed only when this store holds a run the signer validly signed
+/// that kept the same receipt for the step, and is named only when this
+/// store also trusts it. A run that names no signer reads nothing.
+pub fn vouched(store: &Store, manifest: &RunManifest) -> Result<Vec<VouchedStep>> {
+    if manifest.steps.iter().all(|step| step.vouched_by.is_empty()) {
+        return Ok(Vec::new());
+    }
+    let mut endorsements = Endorsements::default();
+    for run_id in store.list_runs()? {
+        // A record that cannot be read confirms nothing.
+        let Ok(attestations) = store.attestations(&run_id) else {
+            continue;
+        };
+        if attestations.is_empty() {
+            continue;
+        }
+        if let Ok(signed) = store.resolve_run(&run_id) {
+            endorsements.add(&attestations, &signed);
+        }
+    }
+    Ok(attest::vouched(
+        manifest,
+        &store.trusted_keys()?,
+        &endorsements,
+    ))
 }

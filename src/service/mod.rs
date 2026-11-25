@@ -138,6 +138,10 @@ pub struct RunDetail {
     /// Claims by step id. A step whose receipt is unreadable or does not
     /// authenticate is absent here; `verify` reports why.
     pub step_claims: BTreeMap<String, Vec<ClaimRecord>>,
+    /// Steps the run reused from imported runs, with who vouched for each,
+    /// as [`audit::vouched`] judges them now.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub vouched: Vec<attest::VouchedStep>,
 }
 
 /// Recorded runs, newest first, and the ones that could not be read.
@@ -476,9 +480,11 @@ impl Workspace {
         let flow = self.flow()?;
         let store = self.store()?;
         let baseline = self.baseline(Some(&flow), options.proofs_from.as_deref())?;
-        Runner::new(&flow, &self.root, &store)
+        let mut report = Runner::new(&flow, &self.root, &store)
             .with_baseline(baseline.as_ref())
-            .run(options)
+            .run(options)?;
+        report.vouched = audit::vouched(&store, &report.manifest)?;
+        Ok(report)
     }
 
     /// The revision proofs must match: `named`, else the committed flow's
@@ -529,10 +535,12 @@ impl Workspace {
                     .map(|receipt| (step.step_id.clone(), receipt.identity.claims))
             })
             .collect();
+        let vouched = audit::vouched(&store, &manifest)?;
         Ok(RunDetail {
             imported: store.is_imported(&manifest.run_id),
             manifest,
             step_claims,
+            vouched,
         })
     }
 

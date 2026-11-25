@@ -110,6 +110,7 @@ mod tests {
             status,
             cached: false,
             claims: ClaimCounts::default(),
+            vouched_by: Vec::new(),
         }
     }
 

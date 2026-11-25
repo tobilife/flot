@@ -18,6 +18,7 @@ use std::time::Duration;
 use anyhow::{bail, Context, Result};
 use serde::Serialize;
 
+use crate::core::attest::VouchedStep;
 use crate::core::digest;
 use crate::core::flow::{Flow, Step};
 use crate::core::metrics::{self, Metrics, Spend};
@@ -32,7 +33,7 @@ use crate::engine::exec;
 use crate::engine::keying::{self, Facts};
 use crate::engine::sandbox;
 use crate::engine::scheduler;
-use crate::store::Store;
+use crate::store::{Recalled, Store};
 
 #[derive(Debug, Clone, Default)]
 pub struct RunOptions {
@@ -80,6 +81,11 @@ pub struct StepReport {
 pub struct RunReport {
     pub manifest: RunManifest,
     pub steps: Vec<StepReport>,
+    /// Who vouched for each step reused from an imported run. The runner
+    /// leaves it empty: the service judges the signers the manifest records
+    /// against the store's attestations and trust list, as `show` does.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub vouched: Vec<VouchedStep>,
 }
 
 /// Predicted execution plan without side effects.
@@ -119,6 +125,8 @@ struct Work<'f> {
 struct Settled {
     receipt: Receipt,
     cached: bool,
+    /// The signers a reused receipt from an imported run rests on.
+    vouched_by: Vec<String>,
     /// What reusing the receipt changed in the workspace. Not part of the
     /// receipt, which describes the step, not this run of it.
     notes: Vec<String>,
@@ -258,12 +266,15 @@ impl<'a> Runner<'a> {
     /// content, and both overwriting the change and keeping it under that
     /// receipt would leave a verdict about files that are not there. A missing
     /// output is fine; reuse restores it.
+    ///
+    /// An imported receipt comes with its signers, so the run can record
+    /// whose word stands in for the work.
     fn recall(
         &self,
         step: &Step,
         step_key: &str,
         notes: &mut Vec<String>,
-    ) -> Result<Option<Receipt>> {
+    ) -> Result<Option<Recalled>> {
         let Some(recalled) = self.store.recall(step_key)? else {
             return Ok(None);
         };
@@ -283,7 +294,7 @@ impl<'a> Runner<'a> {
                 return Ok(None);
             }
         }
-        let known = recalled.receipt;
+        let known = &recalled.receipt;
         // The key covers the claims; this guards the reuse decision itself.
         let claimed: Vec<&str> = known
             .identity
@@ -349,7 +360,7 @@ impl<'a> Runner<'a> {
                 }
             }
         }
-        Ok(Some(known))
+        Ok(Some(recalled))
     }
 
     fn step_env(&self, step: &Step) -> BTreeMap<String, String> {
@@ -402,6 +413,7 @@ impl<'a> Runner<'a> {
                         None
                     } else {
                         self.best_cached_candidate(step, &deps, &pending, &mut limitations)
+                            .map(|recalled| recalled.receipt)
                     };
                     (
                         reusable
@@ -424,6 +436,7 @@ impl<'a> Runner<'a> {
                                 ));
                                 None
                             })
+                            .map(|recalled| recalled.receipt)
                     };
                     (Some(key), reusable)
                 }
@@ -621,6 +634,7 @@ impl<'a> Runner<'a> {
                 observed_digest: self.store.put_observation(&receipt.observed)?,
                 attempts,
                 candidates,
+                vouched_by: entry.vouched_by.clone(),
             });
             reports.push(StepReport {
                 step_id: step_id.clone(),
@@ -732,6 +746,7 @@ impl<'a> Runner<'a> {
         Ok(RunReport {
             manifest,
             steps: reports,
+            vouched: Vec::new(),
         })
     }
 
@@ -804,6 +819,7 @@ impl<'a> Runner<'a> {
         let mut notes = Vec::new();
         let mut attempts = Vec::new();
         let mut candidates = Vec::new();
+        let mut vouched_by = Vec::new();
 
         let (receipt, cached) = if options.stop.is_set() {
             limitations.push("not run: flot was asked to stop".into());
@@ -848,7 +864,8 @@ impl<'a> Runner<'a> {
         } {
             // Reuse costs nothing, so the ceiling never blocks a cache hit.
             notes.extend(restored);
-            (known, true)
+            vouched_by = known.vouched_by;
+            (known.receipt, true)
         } else if let Some(gate) =
             gate.filter(|gate| gate.spent_micro_usd >= gate.ceiling_micro_usd)
         {
@@ -909,14 +926,17 @@ impl<'a> Runner<'a> {
 
         self.store.put_receipt(&receipt)?;
         // Only reusable work may answer for this key. A cancelled or failed
-        // attempt must not displace a success recorded earlier.
+        // attempt must not displace a success recorded earlier. A reused
+        // import is remembered with its signers again: remembered as this
+        // host's work, it would outlive their trust and read as local work.
         if receipt.is_reusable() {
             self.store
-                .remember(&receipt.identity.step_key, &receipt.receipt_id, &[])?;
+                .remember(&receipt.identity.step_key, &receipt.receipt_id, &vouched_by)?;
         }
         Ok(Settled {
             receipt,
             cached,
+            vouched_by,
             notes,
             attempts,
             candidates,
@@ -930,10 +950,10 @@ impl<'a> Runner<'a> {
         step: &Step,
         deps: &[DepRef],
         notes: &mut Vec<String>,
-    ) -> Option<(Receipt, Vec<String>)> {
-        let receipt = self.best_cached_candidate(step, deps, &[], notes)?;
-        match self.restore_outputs(&receipt) {
-            Ok(restored) => Some((receipt, restored)),
+    ) -> Option<(Recalled, Vec<String>)> {
+        let recalled = self.best_cached_candidate(step, deps, &[], notes)?;
+        match self.restore_outputs(&recalled.receipt) {
+            Ok(restored) => Some((recalled, restored)),
             Err(error) => {
                 notes.push(format!(
                     "cached receipt not reused: {error:#}; the step runs again"
@@ -951,7 +971,7 @@ impl<'a> Runner<'a> {
         deps: &[DepRef],
         pending: &[FileDigest],
         notes: &mut Vec<String>,
-    ) -> Option<Receipt> {
+    ) -> Option<Recalled> {
         let mut misses = Vec::new();
         let mut known = Vec::new();
         for name in &step.candidates {
@@ -959,7 +979,7 @@ impl<'a> Runner<'a> {
             let facts = keying::facts_with(&self.root, &candidate, pending);
             let key = self.step_key(&candidate, &facts, deps);
             match self.recall(&candidate, &key, &mut misses) {
-                Ok(Some(receipt)) => known.push(receipt),
+                Ok(Some(recalled)) => known.push(recalled),
                 Ok(None) => {}
                 Err(error) => misses.push(format!(
                     "cached receipt of candidate {name} not reused: {error:#}"
@@ -967,11 +987,12 @@ impl<'a> Runner<'a> {
             }
         }
         let best = (0..known.len()).min_by_key(|&index| {
-            let cost = known[index]
+            let receipt = &known[index].receipt;
+            let cost = receipt
                 .observed
                 .metrics
                 .and_then(|metrics| metrics.cost_micro_usd);
-            (candidate_rank(&known[index], cost), index)
+            (candidate_rank(receipt, cost), index)
         });
         let Some(best) = best else {
             // Another candidate's outputs on disk are expected to refuse a
@@ -1272,7 +1293,7 @@ impl<'a> Runner<'a> {
         step: &Step,
         step_key: &str,
         limitations: &mut Vec<String>,
-    ) -> Option<(Receipt, Vec<String>)> {
+    ) -> Option<(Recalled, Vec<String>)> {
         let known = match self.recall(step, step_key, limitations) {
             Ok(known) => known?,
             Err(error) => {
@@ -1282,7 +1303,7 @@ impl<'a> Runner<'a> {
                 return None;
             }
         };
-        match self.restore_outputs(&known) {
+        match self.restore_outputs(&known.receipt) {
             Ok(notes) => Some((known, notes)),
             Err(error) => {
                 limitations.push(format!(

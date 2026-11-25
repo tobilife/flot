@@ -20,7 +20,7 @@
 
 <code>cargo install flot-cli</code>
 
-Latest release **0.2.4**: proofs that must fail before the change, changes no step read, flaky proofs, a guard that reads shell commands and records what it refused, credentials kept out of shared runs, `flot doctor`, and attested release archives · [changelog](CHANGELOG.md)
+Latest release **0.2.5**: a guard that reads PowerShell commands, steps confined on macOS, step keys that match across Windows and Linux checkouts, CI that reuses a developer's signed run, and reports that name who vouched for each reused step · [changelog](CHANGELOG.md)
 
 </div>
 
@@ -268,7 +268,8 @@ budgets, concurrency, outputs, guarded proofs, scope and sandbox.
 - **Evidence that travels.** `flot run --sign` signs each run as it is
   recorded, and `flot bundle` produces one file a reviewer can import and
   verify. Imported receipts stand in for local work only when a
-  signer the reviewer trusts signed them, and only while that trust lasts.
+  signer the reviewer trusts signed them, and only while that trust lasts;
+  reports name the signer who vouched for each step reused this way.
   A new key comes with a handover both keys sign (`flot key rotate`), which
   readers follow with `flot trust rotate`.
 - **Bounded runs.** Timeouts and output limits stop work and say so; a cost

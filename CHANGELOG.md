@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.5
 
 - The guard reads PowerShell: the Claude Code hook now covers the
   `PowerShell` tool, `flot guard --replay` judges its calls, and
@@ -20,6 +20,30 @@
   copy is keyed by the workspace's records too.
 - This repository's CI trusts the signers in `.github/flot-signers` on the
   base branch, pulls their runs and reuses them; `docs/ci.md` shows how.
+- Reports name who vouched for a step reused from an imported signed run.
+  The run records the signers' keys on the step (`vouched_by`); `flot run`
+  and `flot show` end the step's line with `vouched for by NAME`,
+  `flot verify` lists such steps, and `flot verify --markdown` marks the step
+  `ok, reused, vouched for by NAME` and adds a line
+  `Reused from signed runs: N step(s), vouched for by NAME`; `--json` of
+  `run`, `show` and `verify` carries them as `vouched`. That record is the
+  run's own word, and CI's run is unsigned, so a signer is named only when
+  this store holds a run the signer validly signed that kept the same receipt
+  for the step, and only while the trust list holds the key. Otherwise the
+  key reads `ed25519:<first 16 hex> (not confirmed here)` or
+  `(not trusted here)`. A run that names signers for a step it did not
+  reuse, a key twice, or a key not spelled as flot writes keys does not
+  authenticate.
+- Reusing an imported receipt no longer remembers it as this host's own
+  work: its cache entry keeps the signers, so removing a signer from the trust
+  list stops the reuse on later runs too, not only on the first. Every
+  earlier release did; an entry one wrote this way has no signers and is
+  still reused as this host's work after its signer is removed. Run
+  `flot run --force` once after removing a signer: each step that passes
+  replaces its entry with this host's own result.
+- An import replaces a cache entry that only signers this store no longer
+  trusts vouched for, so a trusted signer's run of the same work is reused
+  instead of being executed again.
 - A step whose inline output was trimmed no longer adds a limitation saying
   so: trimming is how the output is shown, not a limit of the evidence, and
   the `complete output: flot log ...` line under the step already says where

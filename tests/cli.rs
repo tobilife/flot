@@ -1009,6 +1009,122 @@ fn a_trusted_signer_is_named_on_import_and_on_every_later_verify() {
 }
 
 #[test]
+fn every_report_names_who_vouched_for_a_step_reused_from_a_signed_run() {
+    let source = Project::new(PROVEN);
+    let key = public_key(&source);
+    let bundle = signed_bundle(&source);
+    // A host reusing its own work names no one.
+    source
+        .flot(&["run"])
+        .ok()
+        .has("cached   write")
+        .lacks("vouched for");
+    let own = source.flot(&["show", "--json"]).json();
+    assert!(own["steps"][0].get("vouched_by").is_none(), "{own}");
+    source
+        .flot(&["verify", "--markdown"])
+        .ok()
+        .has("| `write` | ok, reused |")
+        .lacks("vouched for")
+        .lacks("Reused from signed runs");
+
+    // CI's run is unsigned; its reports still say whose word a step rests on.
+    let target = Project::new(PROVEN);
+    target.write("seed.txt", "one");
+    target.flot(&["trust", "add", "alice", &key]).ok();
+    target
+        .flot(&["import", "--require-trusted", bundle.to_str().unwrap()])
+        .ok();
+    target
+        .flot(&["run"])
+        .ok()
+        .has("cached   write")
+        .has("vouched for by alice");
+    let shown = target.flot(&["show", "--json"]).json();
+    assert_eq!(shown["steps"][0]["vouched_by"][0], key.as_str(), "{shown}");
+    let run = shown["run_id"].as_str().unwrap().to_string();
+    target
+        .flot(&["verify", "--markdown"])
+        .ok()
+        .has("- Authorship: unsigned\n- Reused from signed runs: 1 step(s), vouched for by alice\n")
+        .has("| `write` | ok, reused, vouched for by alice |");
+    let audit = target.flot(&["verify", "--json"]).json();
+    assert_eq!(audit["vouched"][0]["step_id"], "write", "{audit}");
+    assert_eq!(audit["vouched"][0]["vouched_by"][0]["trusted_as"], "alice");
+    assert_eq!(audit["vouched"][0]["vouched_by"][0]["confirmed"], true);
+
+    // Once alice is no longer trusted, the recorded run names her key as
+    // such, and the next run executes the step instead of reusing it.
+    target.flot(&["trust", "remove", "alice"]).ok();
+    let revoked = format!("vouched for by {} (not trusted here)", &key[..24]);
+    target.flot(&["show", &run]).ok().has(&revoked);
+    target
+        .flot(&["verify", &run])
+        .ok()
+        .has(&format!("  - write: {revoked}"));
+    target.flot(&["run"]).ok().has("ran      write");
+}
+
+#[test]
+fn a_signer_a_run_names_without_their_signature_is_not_confirmed() {
+    let alice = Project::new(PROVEN);
+    let key = public_key(&alice);
+    let mallory = Project::new(PROVEN);
+    mallory.write("seed.txt", "one");
+    mallory.flot(&["run"]).ok();
+    mallory.flot(&["run"]).ok().has("cached   write");
+    let path = mallory.path().join("forged.flotbundle.json");
+    // Mallory's own run, edited to say alice vouched for its step.
+    let forge = |run: &str| {
+        mallory
+            .flot(&["bundle", run, "-o", path.to_str().unwrap()])
+            .ok();
+        let mut bundle: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        bundle["run"]["steps"][0]["vouched_by"] = serde_json::json!([key]);
+        std::fs::write(&path, bundle.to_string()).unwrap();
+    };
+    let target = Project::new(PROVEN);
+    target.flot(&["trust", "add", "alice", &key]).ok();
+
+    // A step the run executed rests on no one's word.
+    forge("latest~1");
+    let refused = target.flot(&["import", path.to_str().unwrap()]);
+    assert_eq!(refused.code, 1, "{}", refused.stdout);
+    refused.has("names signers who vouched for it, but the step was not reused");
+
+    // A reused one may name anyone; only alice's signature would confirm it.
+    forge("latest");
+    target.flot(&["import", path.to_str().unwrap()]).ok();
+    let run = run_id(&mallory);
+    let unconfirmed = format!("vouched for by {} (not confirmed here)", &key[..24]);
+    target
+        .flot(&["show", &run])
+        .ok()
+        .has(&unconfirmed)
+        .lacks("vouched for by alice");
+    target
+        .flot(&["verify", &run])
+        .ok()
+        .has(&format!("  - write: {unconfirmed}"))
+        .lacks("vouched for by alice");
+    target
+        .flot(&["verify", "--markdown", &run])
+        .ok()
+        .has(&format!(
+            "| `write` | ok, reused, vouched for by {} \\(not confirmed here\\) |",
+            &key[..24]
+        ))
+        .lacks("vouched for by alice");
+    let audit = target.flot(&["verify", "--json", &run]).json();
+    assert_eq!(audit["vouched"][0]["vouched_by"][0]["confirmed"], false);
+    assert_eq!(
+        audit["vouched"][0]["vouched_by"][0]["trusted_as"],
+        serde_json::Value::Null
+    );
+}
+
+#[test]
 fn require_trusted_refuses_an_unknown_signer_and_leaves_nothing_behind() {
     let source = Project::new(PROVEN);
     public_key(&source);
@@ -2693,6 +2809,39 @@ fn where_git_ignores_the_executable_bit_the_key_uses_the_recorded_one() {
         .ok()
         .has("cached   solve")
         .lacks("kept");
+}
+
+#[test]
+fn a_candidate_reused_from_a_signed_run_stays_its_signers_after_the_run() {
+    let source = Project::new(CANDIDATES);
+    source.write("question", "life\n");
+    let key = public_key(&source);
+    source.flot(&["run"]).ok().has("kept cheap");
+    let bundle = source.path().join("signed.flotbundle.json");
+    source
+        .flot(&["bundle", "--sign", "-o", bundle.to_str().unwrap()])
+        .ok();
+
+    let target = Project::new(CANDIDATES);
+    target.write("question", "life\n");
+    target.flot(&["trust", "add", "alice", &key]).ok();
+    target
+        .flot(&["import", "--require-trusted", bundle.to_str().unwrap()])
+        .ok();
+    target
+        .flot(&["run"])
+        .ok()
+        .has("cached   solve")
+        .has("candidate cheap  vouched for by alice");
+    // The run that reused alice's candidate remembered it as hers, so
+    // revoking her stops the reuse on the next run too.
+    target.flot(&["trust", "remove", "alice"]).ok();
+    target
+        .flot(&["run"])
+        .ok()
+        .has("ran      solve")
+        .has("kept cheap")
+        .lacks("cached   solve");
 }
 
 #[test]

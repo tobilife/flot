@@ -86,7 +86,15 @@ place of a cache entry the store already relies on. An unsigned or untrusted
 bundle is evidence to inspect and verify, and local runs execute as if it were
 not there. A cache entry seeded by an import remembers who vouched for it and
 is honored only while one of them is still trusted: removing a signer also
-stops reuse of what they signed.
+stops reuse of what they signed. A run that reuses such a receipt records the
+signers on the step (`vouched_by`). That record is the run's word, which no
+signature covers when the run is unsigned, so `flot run`, `flot show` and
+`flot verify` name a signer only when the store holds a run the signer
+validly signed that kept the same receipt for the step, and only while the
+trust list holds the key. Otherwise they show the key marked
+`(not confirmed here)` or `(not trusted here)`. An import replaces an entry
+that only signers no longer trusted vouched for, so a trusted signer's run of
+the same work is reused.
 
 An imported run is marked `(imported)` in `flot runs` and `flot show`, is never
 `latest`, and is never re-signed by this host: `flot bundle --sign` on it is

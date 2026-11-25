@@ -397,6 +397,11 @@ pub struct RunStep {
     /// candidates. The step's receipt is the kept candidate's.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub candidates: Vec<RunCandidate>,
+    /// Signer keys of the imported run the reused receipt came from: whose
+    /// word stands in for the work here. Empty when this host executed the
+    /// step, or reused a receipt it executed itself.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub vouched_by: Vec<String>,
 }
 
 /// An attempt at a step that did not hold, kept as evidence of what it took.
@@ -514,6 +519,32 @@ impl RunManifest {
             }
             if !seen.insert(step.step_id.as_str()) {
                 found.push(format!("step `{}` appears more than once", step.step_id));
+            }
+            // Only a reused receipt rests on someone else's word, and a
+            // signer is named once, spelled as flot spells keys, so a report
+            // can match it against attestations and the trust list.
+            if !step.vouched_by.is_empty() && !step.cached {
+                found.push(format!(
+                    "{}: names signers who vouched for it, but the step was not reused",
+                    step.step_id
+                ));
+            }
+            let mut signers = std::collections::BTreeSet::new();
+            for key in &step.vouched_by {
+                if crate::core::attest::canonical_key(key).ok().as_deref() != Some(key.as_str()) {
+                    found.push(format!(
+                        "{}: `{}` is not a signer key as flot writes one",
+                        step.step_id,
+                        crate::core::attest::fingerprint(key)
+                    ));
+                }
+                if !signers.insert(key.as_str()) {
+                    found.push(format!(
+                        "{}: signer {} is named more than once",
+                        step.step_id,
+                        crate::core::attest::fingerprint(key)
+                    ));
+                }
             }
             let Some(receipt) = receipts.get(step.receipt_id.as_str()) else {
                 found.push(format!(
@@ -866,6 +897,7 @@ mod tests {
             status,
             cached: false,
             claims,
+            vouched_by: Vec::new(),
         }
     }
 
@@ -1070,6 +1102,7 @@ mod tests {
             claims: receipt.claim_counts(),
             attempts: Vec::new(),
             candidates: Vec::new(),
+            vouched_by: Vec::new(),
         }];
         let root_digest =
             RunManifest::root_of(&[(steps[0].step_id.clone(), steps[0].receipt_id.clone())]);
@@ -1108,6 +1141,33 @@ mod tests {
             Observed::default(),
         )]);
         manifest.disagreements(&receipts, &observations)
+    }
+
+    #[test]
+    fn only_a_reused_step_names_its_signers_each_once_by_key() {
+        let receipt = Receipt::seal(identity("a", "out"), Observed::default());
+        let key = crate::core::attest::public_key_of(&[7; 32]);
+        let mut vouched = coherent(&receipt);
+        vouched.steps[0].cached = true;
+        vouched.steps[0].vouched_by = vec![key.clone()];
+        vouched.spend = Spend::default();
+        vouched.spend.add_reused(Observed::default().metrics);
+        assert_eq!(judge(&vouched, &receipt), Vec::<String>::new());
+
+        let mut executed = coherent(&receipt);
+        executed.steps[0].vouched_by = vec![key.clone()];
+        let found = judge(&executed, &receipt);
+        assert!(found[0].contains("was not reused"), "{found:?}");
+
+        let mut twice = vouched.clone();
+        twice.steps[0].vouched_by = vec![key.clone(), key.clone()];
+        let found = judge(&twice, &receipt);
+        assert!(found[0].contains("named more than once"), "{found:?}");
+
+        let mut shouted = vouched.clone();
+        shouted.steps[0].vouched_by = vec![format!("ed25519:{}", key[8..].to_uppercase())];
+        let found = judge(&shouted, &receipt);
+        assert!(found[0].contains("is not a signer key"), "{found:?}");
     }
 
     #[test]

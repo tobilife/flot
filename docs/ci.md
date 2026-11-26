@@ -24,7 +24,7 @@ jobs:
       pull-requests: write   # for the comment
     steps:
       - uses: actions/checkout@v4
-      - uses: tobilife/flot@v0.2.6
+      - uses: tobilife/flot@v0.2.7
 ```
 
 The report goes to the job summary and, on a pull request, into one comment
@@ -97,8 +97,11 @@ reads [`.github/flot-signers`](../.github/flot-signers) from the base branch
 has no such file, every step runs in CI. The flow's `toolchain` step runs
 every time (`always = true`, see [step keys](flows.md#step-keys)), so CI
 reuses the developer's other steps only while its `rustc -vV` and `cargo -V`
-print what the developer's did. The other jobs still build and test
-every commit themselves.
+print what the developer's did. This repository pins its toolchain in
+[`rust-toolchain.toml`](../rust-toolchain.toml), which rustup follows here and
+which the workflows read to install the same one, so a run signed with the
+pinned toolchain is reused in CI; a different `rustc` runs every step again.
+The other jobs still build and test every commit themselves.
 
 After the local run, the developer shares it with `flot push --sign`. A
 fresh clone with a fresh store, doing what that job does (real output, on a

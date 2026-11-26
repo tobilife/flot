@@ -1,12 +1,15 @@
 [package]
 name = "flot-cli"
-version = "0.2.6"
+version = "0.2.7"
 edition = "2021"
 rust-version = "1.88"
 description = "Verifiable agent flow runtime: every step emits a content-addressed receipt, every claim is bound to evidence."
 license = "MIT"
 repository = "https://github.com/tobilife/flot"
 readme = "README.md"
+# Pins this repository's own toolchain; a crate built by `cargo install`
+# needs only `rust-version`.
+exclude = ["rust-toolchain.toml"]
 keywords = ["agent", "workflow", "verification", "mcp", "provenance"]
 categories = ["command-line-utilities", "development-tools"]
 

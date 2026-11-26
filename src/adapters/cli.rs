@@ -1681,6 +1681,11 @@ fn dispatch(
                 print_json(&audit)?;
             } else {
                 render_audit(&audit);
+                // What the run itself says it could not prove; a store too
+                // broken to read it has said so above.
+                if let Ok(detail) = workspace.show(&audit.run_id) {
+                    render_limitations(&detail.manifest);
+                }
             }
             Ok(exit_for(audit.result()))
         }

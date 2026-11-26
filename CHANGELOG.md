@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.7
 
 Five ways a cached step reported a verdict its proof would not give on the
 tree as it is:
@@ -133,11 +133,19 @@ Sharing:
   `://user:…@`; one that starts with `$`, `<`, `{` or `*` is taken for a
   placeholder).
 
+- `flot verify` prints the run's limitations under its result, as
+  `flot run` and `flot show` do; before, a run whose proofs were held to no
+  revision verified as `verdict passed` with nothing to say so.
+
 This repository:
 
 - The flow's `format` step runs `cargo fmt --check` rather than
   `cargo fmt`, so it checks the files its proof judges instead of rewriting
   them.
+- `rust-toolchain.toml` pins the toolchain (1.100.0), and CI and the release
+  read it from there; the MSRV job keeps 1.88. With the `toolchain` step, a
+  run signed on a host with another rustc was not reused in CI: PR CI
+  45736380180 ran every step under 1.100.0 against a run signed under 1.99.1.
 
 ## 0.2.6
 

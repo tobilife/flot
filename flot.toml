@@ -50,6 +50,7 @@ inputs = [
   "src/**/*.rs", "tests/**/*.rs", "Cargo.toml", "README.md", "docs/readme/*.md",
   "docs/ci.md", "action.yml", "plugins/claude-code/.claude-plugin/plugin.json",
   ".claude-plugin/marketplace.json", "tests/guard_corpus.toml",
+  "rust-toolchain.toml", ".github/workflows/*.yml",
 ]
 claims = [
   "the unit suite passes",

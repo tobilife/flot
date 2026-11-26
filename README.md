@@ -20,7 +20,7 @@
 
 <code>cargo install flot-cli</code>
 
-Latest release **0.2.6**: `flot verify` names a run signed by this host's own key as such, and the agent-review example proves formatting, lint and a new test, with caps set from a measured run · [changelog](CHANGELOG.md)
+Latest release **0.2.7**: a cached step answers for the files it changed and reruns when the toolchain changes; the guard reads control flow, wrappers, nested shells, globs and links and checks every tool call; a run of some steps reads `PARTIAL` · [changelog](CHANGELOG.md)
 
 </div>
 

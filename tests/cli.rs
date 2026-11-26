@@ -6041,3 +6041,17 @@ fn verify_states_one_result_and_its_exit_code_follows_it() {
     assert_eq!(audit["verdict"], "passed");
     assert_eq!(audit["result"], "unverified");
 }
+
+#[test]
+fn verify_says_what_the_run_could_not_prove() {
+    let project = Project::new(
+        "[flow]\nname = \"v\"\n\n[[step]]\nid = \"work\"\nrun = \"echo 1 > out.txt\"\nclaims = [\"out holds 1\"]\nverify = \"grep -q 1 out.txt\"\n",
+    );
+    project.flot(&["run"]).ok();
+    project
+        .flot(&["verify"])
+        .ok()
+        .has("verdict passed")
+        .has("limitations:")
+        .has("proofs are held to no revision");
+}

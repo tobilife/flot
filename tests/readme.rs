@@ -86,3 +86,47 @@ fn the_github_action_installs_the_release_being_built() {
         "docs/ci.md uses another release of the action"
     );
 }
+
+/// CI and the release build with the toolchain rust-toolchain.toml pins, so
+/// a run signed here is reused there; the MSRV check builds with
+/// `rust-version`.
+#[test]
+fn the_workflows_build_with_the_pinned_toolchain() {
+    let msrv = read("Cargo.toml")
+        .lines()
+        .find_map(|line| line.strip_prefix("rust-version = "))
+        .expect("Cargo.toml names rust-version")
+        .trim_matches('"')
+        .to_string();
+    assert!(
+        read("rust-toolchain.toml").contains("\nchannel = \""),
+        "rust-toolchain.toml pins a channel"
+    );
+    for workflow in [".github/workflows/ci.yml", ".github/workflows/release.yml"] {
+        let lines: Vec<String> = read(workflow).lines().map(str::to_string).collect();
+        for (at, line) in lines.iter().enumerate() {
+            let Some(version) = line.trim().strip_prefix("- uses: dtolnay/rust-toolchain@") else {
+                continue;
+            };
+            if version == msrv {
+                assert!(
+                    lines
+                        .iter()
+                        .any(|l| l.trim() == format!("RUSTUP_TOOLCHAIN: \"{msrv}\"")),
+                    "{workflow}:{}: the MSRV job sets RUSTUP_TOOLCHAIN over rust-toolchain.toml",
+                    at + 1
+                );
+                continue;
+            }
+            assert_eq!(version, "master", "{workflow}:{}", at + 1);
+            assert!(
+                lines[at + 1..]
+                    .iter()
+                    .take(3)
+                    .any(|l| l.trim() == "toolchain: ${{ steps.rust.outputs.toolchain }}"),
+                "{workflow}:{}: installs the toolchain rust-toolchain.toml pins",
+                at + 1
+            );
+        }
+    }
+}

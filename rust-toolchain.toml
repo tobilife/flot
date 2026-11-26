@@ -1,0 +1,7 @@
+# The toolchain this repository is built, checked and released with, here and
+# in CI. The flow's `toolchain` step makes every other step run again when
+# rustc or cargo differ, so a run signed here is reused in CI only while both
+# use this one. CI reads `channel` from this file; the MSRV job overrides it.
+[toolchain]
+channel = "1.100.0"
+components = ["rustfmt", "clippy"]

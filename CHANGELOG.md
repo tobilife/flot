@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.8
 
 The guard's remaining known holes, measured with the probes that found them
 (each got through 0.2.7 with exit 0):

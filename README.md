@@ -20,7 +20,7 @@
 
 <code>cargo install flot-cli</code>
 
-Latest release **0.2.7**: a cached step answers for the files it changed and reruns when the toolchain changes; the guard reads control flow, wrappers, nested shells, globs and links and checks every tool call; a run of some steps reads `PARTIAL` · [changelog](CHANGELOG.md)
+Latest release **0.2.8**: the guard follows the variables, scripts and interpreter code a call runs, refuses any call naming the signing key, and judges a command substitution by the program that prints it, so ordinary bash scripts pass; macOS stops processes that escape a step · [changelog](CHANGELOG.md)
 
 </div>
 

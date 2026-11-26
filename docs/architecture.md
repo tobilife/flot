@@ -16,7 +16,12 @@ main.rs   composition root: hands the MCP server to the CLI
 Dependencies only point down, adapters never import each other, and `core`
 performs no IO, so identity derivation cannot depend on the machine it runs on.
 `tests/architecture.rs` enforces all three on every test run; each rule was
-checked by injecting a violation and watching it fail.
+checked by injecting a violation and watching it fail. An adapter is the
+file or directory right below `adapters/`, so `adapters/cli/args.rs` is part
+of `cli`; the test runs its rules on a scratch tree to show it tells them
+apart. Literal goldens pin the bytes of step keys, receipts, run manifests
+(digest and signature), bundles and cache entries, so moving code that
+changes any of them fails a test.
 
 Inside the engine, policy and mechanism are split. `keying` decides a step's
 identity, `claims` decides what a proof established (pure: the only path to
@@ -49,7 +54,7 @@ the content store with host-sealed cache and trust, the CLI with typed exit
 codes, an MCP stdio server over the same functions, authenticated receipt
 bundles, spend accounting with a run cost ceiling, signed attestations with a
 local trust list and key handovers, guarded proofs, produced files kept and restored, an enforced
-layer architecture, attempts with feedback, candidates, run search, sharing through git that refuses credential-shaped tokens, a Claude Code plugin whose guard reads every tool call (edits, shell and PowerShell commands, and the paths other tools name), `flot doctor`, and 422 tests including end-to-end runs through the real
+layer architecture, attempts with feedback, candidates, run search, sharing through git that refuses credential-shaped tokens, a Claude Code plugin whose guard reads every tool call (edits, shell and PowerShell commands, and the paths other tools name), `flot doctor`, and 428 tests including end-to-end runs through the real
 binary, a real MCP handshake and a cross-store bundle import.
 
 Not there yet: confining steps on Windows, and confining reads (a step

@@ -732,6 +732,209 @@ verify = "grep -q flot artifact.txt"
         assert_eq!(reread.run.root_digest, manifest.root_digest);
     }
 
+    /// The exact bytes a bundle file holds, which a fresh store imports
+    /// whole. Field order is byte order, so these change only with
+    /// `BUNDLE_SCHEMA`. Everything in it is fixed and named after a release
+    /// that never happens, so releases leave it as it is.
+    #[test]
+    fn a_bundle_file_has_exactly_these_bytes() {
+        use crate::core::flow::SCHEMA_VERSION;
+        use crate::core::metrics::Spend;
+        use crate::core::receipt::{
+            ClaimCounts, ReceiptIdentity, RunStep, StepStatus, ToolIdentity, Verdict,
+        };
+        let receipt = Receipt::seal(
+            ReceiptIdentity {
+                flow: "golden".into(),
+                step_id: "work".into(),
+                step_key: digest::bytes(b"step key"),
+                command: "echo flot".into(),
+                status: StepStatus::Ok,
+                exit_code: Some(0),
+                stdout_digest: digest::bytes(b"flot\n"),
+                stderr_digest: digest::bytes(b""),
+                inputs: Vec::new(),
+                verify_inputs: Vec::new(),
+                outputs: Vec::new(),
+                changed: BTreeMap::new(),
+                deps: Vec::new(),
+                claims: Vec::new(),
+                limitations: Vec::new(),
+                tool: ToolIdentity {
+                    name: "flot".into(),
+                    version: "0.0.0-golden".into(),
+                    schema: SCHEMA_VERSION,
+                },
+                candidate: None,
+                sandbox: None,
+            },
+            Observed {
+                started_at_ms: 1_700_000_000_000,
+                duration_ms: 5,
+                host_os: "linux".into(),
+                stdout_inline: "flot\n".into(),
+                stdout_bytes: 5,
+                ..Observed::default()
+            },
+        );
+        let steps = vec![RunStep {
+            step_id: "work".into(),
+            receipt_id: receipt.receipt_id.clone(),
+            status: StepStatus::Ok,
+            cached: false,
+            claims: ClaimCounts::default(),
+            observed_digest: receipt.observed_digest(),
+            attempts: Vec::new(),
+            candidates: Vec::new(),
+            vouched_by: Vec::new(),
+        }];
+        let root_digest = RunManifest::root_of(&[("work".into(), receipt.receipt_id.clone())]);
+        let run = RunManifest {
+            run_id: RunManifest::id_for(1_700_000_000_000, &root_digest),
+            flow: "golden".into(),
+            flow_digest: digest::bytes(b"flow"),
+            root_digest,
+            verdict: Verdict::Passed,
+            partial: None,
+            steps,
+            claims: ClaimCounts::default(),
+            limitations: Vec::new(),
+            max_parallel: 1,
+            spend: Spend {
+                silent_steps: 1,
+                ..Spend::default()
+            },
+            max_cost_micro_usd: None,
+            started_at_ms: 1_700_000_000_000,
+            duration_ms: 7,
+            flot_version: "0.0.0-golden".into(),
+            refusals: Vec::new(),
+        };
+        let objects = [
+            b"flot\n".to_vec(),
+            Vec::new(),
+            digest::canonical_json(&receipt.observed).into_bytes(),
+        ]
+        .into_iter()
+        .map(|bytes| (digest::bytes(&bytes), digest::base64_encode(&bytes)))
+        .collect();
+        let bundle = Bundle {
+            schema: BUNDLE_SCHEMA,
+            flot_version: "0.0.0-golden".into(),
+            attestations: vec![attest::sign(&SIGNER, &run)],
+            run,
+            receipts: vec![receipt],
+            objects,
+        };
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("golden.flotbundle.json");
+        let report = write(&bundle, &path).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(text, GOLDEN_BUNDLE);
+        assert_eq!(report.bytes, GOLDEN_BUNDLE.len());
+        let (_target, fresh) = empty_store();
+        let imported = import(&fresh, &read(&path).unwrap(), ImportPolicy::default()).unwrap();
+        assert_eq!(imported.receipts, 1);
+    }
+
+    const GOLDEN_BUNDLE: &str = r#"{
+  "schema": 4,
+  "flot_version": "0.0.0-golden",
+  "run": {
+    "run_id": "1700000000000-d717055c17c6",
+    "flow": "golden",
+    "flow_digest": "sha256:3b21278178ed3463f3bde3a35f088caf6d99ff1b2f647d9a0c2b8de599ec3dc6",
+    "root_digest": "sha256:d717055c17c6b2d5688c1316500bd0a011043361ffc85e0adfb91280528afb1f",
+    "verdict": "passed",
+    "steps": [
+      {
+        "step_id": "work",
+        "receipt_id": "sha256:a0541f38d3b26e2c566b6580d841d502d0c974834aecd39b6c1c0f41c65dee1f",
+        "status": "ok",
+        "cached": false,
+        "claims": {
+          "verified": 0,
+          "unverified": 0,
+          "refuted": 0
+        },
+        "observed_digest": "sha256:f6a21c2baa364a172ec5f38d2de91504327dea53c5b1e67d61ded29a59b7cee3"
+      }
+    ],
+    "claims": {
+      "verified": 0,
+      "unverified": 0,
+      "refuted": 0
+    },
+    "limitations": [],
+    "max_parallel": 1,
+    "spend": {
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "cost_micro_usd": 0,
+      "reporting_steps": 0,
+      "silent_steps": 1,
+      "unpriced_steps": 0,
+      "reused_cost_micro_usd": 0
+    },
+    "max_cost_micro_usd": null,
+    "started_at_ms": 1700000000000,
+    "duration_ms": 7,
+    "flot_version": "0.0.0-golden"
+  },
+  "receipts": [
+    {
+      "receipt_id": "sha256:a0541f38d3b26e2c566b6580d841d502d0c974834aecd39b6c1c0f41c65dee1f",
+      "identity": {
+        "flow": "golden",
+        "step_id": "work",
+        "step_key": "sha256:9bcae35dd64134b0c70ba26408a1b8f9f90d80123bdc5462d44d203de3d939f7",
+        "command": "echo flot",
+        "status": "ok",
+        "exit_code": 0,
+        "stdout_digest": "sha256:fa717a4ae03ce706c6c5185ff8bc43f80bf2d44a66cfe1394002db58c3e3d5a2",
+        "stderr_digest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "inputs": [],
+        "verify_inputs": [],
+        "outputs": [],
+        "deps": [],
+        "claims": [],
+        "limitations": [],
+        "tool": {
+          "name": "flot",
+          "version": "0.0.0-golden",
+          "schema": 5
+        }
+      },
+      "observed": {
+        "started_at_ms": 1700000000000,
+        "duration_ms": 5,
+        "host_os": "linux",
+        "stdout_inline": "flot\n",
+        "stdout_truncated": false,
+        "stderr_inline": "",
+        "stderr_truncated": false,
+        "stdout_bytes": 5,
+        "stderr_bytes": 0,
+        "metrics": null,
+        "metrics_notes": []
+      }
+    }
+  ],
+  "objects": {
+    "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855": "",
+    "sha256:f6a21c2baa364a172ec5f38d2de91504327dea53c5b1e67d61ded29a59b7cee3": "eyJkdXJhdGlvbl9tcyI6NSwiaG9zdF9vcyI6ImxpbnV4IiwibWV0cmljcyI6bnVsbCwibWV0cmljc19ub3RlcyI6W10sInN0YXJ0ZWRfYXRfbXMiOjE3MDAwMDAwMDAwMDAsInN0ZGVycl9ieXRlcyI6MCwic3RkZXJyX2lubGluZSI6IiIsInN0ZGVycl90cnVuY2F0ZWQiOmZhbHNlLCJzdGRvdXRfYnl0ZXMiOjUsInN0ZG91dF9pbmxpbmUiOiJmbG90XG4iLCJzdGRvdXRfdHJ1bmNhdGVkIjpmYWxzZX0=",
+    "sha256:fa717a4ae03ce706c6c5185ff8bc43f80bf2d44a66cfe1394002db58c3e3d5a2": "ZmxvdAo="
+  },
+  "attestations": [
+    {
+      "key": "ed25519:ed4928c628d1c2c6eae90338905995612959273a5c63f93636c14614ac8737d1",
+      "manifest_digest": "sha256:fc7b72f5a13019a733d3c096e53a15b9f6e6a3eec545c4ee405e66ba682e4216",
+      "signature": "30ac73ce3e9a0da282b0b795c18ef2e49179cfe1825f4fa13602132c4d8ec5a62df67232463b702b38baf5aa6f8a3ef95e14dc10a54498f4aa8e25393a415e00"
+    }
+  ]
+}"#;
+
     const SIGNER: [u8; 32] = [3; 32];
     const STRANGER: [u8; 32] = [4; 32];
 

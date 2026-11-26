@@ -41,7 +41,9 @@ const IO_PATHS: [&str; 5] = [
 struct Source {
     path: PathBuf,
     layer: String,
-    /// Adapter file stem, so adapters can be told apart from each other.
+    /// The path component right after the layer, without `.rs`, so adapters
+    /// can be told apart from each other: `adapters/cli.rs` and
+    /// `adapters/cli/args.rs` both belong to `cli`.
     unit: String,
     text: String,
 }
@@ -77,7 +79,9 @@ fn walk(root: &Path, dir: &Path, found: &mut Vec<Source>) {
         if layer == "lib" || layer == "main" {
             continue;
         }
-        let unit = relative.file_stem().unwrap().to_string_lossy().to_string();
+        let unit = parts.next().map_or(layer.clone(), |second| {
+            second.trim_end_matches(".rs").to_string()
+        });
         found.push(Source {
             text: std::fs::read_to_string(&path).unwrap(),
             path: relative.to_path_buf(),
@@ -115,10 +119,10 @@ fn every_source_file_belongs_to_a_known_layer() {
     }
 }
 
-#[test]
-fn dependencies_only_point_down_the_layers() {
+/// Every reference that does not point down the layers.
+fn layer_violations(sources: &[Source]) -> Vec<String> {
     let mut violations = Vec::new();
-    for source in sources() {
+    for source in sources {
         for target in crate_references(&source.text) {
             if !LAYERS.contains(&target.as_str()) {
                 violations.push(format!(
@@ -134,34 +138,44 @@ fn dependencies_only_point_down_the_layers() {
             }
         }
     }
-    assert!(violations.is_empty(), "\n{}", violations.join("\n"));
+    violations
 }
 
 #[test]
-fn adapters_do_not_know_about_each_other() {
-    let sources = sources();
+fn dependencies_only_point_down_the_layers() {
+    let violations = layer_violations(&sources());
+    assert!(violations.is_empty(), "\n{}", violations.join("\n"));
+}
+
+/// Every adapter file that names another adapter. `adapters/mod.rs` declares
+/// them all, so it is the one file not checked.
+fn cross_adapter_violations(sources: &[Source]) -> Vec<String> {
     let adapters: Vec<&Source> = sources
         .iter()
         .filter(|source| source.layer == "adapters" && source.unit != "mod")
         .collect();
+    let units: BTreeSet<&str> = adapters.iter().map(|source| source.unit.as_str()).collect();
     let mut violations = Vec::new();
     for source in &adapters {
-        for other in &adapters {
-            if source.unit == other.unit {
+        for other in &units {
+            if source.unit == *other {
                 continue;
             }
-            let needle = format!("adapters::{}", other.unit);
-            if source.text.contains(&needle)
-                || source.text.contains(&format!("super::{}", other.unit))
-            {
+            let needle = format!("adapters::{other}");
+            if source.text.contains(&needle) || source.text.contains(&format!("super::{other}")) {
                 violations.push(format!(
-                    "{} reaches into the {} adapter",
-                    source.path.display(),
-                    other.unit
+                    "{} reaches into the {other} adapter",
+                    source.path.display()
                 ));
             }
         }
     }
+    violations
+}
+
+#[test]
+fn adapters_do_not_know_about_each_other() {
+    let violations = cross_adapter_violations(&sources());
     assert!(violations.is_empty(), "\n{}", violations.join("\n"));
 }
 
@@ -190,4 +204,90 @@ fn the_guard_itself_detects_upward_and_unknown_references() {
     assert!(!allowed("engine").contains(&"service"));
     assert!(!allowed("adapters").contains(&"engine"));
     assert!(!allowed("core").contains(&"store"));
+}
+
+#[test]
+fn the_guard_itself_tells_adapters_apart_by_their_directory() {
+    // An adapter split into a file and a directory beside it, as `cli` may
+    // be, read the way the real tree is.
+    let scratch = tempfile::tempdir().unwrap();
+    let root = scratch.path();
+    let files = [
+        ("adapters/mod.rs", "pub mod cli;\npub mod mcp;\n"),
+        ("adapters/cli.rs", "mod args;\nmod hook;\nmod render;\n"),
+        ("adapters/cli/args.rs", "use super::mcp::serve;\n"),
+        ("adapters/cli/render.rs", "fn f() { crate::adapters::mcp::serve() }\n"),
+        (
+            "adapters/cli/hook.rs",
+            "use super::args::Args;\nuse super::super::cli::render;\nuse crate::adapters::cli::Shell;\n",
+        ),
+        ("adapters/mcp.rs", "mod wire;\npub fn serve() {}\n"),
+        ("adapters/mcp/wire.rs", "use super::super::cli::main;\n"),
+    ];
+    for (path, text) in files {
+        let path = root.join(path);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, text).unwrap();
+    }
+    let mut found = Vec::new();
+    walk(root, root, &mut found);
+    let shown = |path: &str| path.split('/').collect::<PathBuf>().display().to_string();
+
+    let mut units: Vec<(String, &str)> = found
+        .iter()
+        .map(|source| (source.path.display().to_string(), source.unit.as_str()))
+        .collect();
+    units.sort();
+    let mut expected = [
+        (shown("adapters/mod.rs"), "mod"),
+        (shown("adapters/cli.rs"), "cli"),
+        (shown("adapters/cli/args.rs"), "cli"),
+        (shown("adapters/cli/render.rs"), "cli"),
+        (shown("adapters/cli/hook.rs"), "cli"),
+        (shown("adapters/mcp.rs"), "mcp"),
+        (shown("adapters/mcp/wire.rs"), "mcp"),
+    ];
+    expected.sort();
+    assert_eq!(units, expected);
+
+    // A nested file that names another adapter is caught, by `super::` or
+    // by `crate::adapters::`; one that names its own adapter is not.
+    let mut crossings = cross_adapter_violations(&found);
+    crossings.sort();
+    assert_eq!(
+        crossings,
+        [
+            format!(
+                "{} reaches into the mcp adapter",
+                shown("adapters/cli/args.rs")
+            ),
+            format!(
+                "{} reaches into the mcp adapter",
+                shown("adapters/cli/render.rs")
+            ),
+            format!(
+                "{} reaches into the cli adapter",
+                shown("adapters/mcp/wire.rs")
+            ),
+        ]
+    );
+
+    // A `crate::adapters` path is refused by the layering rule on its own,
+    // whichever adapter it names: inside an adapter, its own files are
+    // reached through `super::`.
+    let mut layered = layer_violations(&found);
+    layered.sort();
+    assert_eq!(
+        layered,
+        [
+            format!(
+                "{} (adapters) depends on adapters",
+                shown("adapters/cli/hook.rs")
+            ),
+            format!(
+                "{} (adapters) depends on adapters",
+                shown("adapters/cli/render.rs")
+            ),
+        ]
+    );
 }

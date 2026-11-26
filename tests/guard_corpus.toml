@@ -159,6 +159,34 @@ protects = ["check.sh"]
 status = "closed"
 note = "xargs given the file in a here-string"
 
+[[row]]
+shell = "sh"
+command = "chronic rm check.sh"
+protects = ["check.sh"]
+status = "open"
+note = "a wrapper the reader does not know (moreutils' chronic) runs its arguments as a command"
+
+[[row]]
+shell = "sh"
+command = "strace -f rm check.sh"
+protects = ["check.sh"]
+status = "open"
+note = "a tracer, with an option, runs its arguments as a command"
+
+[[row]]
+shell = "sh"
+command = "ltrace rm check.sh"
+protects = ["check.sh"]
+status = "open"
+note = "a library tracer runs its arguments as a command"
+
+[[row]]
+shell = "sh"
+command = "unbuffer rm check.sh"
+protects = ["check.sh"]
+status = "open"
+note = "expect's unbuffer runs its arguments as a command"
+
 # --- Wildcards, braces, variables and other names
 
 [[row]]
@@ -1469,6 +1497,41 @@ command = "echo flot trust add ci AAAA"
 protects = []
 status = "allowed"
 note = "a flot command as an argument"
+
+[[row]]
+shell = "sh"
+command = "dash -c 'flot gc'"
+protects = ["flot gc"]
+status = "closed"
+note = "a flot command in dash's command line"
+
+[[row]]
+shell = "sh"
+command = "busybox sh -c 'flot gc'"
+protects = ["flot gc"]
+status = "closed"
+note = "a flot command in busybox sh's command line"
+
+[[row]]
+shell = "sh"
+command = "ash -c 'flot gc'"
+protects = ["flot gc"]
+status = "open"
+note = "a flot command in the command line of a shell the flot-verb reader does not know, though the path reader reads `ash -c 'rm check.sh'`"
+
+[[row]]
+shell = "sh"
+command = "mksh -c 'flot trust add ci AAAA'"
+protects = ["flot trust add"]
+status = "open"
+note = "a flot command in the command line of a shell the flot-verb reader does not know, though the path reader reads `mksh -c 'rm check.sh'`"
+
+[[row]]
+shell = "sh"
+command = "busybox ash -c 'flot gc'"
+protects = ["flot gc"]
+status = "open"
+note = "busybox running a shell the flot-verb reader does not know"
 
 # --- Downloaded code
 

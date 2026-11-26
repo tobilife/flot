@@ -8,11 +8,12 @@ use anyhow::Result;
 
 use crate::core::flow::Step;
 use crate::core::metrics;
-use crate::core::receipt::{candidate_rank, DepRef, FileDigest, StepStatus};
+use crate::core::receipt::{candidate_rank, DepRef, FileDigest};
 use crate::engine::exec;
 use crate::engine::keying;
 use crate::store::Recalled;
 
+use super::execute::Unrun;
 use super::{Contender, CostGate, Runner};
 
 /// Unique scratch workspaces for candidates.
@@ -132,26 +133,15 @@ impl Runner<'_> {
             let mut said = Vec::new();
             let (receipt, attempts) = match keying::copy_workspace(&self.root, &place, &candidate) {
                 Ok(()) => {
-                    let facts = runner.facts(&candidate);
-                    let key = runner.step_key(&candidate, &facts, deps);
-                    runner.attempt(&candidate, key, facts, deps.to_vec(), gate, stop, &mut said)?
+                    let keyed = runner.keyed(&candidate, runner.facts(&candidate), deps.to_vec());
+                    runner.attempt(keyed, gate, stop, &mut said)?
                 }
                 Err(error) => {
                     let facts = keying::facts_of(&self.root, &candidate);
-                    let key = self.step_key(&candidate, &facts, deps);
-                    let mut limitations = facts.limitations.clone();
-                    limitations.push(format!(
-                        "could not run: its workspace could not be prepared: {error:#}"
-                    ));
-                    let receipt = runner.unrun_receipt(
-                        StepStatus::Failed,
-                        "step could not run",
-                        &candidate,
-                        &key,
-                        facts,
-                        deps.to_vec(),
-                        limitations,
-                    )?;
+                    let keyed = self.keyed(&candidate, facts, deps.to_vec());
+                    let why =
+                        format!("could not run: its workspace could not be prepared: {error:#}");
+                    let receipt = runner.unrun_receipt(Unrun::Failed, keyed, why)?;
                     (receipt, Vec::new())
                 }
             };

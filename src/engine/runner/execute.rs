@@ -9,19 +9,19 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 
 use crate::core::digest;
-use crate::core::flow::Step;
+use crate::core::flow::{ResolvedBudget, Sandbox, Step};
 use crate::core::metrics::{self, Metrics};
 use crate::core::preview::stream_preview;
 use crate::core::receipt::{
-    ClaimStatus, DepRef, FileDigest, Observed, Receipt, ReceiptIdentity, SandboxRecord, StepStatus,
-    ToolIdentity,
+    ClaimRecord, ClaimStatus, FileDigest, Observed, Receipt, ReceiptIdentity, SandboxRecord,
+    StepStatus, ToolIdentity,
 };
 use crate::engine::claims::{self, Proof, ProofOutcome, Red};
 use crate::engine::exec;
 use crate::engine::keying::{self, Facts};
 use crate::engine::sandbox;
 
-use super::{Runner, METRICS_SEQUENCE};
+use super::{Keyed, Runner, METRICS_SEQUENCE};
 
 impl Runner<'_> {
     fn step_env(&self, step: &Step) -> BTreeMap<String, String> {
@@ -44,23 +44,32 @@ impl Runner<'_> {
 
     /// The receipt of a step that never produced a result of its own:
     /// cancelled before it started, or failed because it could not run.
-    #[allow(clippy::too_many_arguments)]
+    /// Its limitations are its facts' and then `why`.
     pub(super) fn unrun_receipt(
         &self,
-        status: StepStatus,
-        reason: &str,
-        step: &Step,
-        step_key: &str,
-        facts: Facts,
-        deps: Vec<DepRef>,
-        limitations: Vec<String>,
+        unrun: Unrun,
+        keyed: Keyed<'_>,
+        why: String,
     ) -> Result<Receipt> {
+        let (status, reason) = match unrun {
+            Unrun::Cancelled => (StepStatus::Cancelled, "step was not run"),
+            Unrun::Failed => (StepStatus::Failed, "step could not run"),
+            Unrun::Unconfined => (StepStatus::Failed, "step could not run in its sandbox"),
+        };
+        let Keyed {
+            step,
+            step_key,
+            facts,
+            deps,
+        } = keyed;
+        let mut limitations = facts.limitations;
+        limitations.push(why);
         let empty = self.store.put_bytes(b"")?;
         Ok(Receipt::seal(
             ReceiptIdentity {
                 flow: self.flow.meta.name.clone(),
                 step_id: step.id.clone(),
-                step_key: step_key.to_string(),
+                step_key,
                 command: step.run.clone(),
                 status,
                 exit_code: None,
@@ -85,24 +94,61 @@ impl Runner<'_> {
         ))
     }
 
+    /// The receipt of a step whose sandbox cannot be enforced here: a step
+    /// that asked to be confined runs confined or not at all.
+    fn unconfined(&self, keyed: Keyed<'_>, refused: Unenforceable) -> Result<Receipt> {
+        let Unenforceable(error) = refused;
+        let why = format!("could not run: its sandbox cannot be enforced here: {error:#}");
+        self.unrun_receipt(Unrun::Unconfined, keyed, why)
+    }
+
     /// Run a step once and settle its claims. `since` is the workspace before
     /// the step's first attempt, taken here when this is it.
-    #[allow(clippy::too_many_arguments)]
+    ///
+    /// The phases, in order: set up where the command runs, run it, judge
+    /// how it ended, keep what it produced, hold it to its `may_change`,
+    /// bind what it changed, prove its claims, and seal the receipt. Each
+    /// adds its limitations after those found before: their order is part
+    /// of the receipt id.
     pub(super) fn execute(
         &self,
-        step: &Step,
-        step_key: &str,
-        facts: Facts,
-        deps: Vec<DepRef>,
+        keyed: Keyed<'_>,
         extra: &BTreeMap<String, String>,
         stop: &exec::StopSignal,
         since: &mut Option<Vec<FileDigest>>,
     ) -> Result<Receipt> {
-        let mut limitations = facts.limitations.clone();
+        let step = keyed.step;
         let budget = self.flow.resolved_budget(step);
+        let setup = match self.set_up(step, extra)? {
+            Ok(setup) => setup,
+            Err(refused) => return self.unconfined(keyed, refused),
+        };
+        let mut ran = match self.run_step(step, &setup, budget, stop, since)? {
+            Ok(ran) => ran,
+            Err(refused) => return self.unconfined(keyed, refused),
+        };
+        let mut limitations = keyed.facts.limitations.clone();
+        limitations.append(&mut ran.problems);
+        let reported = read_metrics(&setup.metrics_path);
+        let mut found = Findings::ended(limitations, step, budget, &ran.outcome, reported);
+        let produced = self.keep_outputs(step, budget, &ran.outcome, &mut found)?;
+        found.strayed(step, ran.strayed.as_deref());
+        let after = self.facts(step);
+        self.bind_changes(&keyed, &after, &mut ran.changed, &mut found.limitations);
+        self.settle_claims(&keyed, &after, &produced.files, budget, stop, &mut found);
+        Ok(self.seal(keyed, setup, ran, produced, found))
+    }
+
+    /// Where the step's command runs and how: its environment, the file it
+    /// reports its spend in, and its sandbox, which a step that asked for
+    /// one runs in or not at all.
+    fn set_up<'s>(
+        &self,
+        step: &'s Step,
+        extra: &BTreeMap<String, String>,
+    ) -> Result<Result<Setup<'s>, Unenforceable>> {
         let (mut env, mut metrics_path) = self.metered_env(step)?;
         env.extend(extra.clone());
-        let timeout = Duration::from_secs(budget.timeout_secs);
         // A confined step writes its metrics and temporary files in a scratch
         // directory of its own, not where other steps' work lies.
         let scratch = match step
@@ -125,7 +171,6 @@ impl Runner<'_> {
                 Some(scratch)
             }
         };
-        // A step that asked to be confined runs confined or not at all.
         let confined = match &step.sandbox {
             None => None,
             Some(policy) => {
@@ -139,23 +184,29 @@ impl Runner<'_> {
                     .and_then(|write| sandbox::prepare(policy.network, write.as_deref(), &own));
                 match prepared {
                     Ok(prepared) => Some((policy, prepared)),
-                    Err(error) => {
-                        limitations.push(format!(
-                            "could not run: its sandbox cannot be enforced here: {error:#}"
-                        ));
-                        return self.unrun_receipt(
-                            StepStatus::Failed,
-                            "step could not run in its sandbox",
-                            step,
-                            step_key,
-                            facts,
-                            deps,
-                            limitations,
-                        );
-                    }
+                    Err(error) => return Ok(Err(Unenforceable(error))),
                 }
             }
         };
+        Ok(Ok(Setup {
+            env,
+            metrics_path,
+            _scratch: scratch,
+            confined,
+        }))
+    }
+
+    /// Run the step's command: alone when it declares `may_change`, so the
+    /// files that changed while it ran are its own doing, and between two
+    /// snapshots of the workspace when what it changes matters.
+    fn run_step(
+        &self,
+        step: &Step,
+        setup: &Setup<'_>,
+        budget: ResolvedBudget,
+        stop: &exec::StopSignal,
+        since: &mut Option<Vec<FileDigest>>,
+    ) -> Result<Result<Ran, Unenforceable>> {
         let scoped = !step.may_change.is_empty();
         // A poisoned lock guards nothing: the data is `()`.
         let (_shared, _alone) = if scoped {
@@ -171,36 +222,21 @@ impl Runner<'_> {
                 .unwrap_or_else(|poison| poison.into_inner());
             (Some(shared), None)
         };
-        // What a step changes is bound to its receipt. A candidate's changes
-        // other than its outputs stay in its copy: there is nothing to bind.
-        let binds = self.candidate.is_none();
+        let binds = self.binds();
         let before = (scoped || binds).then(|| keying::snapshot(&self.root, &self.origin));
         let outcome = match exec::run_confined(
             &step.run,
             &self.root,
-            &env,
-            timeout,
+            &setup.env,
+            Duration::from_secs(budget.timeout_secs),
             budget.max_output_bytes,
             stop,
-            confined.as_ref().map(|(_, prepared)| prepared),
+            setup.confined.as_ref().map(|(_, prepared)| prepared),
         ) {
             Ok(outcome) => outcome,
             // Confinement is applied as the step starts, so a kernel that
             // refuses it shows here.
-            Err(error) if confined.is_some() => {
-                limitations.push(format!(
-                    "could not run: its sandbox cannot be enforced here: {error:#}"
-                ));
-                return self.unrun_receipt(
-                    StepStatus::Failed,
-                    "step could not run in its sandbox",
-                    step,
-                    step_key,
-                    facts,
-                    deps,
-                    limitations,
-                );
-            }
+            Err(error) if setup.confined.is_some() => return Ok(Err(Unenforceable(error))),
             Err(error) => {
                 return Err(error).with_context(|| format!("step `{}` could not start", step.id));
             }
@@ -208,126 +244,92 @@ impl Runner<'_> {
         let after = before
             .as_ref()
             .map(|_| keying::snapshot(&self.root, &self.origin));
+        let mut problems = Vec::new();
         let strayed = match (&before, &after) {
             (Some(before), Some(after)) if scoped => {
-                limitations.extend(before.problems.iter().cloned());
-                limitations.extend(after.problems.iter().cloned());
+                problems.extend(before.problems.iter().cloned());
+                problems.extend(after.problems.iter().cloned());
                 Some(keying::out_of_scope(step, &before.files, &after.files))
             }
             _ => None,
         };
         drop((_shared, _alone));
-        let mut changed = match (before, after) {
+        let changed = match (before, after) {
             (Some(before), Some(after)) if binds => {
                 keying::changes(since.get_or_insert(before.files), &after.files)
             }
             _ => BTreeMap::new(),
         };
-        let (mut step_metrics, mut metrics_notes) = read_metrics(&metrics_path);
-        if outcome.strays_stopped {
-            limitations.push(
-                "left processes running when it exited; they were stopped, so nothing a step starts outlives it".into(),
-            );
-        }
-        if outcome.output_detached {
-            limitations.push(
-                "a process that left the step's process group still held its output; captured output may be incomplete".into(),
-            );
-        }
-        // Processes that left their group, from the step and from its proofs.
-        let mut escaped = outcome.escaped.clone();
+        Ok(Ok(Ran {
+            outcome,
+            problems,
+            strayed,
+            changed,
+        }))
+    }
 
-        let mut tolerated = false;
-        let status = if outcome.timed_out {
-            limitations.push(format!(
-                "stopped at its {}s timeout budget; output is partial",
-                budget.timeout_secs
-            ));
-            StepStatus::Timeout
-        } else if outcome.interrupted {
-            limitations.push("stopped because flot was asked to stop; output is partial".into());
-            StepStatus::Failed
-        } else if outcome.output_overflow {
-            limitations.push(format!(
-                "stopped after {} bytes on one output stream, its max_output_bytes budget; output is cut there",
-                budget.max_output_bytes
-            ));
-            StepStatus::Failed
-        } else if outcome.exit_code == Some(0) {
-            StepStatus::Ok
-        } else if step.allow_failure {
-            tolerated = true;
-            limitations.push(format!(
-                "{} but the step is declared allow_failure, so the run is not failed by it",
-                ending(&outcome)
-            ));
-            StepStatus::Ok
-        } else {
-            if let Some(signal) = outcome.signal {
-                limitations.push(format!("was killed by signal {signal}"));
-            }
-            StepStatus::Failed
-        };
+    /// Whether a receipt binds what its step changed. A candidate's changes
+    /// other than its outputs stay in its copy: there is nothing to bind.
+    fn binds(&self) -> bool {
+        self.candidate.is_none()
+    }
 
+    /// Keep whatever the step produced, even when it failed: partial output
+    /// is evidence of how it failed. A success that is missing a declared
+    /// output did not do what the flow says it does.
+    fn keep_outputs(
+        &self,
+        step: &Step,
+        budget: ResolvedBudget,
+        outcome: &exec::Outcome,
+        found: &mut Findings,
+    ) -> Result<Produced> {
         let stdout_digest = self.store.put_bytes(&outcome.stdout)?;
         let stderr_digest = self.store.put_bytes(&outcome.stderr)?;
-
-        // Keep whatever the step produced, even when it failed: partial output
-        // is evidence of how it failed. A success that is missing a declared
-        // output did not do what the flow says it does.
-        let produced = match keying::scan_outputs(&self.root, &step.outputs, |bytes| {
+        let scan = match keying::scan_outputs(&self.root, &step.outputs, |bytes| {
             self.store.put_bytes(bytes)
         }) {
-            Ok(produced) => produced,
+            Ok(scan) => scan,
             Err(error) => {
-                limitations.push(format!("outputs could not be recorded: {error:#}"));
+                found
+                    .limitations
+                    .push(format!("outputs could not be recorded: {error:#}"));
                 keying::Scan {
                     unmatched: step.outputs.clone(),
                     ..keying::Scan::default()
                 }
             }
         };
-        limitations.extend(produced.problems.iter().cloned());
-        let status = if status.is_ok() && !produced.unmatched.is_empty() {
-            let missing = produced.unmatched.join(", ");
-            if step.allow_failure {
-                tolerated = true;
-                limitations.push(format!(
-                    "produced no file for declared output {missing}, but the step is declared allow_failure"
-                ));
-                status
-            } else {
-                limitations.push(format!("produced no file for declared output {missing}"));
-                StepStatus::Failed
-            }
-        } else {
-            status
-        };
-        let status = match strayed {
-            Some(strayed) if !strayed.is_empty() => {
-                let list = strayed.join(", ");
-                if step.allow_failure {
-                    tolerated = tolerated || status.is_ok();
-                    limitations.push(format!(
-                        "changed files outside may_change ({list}), but the step is declared allow_failure"
-                    ));
-                    status
-                } else {
-                    limitations.push(format!("changed files outside may_change: {list}"));
-                    if status.is_ok() {
-                        StepStatus::Failed
-                    } else {
-                        status
-                    }
-                }
-            }
-            _ => status,
-        };
+        found.limitations.extend(scan.problems);
+        found.missing_outputs(step, &scan.unmatched);
+        let (stdout_inline, stdout_truncated) =
+            stream_preview(&outcome.stdout, budget.max_inline_bytes);
+        let (stderr_inline, stderr_truncated) =
+            stream_preview(&outcome.stderr, budget.max_inline_bytes);
+        Ok(Produced {
+            stdout_digest,
+            stderr_digest,
+            stdout_inline,
+            stdout_truncated,
+            stderr_inline,
+            stderr_truncated,
+            files: scan.files,
+        })
+    }
 
-        // Re-read what the step declared it reads. A step that edits its own
-        // inputs leaves a receipt describing content that no longer exists; one
-        // that edits its proof cannot have that proof vouch for it.
-        let after = self.facts(step);
+    /// Re-read as `after` what the step declared it reads, and bind to its
+    /// receipt the files it answers for besides its outputs. A step that
+    /// edits its own inputs leaves a receipt describing content that no
+    /// longer exists; one that edits its proof cannot have that proof vouch
+    /// for it.
+    fn bind_changes(
+        &self,
+        keyed: &Keyed<'_>,
+        after: &Facts,
+        changed: &mut BTreeMap<String, Option<String>>,
+        limitations: &mut Vec<String>,
+    ) {
+        let (step, facts) = (keyed.step, &keyed.facts);
         let edited_inputs = keying::changed_paths(&facts.inputs, &after.inputs);
         if !edited_inputs.is_empty() {
             limitations.push(format!(
@@ -335,165 +337,162 @@ impl Runner<'_> {
                 edited_inputs.join(", ")
             ));
         }
-        if binds {
-            // Declared files the scan does not reach, such as an input git
-            // ignores, are bound too.
-            for (path, content) in keying::changes(&facts.inputs, &after.inputs)
-                .into_iter()
-                .chain(keying::changes(&facts.verify_inputs, &after.verify_inputs))
-            {
-                changed.entry(path).or_insert(content);
-            }
-            for (path, content) in self.still_in_place(step, step_key) {
-                changed.entry(path).or_insert(content);
-            }
-            // Outputs are recorded, restored and checked as outputs.
-            changed.retain(|path, _| !step.declares_output(path));
+        if !self.binds() {
+            return;
         }
-        let drift = self.drift(step, &facts.verify_inputs);
-        let proof = match (drift, claims::proof_command(step, status, tolerated)) {
-            (Some(drift), _) => drift,
-            (None, None) => ProofOutcome::NotRun,
-            (None, Some(command)) => {
-                let changed = keying::changed_paths(&facts.verify_inputs, &after.verify_inputs);
-                if !changed.is_empty() {
-                    ProofOutcome::Compromised { changed }
-                } else {
-                    match self.prove(
-                        step,
-                        command,
-                        &self.root,
-                        timeout,
-                        budget.max_output_bytes,
-                        stop,
-                        &mut escaped,
-                    ) {
-                        Err(error) => ProofOutcome::Failed(format!("{error:#}")),
-                        Ok((proof, proof_metrics, proof_notes)) => {
-                            step_metrics = match (step_metrics, proof_metrics) {
-                                (Some(step), Some(proof)) => Some(step.plus(proof)),
-                                (step, proof) => step.or(proof),
-                            };
-                            metrics_notes.extend(proof_notes);
-                            // A verdict holds only for the files it judged:
-                            // the outputs as recorded and the proof inputs as
-                            // they were before it ran.
-                            let mut changed = self.changed_outputs(step, &produced.files);
-                            changed.extend(keying::changed_paths(
-                                &after.verify_inputs,
-                                &self.facts(step).verify_inputs,
-                            ));
-                            if changed.is_empty() {
-                                ProofOutcome::Ran(proof)
-                            } else {
-                                changed.sort();
-                                changed.dedup();
-                                ProofOutcome::Disturbed { changed }
-                            }
-                        }
-                    }
-                }
-            }
-        };
-        let mut claims = claims::settle(step, status, tolerated, proof, &mut limitations);
+        // Declared files the scan does not reach, such as an input git
+        // ignores, are bound too.
+        for (path, content) in keying::changes(&facts.inputs, &after.inputs)
+            .into_iter()
+            .chain(keying::changes(&facts.verify_inputs, &after.verify_inputs))
+        {
+            changed.entry(path).or_insert(content);
+        }
+        for (path, content) in self.still_in_place(step, &keyed.step_key) {
+            changed.entry(path).or_insert(content);
+        }
+        // Outputs are recorded, restored and checked as outputs.
+        changed.retain(|path, _| !step.declares_output(path));
+    }
+
+    /// Settle the step's claims on what its proof shows, and for a proof
+    /// that must fail before the change, on what it does there. A process
+    /// that left its group meanwhile leaves them unverified.
+    fn settle_claims(
+        &self,
+        keyed: &Keyed<'_>,
+        after: &Facts,
+        files: &[FileDigest],
+        budget: ResolvedBudget,
+        stop: &exec::StopSignal,
+        found: &mut Findings,
+    ) {
+        let step = keyed.step;
+        let proof = self.proof(keyed, after, files, budget, stop, found);
+        let mut claims = claims::settle(
+            step,
+            found.status,
+            found.tolerated,
+            proof,
+            &mut found.limitations,
+        );
         if step.fails_before
             && claims
                 .iter()
                 .any(|claim| claim.status == ClaimStatus::Verified)
         {
-            let (red, red_metrics, red_notes) =
-                self.red(step, timeout, budget.max_output_bytes, stop, &mut escaped);
-            step_metrics = match (step_metrics, red_metrics) {
-                (Some(step), Some(red)) => Some(step.plus(red)),
-                (step, red) => step.or(red),
-            };
-            metrics_notes.extend(red_notes);
-            claims = claims::hold_before(claims, red, &mut limitations);
+            let (red, red_metrics, red_notes) = self.red(step, budget, stop, &mut found.escaped);
+            found.spent(red_metrics, red_notes);
+            claims = claims::hold_before(claims, red, &mut found.limitations);
         }
-        if !escaped.is_empty() {
-            // It may still have been at work while the proof ran, or after:
-            // whatever the proof said is not evidence.
-            let pids = |traced: bool| -> Option<String> {
-                let mut pids: Vec<u32> = escaped
-                    .iter()
-                    .filter(|escapee| escapee.traced == traced)
-                    .map(|escapee| escapee.pid)
-                    .collect();
-                pids.sort_unstable();
-                pids.dedup();
-                let named: Vec<String> = pids.iter().map(u32::to_string).collect();
-                (!named.is_empty()).then(|| {
-                    format!(
-                        "{} {}",
-                        if named.len() == 1 { "pid" } else { "pids" },
-                        named.join(", ")
-                    )
-                })
-            };
-            if let Some(pids) = pids(true) {
-                limitations.push(format!(
-                    "a process it started left its process group and was stopped ({pids})"
+        found.claims = claims;
+        found.escapes();
+    }
+
+    /// What the step's proof shows: run when the step succeeded with claims
+    /// to prove, against the proof inputs as they were before the step ran
+    /// and the outputs as recorded, and only if those are still what it
+    /// judged once it is done.
+    fn proof(
+        &self,
+        keyed: &Keyed<'_>,
+        after: &Facts,
+        files: &[FileDigest],
+        budget: ResolvedBudget,
+        stop: &exec::StopSignal,
+        found: &mut Findings,
+    ) -> ProofOutcome {
+        let (step, facts) = (keyed.step, &keyed.facts);
+        let drift = self.drift(step, &facts.verify_inputs);
+        let command = match (
+            drift,
+            claims::proof_command(step, found.status, found.tolerated),
+        ) {
+            (Some(drift), _) => return drift,
+            (None, None) => return ProofOutcome::NotRun,
+            (None, Some(command)) => command,
+        };
+        let changed = keying::changed_paths(&facts.verify_inputs, &after.verify_inputs);
+        if !changed.is_empty() {
+            return ProofOutcome::Compromised { changed };
+        }
+        match self.prove(step, command, &self.root, budget, stop, &mut found.escaped) {
+            Err(error) => ProofOutcome::Failed(format!("{error:#}")),
+            Ok((proof, proof_metrics, proof_notes)) => {
+                found.spent(proof_metrics, proof_notes);
+                // A verdict holds only for the files it judged: the outputs
+                // as recorded and the proof inputs as they were before it ran.
+                let mut changed = self.changed_outputs(step, files);
+                changed.extend(keying::changed_paths(
+                    &after.verify_inputs,
+                    &self.facts(step).verify_inputs,
                 ));
-            }
-            if let Some(pids) = pids(false) {
-                limitations.push(format!(
-                    "a process that left its process group was stopped while this step ran ({pids}); nothing tells which step started it, so each step running then answers for it"
-                ));
-            }
-            // A refutation stands: the step is not let off by what escaped.
-            for claim in &mut claims {
-                if claim.status == ClaimStatus::Verified {
-                    claim.status = ClaimStatus::Unverified;
-                    claim.reason =
-                        Some("a process left its process group while the step ran".into());
+                if changed.is_empty() {
+                    ProofOutcome::Ran(proof)
+                } else {
+                    changed.sort();
+                    changed.dedup();
+                    ProofOutcome::Disturbed { changed }
                 }
             }
         }
+    }
 
-        let (stdout_inline, stdout_truncated) =
-            stream_preview(&outcome.stdout, budget.max_inline_bytes);
-        let (stderr_inline, stderr_truncated) =
-            stream_preview(&outcome.stderr, budget.max_inline_bytes);
-
-        Ok(Receipt::seal(
+    /// The receipt of the execution, as its phases found it. Confined in a
+    /// scratch directory, the step is done with it once this is sealed.
+    fn seal(
+        &self,
+        keyed: Keyed<'_>,
+        setup: Setup<'_>,
+        ran: Ran,
+        produced: Produced,
+        found: Findings,
+    ) -> Receipt {
+        let Keyed {
+            step,
+            step_key,
+            facts,
+            deps,
+        } = keyed;
+        Receipt::seal(
             ReceiptIdentity {
                 flow: self.flow.meta.name.clone(),
                 step_id: step.id.clone(),
-                step_key: step_key.to_string(),
+                step_key,
                 command: step.run.clone(),
-                status,
-                exit_code: outcome.exit_code,
-                stdout_digest,
-                stderr_digest,
+                status: found.status,
+                exit_code: ran.outcome.exit_code,
+                stdout_digest: produced.stdout_digest,
+                stderr_digest: produced.stderr_digest,
                 inputs: facts.inputs,
                 verify_inputs: facts.verify_inputs,
                 outputs: produced.files,
-                changed,
+                changed: ran.changed,
                 deps,
-                claims,
-                limitations,
+                claims: found.claims,
+                limitations: found.limitations,
                 tool: ToolIdentity::default(),
                 candidate: self.candidate.clone(),
-                sandbox: confined.map(|(policy, prepared)| SandboxRecord {
+                sandbox: setup.confined.map(|(policy, prepared)| SandboxRecord {
                     network: policy.network,
                     write: policy.write.clone(),
                     mechanism: prepared.mechanism,
                 }),
             },
             Observed {
-                started_at_ms: outcome.started_at_ms,
-                duration_ms: outcome.duration_ms,
+                started_at_ms: ran.outcome.started_at_ms,
+                duration_ms: ran.outcome.duration_ms,
                 host_os: std::env::consts::OS.to_string(),
-                stdout_inline,
-                stdout_truncated,
-                stderr_inline,
-                stderr_truncated,
-                stdout_bytes: outcome.stdout.len(),
-                stderr_bytes: outcome.stderr.len(),
-                metrics: step_metrics,
-                metrics_notes,
+                stdout_inline: produced.stdout_inline,
+                stdout_truncated: produced.stdout_truncated,
+                stderr_inline: produced.stderr_inline,
+                stderr_truncated: produced.stderr_truncated,
+                stdout_bytes: ran.outcome.stdout.len(),
+                stderr_bytes: ran.outcome.stderr.len(),
+                metrics: found.metrics,
+                metrics_notes: found.metrics_notes,
             },
-        ))
+        )
     }
 
     /// Recorded outputs that now differ from what was recorded, or that are
@@ -536,8 +535,7 @@ impl Runner<'_> {
     fn red(
         &self,
         step: &Step,
-        timeout: Duration,
-        max_output_bytes: usize,
+        budget: ResolvedBudget,
         stop: &exec::StopSignal,
         escaped: &mut Vec<exec::Escaped>,
     ) -> (Red, Option<Metrics>, Vec<String>) {
@@ -551,15 +549,8 @@ impl Runner<'_> {
         let mut spent: Option<Metrics> = None;
         let mut notes = Vec::new();
         let mut prove = |place: &Path| -> Result<Proof> {
-            let (proof, metrics, proof_notes) = self.prove(
-                step,
-                command,
-                place,
-                timeout,
-                max_output_bytes,
-                stop,
-                escaped,
-            )?;
+            let (proof, metrics, proof_notes) =
+                self.prove(step, command, place, budget, stop, escaped)?;
             spent = match (spent.take(), metrics) {
                 (Some(spent), Some(more)) => Some(spent.plus(more)),
                 (spent, more) => spent.or(more),
@@ -600,14 +591,12 @@ impl Runner<'_> {
     /// asked to review for instance, so it reports through its own
     /// `$FLOT_METRICS`, counted as the step's spend. Processes it started
     /// that left its process group are added to `escaped`.
-    #[allow(clippy::too_many_arguments)]
     fn prove(
         &self,
         step: &Step,
         command: &str,
         place: &Path,
-        timeout: Duration,
-        max_output_bytes: usize,
+        budget: ResolvedBudget,
         stop: &exec::StopSignal,
         escaped: &mut Vec<exec::Escaped>,
     ) -> Result<(Proof, Option<Metrics>, Vec<String>)> {
@@ -622,8 +611,15 @@ impl Runner<'_> {
                 );
             }
         }
-        let verification = exec::run_command(command, place, &env, timeout, max_output_bytes, stop)
-            .with_context(|| format!("verify command for step `{}` could not start", step.id))?;
+        let verification = exec::run_command(
+            command,
+            place,
+            &env,
+            Duration::from_secs(budget.timeout_secs),
+            budget.max_output_bytes,
+            stop,
+        )
+        .with_context(|| format!("verify command for step `{}` could not start", step.id))?;
         escaped.extend(verification.escaped.iter().cloned());
         let (metrics, notes) = read_metrics(&metrics_path);
         let notes = notes
@@ -645,6 +641,228 @@ impl Runner<'_> {
             metrics,
             notes,
         ))
+    }
+}
+
+/// How a step that never produced a result of its own ended.
+pub(super) enum Unrun {
+    /// The run did not start it.
+    Cancelled,
+    /// It could not run.
+    Failed,
+    /// Its sandbox cannot be enforced here.
+    Unconfined,
+}
+
+/// Where and how a step's command runs.
+struct Setup<'s> {
+    env: BTreeMap<String, String>,
+    /// Where the command reports what it spent.
+    metrics_path: PathBuf,
+    /// The confined step's own directory for its metrics and temporary
+    /// files, removed with the setup.
+    _scratch: Option<Scratch>,
+    /// The sandbox the step asked for, prepared.
+    confined: Option<(&'s Sandbox, sandbox::Prepared)>,
+}
+
+/// Why a step's sandbox cannot be enforced here.
+struct Unenforceable(anyhow::Error);
+
+/// What running a step's command left: how it ended, and what it changed.
+struct Ran {
+    outcome: exec::Outcome,
+    /// What the snapshots around a step with `may_change` could not read.
+    problems: Vec<String>,
+    /// Files it changed outside its `may_change`, when it declares one.
+    strayed: Option<Vec<String>>,
+    /// What every attempt so far changed, when the receipt binds that.
+    changed: BTreeMap<String, Option<String>>,
+}
+
+/// What a step produced, kept in the store: its output streams, with what
+/// its receipt shows of them inline, and the files of its declared outputs.
+struct Produced {
+    stdout_digest: String,
+    stderr_digest: String,
+    stdout_inline: String,
+    stdout_truncated: bool,
+    stderr_inline: String,
+    stderr_truncated: bool,
+    files: Vec<FileDigest>,
+}
+
+/// What the phases after a step's command find: its status, its claims,
+/// and its limitations in the order found, which is part of the receipt
+/// id; and what the step and its proofs spent.
+struct Findings {
+    status: StepStatus,
+    /// A failure that `allow_failure` let pass: the step is `ok`, and
+    /// proves nothing.
+    tolerated: bool,
+    claims: Vec<ClaimRecord>,
+    limitations: Vec<String>,
+    metrics: Option<Metrics>,
+    metrics_notes: Vec<String>,
+    /// Processes that left their group, from the step and from its proofs.
+    escaped: Vec<exec::Escaped>,
+}
+
+impl Findings {
+    /// The step's status from how its command ended: a limitation, after
+    /// `limitations`, for each way it did not simply exit zero, and whether
+    /// `allow_failure` let a failure pass. `reported` is what it reported
+    /// spending.
+    fn ended(
+        mut limitations: Vec<String>,
+        step: &Step,
+        budget: ResolvedBudget,
+        outcome: &exec::Outcome,
+        reported: (Option<Metrics>, Vec<String>),
+    ) -> Findings {
+        if outcome.strays_stopped {
+            limitations.push(
+                "left processes running when it exited; they were stopped, so nothing a step starts outlives it".into(),
+            );
+        }
+        if outcome.output_detached {
+            limitations.push(
+                "a process that left the step's process group still held its output; captured output may be incomplete".into(),
+            );
+        }
+        let mut tolerated = false;
+        let status = if outcome.timed_out {
+            limitations.push(format!(
+                "stopped at its {}s timeout budget; output is partial",
+                budget.timeout_secs
+            ));
+            StepStatus::Timeout
+        } else if outcome.interrupted {
+            limitations.push("stopped because flot was asked to stop; output is partial".into());
+            StepStatus::Failed
+        } else if outcome.output_overflow {
+            limitations.push(format!(
+                "stopped after {} bytes on one output stream, its max_output_bytes budget; output is cut there",
+                budget.max_output_bytes
+            ));
+            StepStatus::Failed
+        } else if outcome.exit_code == Some(0) {
+            StepStatus::Ok
+        } else if step.allow_failure {
+            tolerated = true;
+            limitations.push(format!(
+                "{} but the step is declared allow_failure, so the run is not failed by it",
+                ending(outcome)
+            ));
+            StepStatus::Ok
+        } else {
+            if let Some(signal) = outcome.signal {
+                limitations.push(format!("was killed by signal {signal}"));
+            }
+            StepStatus::Failed
+        };
+        let (metrics, metrics_notes) = reported;
+        Findings {
+            status,
+            tolerated,
+            claims: Vec::new(),
+            limitations,
+            metrics,
+            metrics_notes,
+            escaped: outcome.escaped.clone(),
+        }
+    }
+
+    /// A success missing a declared output fails, unless the step is
+    /// declared `allow_failure`.
+    fn missing_outputs(&mut self, step: &Step, unmatched: &[String]) {
+        if !self.status.is_ok() || unmatched.is_empty() {
+            return;
+        }
+        let missing = unmatched.join(", ");
+        if step.allow_failure {
+            self.tolerated = true;
+            self.limitations.push(format!(
+                "produced no file for declared output {missing}, but the step is declared allow_failure"
+            ));
+        } else {
+            self.limitations
+                .push(format!("produced no file for declared output {missing}"));
+            self.status = StepStatus::Failed;
+        }
+    }
+
+    /// A step that changed files outside its `may_change` fails, unless it
+    /// is declared `allow_failure`.
+    fn strayed(&mut self, step: &Step, strayed: Option<&[String]>) {
+        let Some(strayed) = strayed.filter(|strayed| !strayed.is_empty()) else {
+            return;
+        };
+        let list = strayed.join(", ");
+        if step.allow_failure {
+            self.tolerated = self.tolerated || self.status.is_ok();
+            self.limitations.push(format!(
+                "changed files outside may_change ({list}), but the step is declared allow_failure"
+            ));
+        } else {
+            self.limitations
+                .push(format!("changed files outside may_change: {list}"));
+            if self.status.is_ok() {
+                self.status = StepStatus::Failed;
+            }
+        }
+    }
+
+    /// Count what a proof of the step reported spending as the step's.
+    fn spent(&mut self, metrics: Option<Metrics>, notes: Vec<String>) {
+        self.metrics = match (self.metrics, metrics) {
+            (Some(step), Some(proof)) => Some(step.plus(proof)),
+            (step, proof) => step.or(proof),
+        };
+        self.metrics_notes.extend(notes);
+    }
+
+    /// A process that left its group may still have been at work while the
+    /// proof ran, or after: whatever the proof said is not evidence.
+    fn escapes(&mut self) {
+        if self.escaped.is_empty() {
+            return;
+        }
+        let pids = |traced: bool| -> Option<String> {
+            let mut pids: Vec<u32> = self
+                .escaped
+                .iter()
+                .filter(|escapee| escapee.traced == traced)
+                .map(|escapee| escapee.pid)
+                .collect();
+            pids.sort_unstable();
+            pids.dedup();
+            let named: Vec<String> = pids.iter().map(u32::to_string).collect();
+            (!named.is_empty()).then(|| {
+                format!(
+                    "{} {}",
+                    if named.len() == 1 { "pid" } else { "pids" },
+                    named.join(", ")
+                )
+            })
+        };
+        if let Some(pids) = pids(true) {
+            self.limitations.push(format!(
+                "a process it started left its process group and was stopped ({pids})"
+            ));
+        }
+        if let Some(pids) = pids(false) {
+            self.limitations.push(format!(
+                "a process that left its process group was stopped while this step ran ({pids}); nothing tells which step started it, so each step running then answers for it"
+            ));
+        }
+        // A refutation stands: the step is not let off by what escaped.
+        for claim in &mut self.claims {
+            if claim.status == ClaimStatus::Verified {
+                claim.status = ClaimStatus::Unverified;
+                claim.reason = Some("a process left its process group while the step ran".into());
+            }
+        }
     }
 }
 

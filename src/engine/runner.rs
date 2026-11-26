@@ -12,8 +12,10 @@
 mod attempts;
 mod candidates;
 mod execute;
+mod manifest;
 mod reuse;
 
+use self::execute::Unrun;
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicU64;
@@ -24,10 +26,9 @@ use serde::Serialize;
 
 use crate::core::attest::VouchedStep;
 use crate::core::flow::{Flow, Step};
-use crate::core::metrics::{self, Metrics, Spend};
+use crate::core::metrics::{self, Metrics};
 use crate::core::receipt::{
-    candidate_rank, sum_costs, verdict_for, ClaimCounts, DepRef, FileDigest, Receipt,
-    ReceiptIdentity, RunAttempt, RunCandidate, RunManifest, RunStep, StepStatus, FLOT_VERSION,
+    candidate_rank, sum_costs, ClaimCounts, DepRef, FileDigest, Receipt, RunManifest, StepStatus,
 };
 use crate::engine::baseline::Baseline;
 use crate::engine::claims::ProofOutcome;
@@ -120,6 +121,16 @@ struct Work<'f> {
     blocked: Vec<String>,
     deps: Vec<DepRef>,
     gate: Option<CostGate>,
+}
+
+/// A step with what keys it: the files it reads, the receipts it follows,
+/// and the key they make. Every receipt of the step records them.
+#[derive(Clone)]
+struct Keyed<'s> {
+    step: &'s Step,
+    step_key: String,
+    facts: Facts,
+    deps: Vec<DepRef>,
 }
 
 /// A step that reached a receipt, and whether that receipt was reused.
@@ -260,6 +271,16 @@ impl<'a> Runner<'a> {
         keying::step_key(&self.flow.meta.name, step, facts, deps)
     }
 
+    /// `step` with the key `facts` and `deps` make for it.
+    fn keyed<'s>(&self, step: &'s Step, facts: Facts, deps: Vec<DepRef>) -> Keyed<'s> {
+        Keyed {
+            step_key: self.step_key(step, &facts, &deps),
+            step,
+            facts,
+            deps,
+        }
+    }
+
     /// Plan the run: what would execute, what would be reused, what evidence
     /// gaps the flow already has. Reads files, runs nothing.
     pub fn plan(&self, options: &RunOptions) -> Result<Vec<PlanEntry>> {
@@ -394,289 +415,10 @@ impl<'a> Runner<'a> {
             |work| self.settle(work, options),
         )?;
 
-        let mut manifest_steps: Vec<RunStep> = Vec::new();
-        let mut reports: Vec<StepReport> = Vec::new();
-        let mut totals = ClaimCounts::default();
-        let mut spend = Spend::default();
-        // Executions whose cost is unknown: they reported nothing, or no cost.
-        let mut silent: Vec<String> = Vec::new();
-        let mut unpriced: Vec<String> = Vec::new();
-        let mut limitations: Vec<String> = Vec::new();
-        // Held to no revision, a proof can be edited along with the work it
-        // judges; what it read last time here is the one thing to compare.
-        let proofs_before = match self.baseline {
-            Some(_) => HashMap::new(),
-            None => {
-                // Only a step with a proof has one to compare, and the store
-                // is read until each such step is found.
-                let proven: Vec<String> = order
-                    .iter()
-                    .filter(|step_id| {
-                        self.flow
-                            .step(step_id)
-                            .is_some_and(|step| step.verify.is_some())
-                    })
-                    .cloned()
-                    .collect();
-                self.proofs_before(&proven)
-            }
-        };
-
-        // Assemble in dependency order, never in completion order: the run root
-        // must not depend on which worker finished first.
-        for step_id in &order {
-            let entry = settled
-                .get(step_id)
-                .expect("every selected step settles exactly once");
-            let receipt = &entry.receipt;
-            let cached = entry.cached;
-            let mut step_limitations = receipt.identity.limitations.clone();
-            step_limitations.extend(entry.notes.iter().cloned());
-            if let Some((run_id, Some(earlier))) = proofs_before.get(step_id) {
-                let changed = proof_changes(earlier, &receipt.identity);
-                if !changed.is_empty() {
-                    step_limitations.push(format!(
-                        "its proof changed since run {run_id} ({}); read the change before trusting the verdict",
-                        changed.join(", ")
-                    ));
-                }
-            }
-            let counts = receipt.claim_counts();
-            totals.add(counts);
-            let mut attempts = Vec::new();
-            for earlier in &entry.attempts {
-                spend.add_executed(earlier.observed.metrics);
-                unknown_cost(earlier, &mut silent, &mut unpriced);
-                attempts.push(RunAttempt {
-                    receipt_id: earlier.receipt_id.clone(),
-                    observed_digest: self.store.put_observation(&earlier.observed)?,
-                });
-            }
-            let mut candidates = Vec::new();
-            for candidate in &entry.candidates {
-                let mut attempts = Vec::new();
-                for earlier in candidate.attempts.iter().chain([&candidate.receipt]) {
-                    spend.add_executed(earlier.observed.metrics);
-                    unknown_cost(earlier, &mut silent, &mut unpriced);
-                    attempts.push(RunAttempt {
-                        receipt_id: earlier.receipt_id.clone(),
-                        observed_digest: self.store.put_observation(&earlier.observed)?,
-                    });
-                }
-                let last = attempts.pop().expect("a candidate has a last receipt");
-                candidates.push(RunCandidate {
-                    name: candidate.name.clone(),
-                    receipt_id: last.receipt_id,
-                    observed_digest: last.observed_digest,
-                    attempts,
-                });
-            }
-            if !cached && receipt.identity.candidate.is_some() {
-                let kept = Contender {
-                    name: receipt.identity.candidate.clone().unwrap_or_default(),
-                    receipt: receipt.clone(),
-                    attempts: entry.attempts.clone(),
-                };
-                let step = self.flow.step(step_id).expect("validated step");
-                let told: Vec<String> = step
-                    .candidates
-                    .iter()
-                    .filter_map(|name| {
-                        std::iter::once(&kept)
-                            .chain(&entry.candidates)
-                            .find(|ran| &ran.name == name)
-                    })
-                    .map(|ran| {
-                        let tries = ran.attempts.len() + 1;
-                        format!(
-                            "{} {}{} ({})",
-                            ran.name,
-                            outcome(&ran.receipt),
-                            if tries > 1 {
-                                format!(" after {tries} attempts")
-                            } else {
-                                String::new()
-                            },
-                            ran.cost_micro_usd()
-                                .map(metrics::format_usd)
-                                .unwrap_or_else(|| "cost unknown".into())
-                        )
-                    })
-                    .collect();
-                step_limitations.push(format!(
-                    "candidates {}; kept {}",
-                    told.join(", "),
-                    kept.name
-                ));
-            }
-            if !entry.attempts.is_empty() {
-                let mut told: Vec<String> = entry
-                    .attempts
-                    .iter()
-                    .enumerate()
-                    .map(|(number, earlier)| format!("{} {}", number + 1, outcome(earlier)))
-                    .collect();
-                told.push(format!("{} {}", told.len() + 1, outcome(receipt)));
-                step_limitations.push(format!(
-                    "took {} attempts of {} allowed: {}",
-                    told.len(),
-                    self.flow.step(step_id).expect("validated step").attempts(),
-                    told.join(", ")
-                ));
-            }
-            if cached {
-                spend.add_reused(receipt.observed.metrics);
-            } else if receipt.identity.status != StepStatus::Cancelled {
-                spend.add_executed(receipt.observed.metrics);
-                unknown_cost(receipt, &mut silent, &mut unpriced);
-            }
-            for limitation in &step_limitations {
-                limitations.push(format!("{}: {}", step_id, limitation));
-            }
-            if !cached {
-                for note in &receipt.observed.metrics_notes {
-                    limitations.push(format!("{}: {}", step_id, note));
-                }
-            }
-            manifest_steps.push(RunStep {
-                step_id: step_id.clone(),
-                receipt_id: receipt.receipt_id.clone(),
-                status: receipt.identity.status,
-                cached,
-                claims: counts,
-                observed_digest: self.store.put_observation(&receipt.observed)?,
-                attempts,
-                candidates,
-                vouched_by: entry.vouched_by.clone(),
-            });
-            reports.push(StepReport {
-                step_id: step_id.clone(),
-                receipt_id: receipt.receipt_id.clone(),
-                stdout_digest: receipt.identity.stdout_digest.clone(),
-                status: receipt.identity.status,
-                cached,
-                claims: counts,
-                duration_ms: receipt.observed.duration_ms,
-                stdout_inline: receipt.observed.stdout_inline.clone(),
-                stdout_truncated: receipt.observed.stdout_truncated,
-                stderr_inline: receipt.observed.stderr_inline.clone(),
-                stderr_truncated: receipt.observed.stderr_truncated,
-                limitations: step_limitations,
-                metrics: receipt.observed.metrics,
-                outputs: receipt.identity.outputs.clone(),
-                candidate: receipt.identity.candidate.clone(),
-                attempts: if cached || receipt.identity.status == StepStatus::Cancelled {
-                    0
-                } else {
-                    entry.attempts.len() + 1
-                },
-            });
-        }
-
-        if let Some(baseline) = self.baseline {
-            limitations.push(format!("proofs checked against {}", baseline.label()));
-            let missing = baseline.missing_steps(|id| self.flow.step(id).is_some());
-            if !missing.is_empty() {
-                limitations.push(format!(
-                    "steps with claims at {} are not in this flow: {}; their claims are not made",
-                    baseline.label(),
-                    missing.join(", ")
-                ));
-            }
-        } else if order.iter().any(|step_id| {
-            self.flow
-                .step(step_id)
-                .is_some_and(|step| step.verify.is_some())
-        }) {
-            limitations.push(
-                "proofs are held to no revision: an edited proof passes here; set proofs_from (flows.md#proofs-from-a-revision)"
-                    .into(),
-            );
-        }
-        // A selection that leaves steps out is recorded, so no report reads
-        // its verdict as the flow's.
-        let partial =
-            (order.len() < self.flow.steps.len()).then_some(crate::core::receipt::Partial {
-                selected: order.len(),
-                of: self.flow.steps.len(),
-            });
-        if let Some(partial) = partial {
-            limitations.push(format!(
-                "partial run: {} of {} steps selected",
-                partial.selected, partial.of
-            ));
-        }
-        if let Some(ceiling) = ceiling_micro_usd {
-            if !silent.is_empty() {
-                limitations.push(format!(
-                    "{} executed step(s) reported no metrics ({}); the cost ceiling cannot see what they spent",
-                    silent.len(),
-                    silent.join(", ")
-                ));
-            }
-            if !unpriced.is_empty() {
-                limitations.push(format!(
-                    "{} executed step(s) reported no cost ({}); the cost ceiling cannot see what they spent",
-                    unpriced.len(),
-                    unpriced.join(", ")
-                ));
-            }
-            if spend.cost_micro_usd > ceiling {
-                limitations.push(format!(
-                    "spent {} against a {} ceiling: the ceiling is checked before each step starts, so steps already running when it was crossed finished",
-                    metrics::format_usd(spend.cost_micro_usd),
-                    metrics::format_usd(ceiling)
-                ));
-            }
-        }
-        limitations.extend(self.output_conflicts(&order, &settled)?);
-        if jobs > 1 {
-            limitations.push(format!(
-                "up to {jobs} steps ran concurrently; flot checks the outputs steps declare, but cannot see files they write without declaring them"
-            ));
-        }
-
-        let pairs: Vec<(String, String)> = manifest_steps
-            .iter()
-            .map(|step| (step.step_id.clone(), step.receipt_id.clone()))
-            .collect();
-        let root_digest = RunManifest::root_of(&pairs);
-        let verdict = verdict_for(&manifest_steps, totals);
-        let duration_ms = exec::millis(started.elapsed());
-        // What the guard refused since the run before this one finished,
-        // agents this run started included.
-        let previous_end = self
-            .store
-            .resolve_run("latest")
-            .map(|previous| previous.started_at_ms + previous.duration_ms)
-            .unwrap_or(0);
-        let refusals = self
-            .store
-            .refusals(previous_end, started_at_ms + duration_ms)?;
-        let manifest = RunManifest {
-            run_id: RunManifest::id_for(started_at_ms, &root_digest),
-            flow: self.flow.meta.name.clone(),
-            flow_digest: self.flow.digest(),
-            root_digest,
-            verdict,
-            partial,
-            steps: manifest_steps,
-            claims: totals,
-            limitations,
-            max_parallel: jobs,
-            spend,
-            max_cost_micro_usd: ceiling_micro_usd,
-            started_at_ms,
-            duration_ms,
-            flot_version: FLOT_VERSION.to_string(),
-            refusals,
-        };
-        self.store.save_run(&manifest)?;
-        Ok(RunReport {
-            manifest,
-            steps: reports,
-            vouched: Vec::new(),
-        })
+        let assembly = self.assemble(&order, &settled, jobs, ceiling_micro_usd)?;
+        let report = self.report(assembly, started_at_ms, started)?;
+        self.store.save_run(&report.manifest)?;
+        Ok(report)
     }
 
     /// Derive a ready step's work from its settled dependencies. Spend is read
@@ -740,9 +482,7 @@ impl<'a> Runner<'a> {
             deps,
             gate,
         } = work;
-        let facts = self.facts(step);
-        let mut limitations = facts.limitations.clone();
-        let step_key = self.step_key(step, &facts, &deps);
+        let keyed = self.keyed(step, self.facts(step), deps);
         // Facts about this run, such as why a cached receipt was passed over,
         // are notes. Only facts about the work go into a receipt.
         let mut notes = Vec::new();
@@ -751,45 +491,20 @@ impl<'a> Runner<'a> {
         let mut vouched_by = Vec::new();
 
         let (receipt, cached) = if options.stop.is_set() {
-            limitations.push("not run: flot was asked to stop".into());
-            (
-                self.unrun_receipt(
-                    StepStatus::Cancelled,
-                    "step was not run",
-                    step,
-                    &step_key,
-                    facts,
-                    deps,
-                    limitations,
-                )?,
-                false,
-            )
+            let why = "not run: flot was asked to stop".to_string();
+            (self.unrun_receipt(Unrun::Cancelled, keyed, why)?, false)
         } else if !blocked.is_empty() {
-            limitations.push(format!(
-                "not run: dependency {} did not hold",
-                blocked.join(", ")
-            ));
-            (
-                self.unrun_receipt(
-                    StepStatus::Cancelled,
-                    "step was not run",
-                    step,
-                    &step_key,
-                    facts,
-                    deps,
-                    limitations,
-                )?,
-                false,
-            )
+            let why = format!("not run: dependency {} did not hold", blocked.join(", "));
+            (self.unrun_receipt(Unrun::Cancelled, keyed, why)?, false)
         } else if let Some((known, restored)) = if force || step.always {
             None
-        } else if self.drift(step, &facts.verify_inputs).is_some() {
+        } else if self.drift(step, &keyed.facts.verify_inputs).is_some() {
             // A receipt proven against something else does not stand in.
             None
         } else if step.candidates.is_empty() {
-            self.reuse(step, &step_key, &mut notes)
+            self.reuse(step, &keyed.step_key, &mut notes)
         } else {
-            self.reuse_candidate(step, &deps, &mut notes)
+            self.reuse_candidate(step, &keyed.deps, &mut notes)
         } {
             // Reuse costs nothing, so the ceiling never blocks a cache hit.
             notes.extend(restored);
@@ -798,44 +513,21 @@ impl<'a> Runner<'a> {
         } else if let Some(gate) =
             gate.filter(|gate| gate.spent_micro_usd >= gate.ceiling_micro_usd)
         {
-            limitations.push(format!(
+            let why = format!(
                 "not run: run cost ceiling of {} reached ({} spent by executed steps)",
                 metrics::format_usd(gate.ceiling_micro_usd),
                 metrics::format_usd(gate.spent_micro_usd)
-            ));
-            (
-                self.unrun_receipt(
-                    StepStatus::Cancelled,
-                    "step was not run",
-                    step,
-                    &step_key,
-                    facts,
-                    deps,
-                    limitations,
-                )?,
-                false,
-            )
+            );
+            (self.unrun_receipt(Unrun::Cancelled, keyed, why)?, false)
         } else if step.candidates.is_empty() {
-            let (receipt, earlier) =
-                self.attempt(step, step_key, facts, deps, gate, &options.stop, &mut notes)?;
+            let (receipt, earlier) = self.attempt(keyed, gate, &options.stop, &mut notes)?;
             attempts = earlier;
             (receipt, false)
         } else {
-            let mut ran = self.compete(step, &deps, gate, &options.stop, &mut notes)?;
+            let mut ran = self.compete(step, &keyed.deps, gate, &options.stop, &mut notes)?;
             if ran.is_empty() {
-                limitations.push("not run: no candidate started".into());
-                (
-                    self.unrun_receipt(
-                        StepStatus::Cancelled,
-                        "step was not run",
-                        step,
-                        &step_key,
-                        facts,
-                        deps,
-                        limitations,
-                    )?,
-                    false,
-                )
+                let why = "not run: no candidate started".to_string();
+                (self.unrun_receipt(Unrun::Cancelled, keyed, why)?, false)
             } else {
                 let kept = (0..ran.len())
                     .min_by_key(|&index| {
@@ -870,100 +562,6 @@ impl<'a> Runner<'a> {
             attempts,
             candidates,
         })
-    }
-
-    /// For each of `steps`, the newest run executed here that has it, and its
-    /// receipt there (`None` when that receipt is unreadable). Imported runs
-    /// are not this host's, and a run of another flow is not this step's.
-    fn proofs_before(
-        &self,
-        steps: &[String],
-    ) -> HashMap<String, (String, Option<ReceiptIdentity>)> {
-        let mut found = HashMap::new();
-        for run_id in self.store.list_runs().unwrap_or_default() {
-            if found.len() == steps.len() {
-                break;
-            }
-            if self.store.is_imported(&run_id) {
-                continue;
-            }
-            let Ok(run) = self.store.resolve_run(&run_id) else {
-                continue;
-            };
-            if run.flow != self.flow.meta.name {
-                continue;
-            }
-            for entry in run.steps {
-                if found.contains_key(&entry.step_id) || !steps.contains(&entry.step_id) {
-                    continue;
-                }
-                let earlier = self
-                    .store
-                    .load_receipt(&entry.receipt_id)
-                    .ok()
-                    .map(|receipt| receipt.identity);
-                found.insert(entry.step_id, (run_id.clone(), earlier));
-            }
-        }
-        found
-    }
-}
-
-/// What differs between the proofs two receipts of a step record: the files
-/// it read, its command and its claims. A command neither receipt records is
-/// not compared.
-fn proof_changes(earlier: &ReceiptIdentity, now: &ReceiptIdentity) -> Vec<String> {
-    let mut changed = keying::changed_paths(&earlier.verify_inputs, &now.verify_inputs);
-    let command = |identity: &ReceiptIdentity| {
-        identity
-            .claims
-            .iter()
-            .find_map(|claim| claim.verify_command.clone())
-    };
-    if let (Some(before), Some(after)) = (command(earlier), command(now)) {
-        if before != after {
-            changed.push("the verify command".into());
-        }
-    }
-    if !earlier
-        .claims
-        .iter()
-        .map(|claim| &claim.text)
-        .eq(now.claims.iter().map(|claim| &claim.text))
-    {
-        changed.push("the claims".into());
-    }
-    changed
-}
-
-/// How one attempt ended, in a word or two: `held`, or why not.
-fn outcome(receipt: &Receipt) -> String {
-    let counts = receipt.claim_counts();
-    if !receipt.identity.status.is_ok() {
-        match receipt.identity.exit_code {
-            Some(code) => format!("{} (exit {code})", receipt.identity.status.label()),
-            None => receipt.identity.status.label().to_string(),
-        }
-    } else if counts.refuted > 0 {
-        "refuted".into()
-    } else if !receipt.is_reusable() {
-        "unverified".into()
-    } else {
-        "held".into()
-    }
-}
-
-/// Note an execution whose cost is unknown, named by its step and, for a
-/// candidate, the candidate.
-fn unknown_cost(receipt: &Receipt, silent: &mut Vec<String>, unpriced: &mut Vec<String>) {
-    let label = match &receipt.identity.candidate {
-        Some(name) => format!("{} ({name})", receipt.identity.step_id),
-        None => receipt.identity.step_id.clone(),
-    };
-    match receipt.observed.metrics {
-        None => silent.push(label),
-        Some(metrics) if metrics.cost_micro_usd.is_none() => unpriced.push(label),
-        Some(_) => {}
     }
 }
 

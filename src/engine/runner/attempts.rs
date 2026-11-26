@@ -7,14 +7,13 @@ use std::sync::atomic::Ordering;
 
 use anyhow::{Context, Result};
 
-use crate::core::flow::Step;
 use crate::core::metrics;
 use crate::core::preview::stream_preview;
-use crate::core::receipt::{DepRef, Receipt, StepStatus};
+use crate::core::receipt::Receipt;
 use crate::engine::exec;
-use crate::engine::keying::Facts;
 
-use super::{CostGate, Runner, METRICS_SEQUENCE};
+use super::execute::Unrun;
+use super::{CostGate, Keyed, Runner, METRICS_SEQUENCE};
 
 impl Runner<'_> {
     /// Execute a step until it holds or its attempts run out. An attempt that
@@ -25,17 +24,14 @@ impl Runner<'_> {
     /// No further attempt starts once flot is asked to stop, once the run's
     /// cost ceiling is reached, or after a command that could not start at
     /// all, which another attempt would not change.
-    #[allow(clippy::too_many_arguments)]
     pub(super) fn attempt(
         &self,
-        step: &Step,
-        mut step_key: String,
-        mut facts: Facts,
-        deps: Vec<DepRef>,
+        mut keyed: Keyed<'_>,
         gate: Option<CostGate>,
         stop: &exec::StopSignal,
         notes: &mut Vec<String>,
     ) -> Result<(Receipt, Vec<Receipt>)> {
+        let step = keyed.step;
         let allowed = step.attempts();
         let mut earlier: Vec<Receipt> = Vec::new();
         // The workspace before the first attempt: each attempt's receipt
@@ -58,32 +54,15 @@ impl Runner<'_> {
                     path.to_string_lossy().to_string(),
                 );
             }
-            let executed = self.execute(
-                step,
-                &step_key,
-                facts.clone(),
-                deps.clone(),
-                &extra,
-                stop,
-                &mut since,
-            );
+            let executed = self.execute(keyed.clone(), &extra, stop, &mut since);
             if let Some(path) = &feedback {
                 let _ = std::fs::remove_file(path);
             }
             let receipt = match executed {
                 Ok(receipt) => receipt,
                 Err(error) => {
-                    let mut limitations = facts.limitations.clone();
-                    limitations.push(format!("could not run: {error:#}"));
-                    let receipt = self.unrun_receipt(
-                        StepStatus::Failed,
-                        "step could not run",
-                        step,
-                        &step_key,
-                        facts,
-                        deps,
-                        limitations,
-                    )?;
+                    let why = format!("could not run: {error:#}");
+                    let receipt = self.unrun_receipt(Unrun::Failed, keyed, why)?;
                     return Ok((receipt, earlier));
                 }
             };
@@ -108,8 +87,7 @@ impl Runner<'_> {
             }
             self.store.put_receipt(&receipt)?;
             earlier.push(receipt);
-            facts = self.facts(step);
-            step_key = self.step_key(step, &facts, &deps);
+            keyed = self.keyed(step, self.facts(step), keyed.deps);
         }
     }
 

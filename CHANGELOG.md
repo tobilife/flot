@@ -59,6 +59,12 @@ The guard corpus has 260 rows.
   looks at the processes below each running command every 20 ms and reads
   `FLOT_COMMAND_ID` from their environment; one that clears its environment
   and leaves its parent within 20 ms is still not seen.
+- Linux: a process a step starts in the background, caught by flot inside
+  `execve` with its environment not yet readable, was taken for one without
+  `FLOT_COMMAND_ID`: it was stopped while its step still ran and charged to
+  every running step. flot now looks again for up to 50 ms before deciding.
+  Found by CI on main, where the escape tests failed once; reading the
+  environment of adopted processes in a loop showed 1 empty read in 134,141.
 
 ## 0.2.7
 

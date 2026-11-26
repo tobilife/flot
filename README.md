@@ -339,7 +339,7 @@ agent with the permissions you would give it anyway.
 
 At least one claim has no proof that settled it: the step has no `verify`
 command, the step failed or was tolerated with `allow_failure`, the proof
-timed out, was killed, or saw its files change, or, on Linux, a process the
+timed out, was killed, or saw its files change, or, on Linux or macOS, a process the
 step or its proof started outlived it (a daemon, `setsid`) and was stopped.
 `flot show` names each
 unverified claim, and `flot plan` lists claims that lack a proof before you

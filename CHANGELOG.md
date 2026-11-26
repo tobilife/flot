@@ -1,5 +1,34 @@
 # Changelog
 
+## Unreleased
+
+The guard's remaining known holes, measured with the probes that found them
+(each got through 0.2.7 with exit 0):
+
+- A variable the line sets is followed: `f=check.sh; rm $f` is refused.
+- Scripts a command runs are read and judged (`sh clean.sh`, `. x.sh`,
+  `./x`, a `#!` program, PowerShell `-File`), up to 1 MiB each.
+- Interpreter code is read for the protected names it holds: `python3 -c
+  "open('check.sh','w')…"` is refused, `python3 -c 'print(1)'` is not.
+- A name built when the line runs matches every protected path it could
+  spell, and code built for `sh` or `eval` is refused
+  (`sh -c "$(printf 'rm che%s' ck.sh)"`); `$(mktemp …)` stands for a fresh
+  name, so `T=$(mktemp -d); …; rm -rf $T` stays allowed.
+- PowerShell: `$env:USERPROFILE` and the other environment variables,
+  `$HOME`, `$PWD`, `$name = '…'`, `cd`/`Set-Location`, `-EncodedCommand`,
+  `Start-Process` and `$_` in `ForEach-Object` are followed.
+- Any call that names the signing key, a retired copy or `host.secret`
+  is refused, reads included, with or without a flow.
+
+Replaying this host's transcripts (117 on WSL with 4,725 calls, 755 on
+Windows with 8,057) refused nothing new. The guard corpus has 231 rows.
+
+- macOS: a process a step or its proof starts that leaves its process group
+  is stopped and leaves the step's claims unverified, as on Linux. flot
+  looks at the processes below each running command every 20 ms and reads
+  `FLOT_COMMAND_ID` from their environment; one that clears its environment
+  and leaves its parent within 20 ms is still not seen.
+
 ## 0.2.7
 
 Five ways a cached step reported a verdict its proof would not give on the

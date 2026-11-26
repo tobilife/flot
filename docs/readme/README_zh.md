@@ -284,7 +284,7 @@ macOS 用 Seatbelt 配置）；无法强制的地方，
 <summary><strong>为什么我的运行是 <code>unverified</code>？</strong></summary>
 
 至少有一项声明没有得到确定的证明：步骤没有 `verify` 命令，步骤失败或通过 `allow_failure`
-被容忍，证明超时、被终止、运行期间其文件发生了变化，或者在 Linux 上，步骤或其证明启动的
+被容忍，证明超时、被终止、运行期间其文件发生了变化，或者在 Linux 或 macOS 上，步骤或其证明启动的
 进程（守护进程、`setsid`）比它活得更久而被停止。`flot show` 会列出每一项未验证的
 声明，`flot plan` 在运行任何东西之前就会列出缺少证明的声明。
 

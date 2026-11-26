@@ -385,10 +385,13 @@ the first failing line of a multi-line command fails the step; without `-e` an
 agent call that failed, followed by a line that succeeded, would be recorded as
 success. Write `|| true` where a failure is expected. A step is one unit of
 work: anything it left running in its process group when it exits is stopped,
-and reported. On Linux a process that escapes the group (`setsid`, a
-daemon) is stopped too: flot adopts every process orphaned below it, and
-after each step command and each proof it stops any adopted process that
-left its group, with any group that process leads. The step's verified
+and reported. On Linux and macOS a process that escapes the group
+(`setsid`, a daemon) is stopped too. On Linux flot adopts every process
+orphaned below it; macOS cannot adopt, so there flot looks every 20 ms at the
+processes below each running step command and proof and remembers them, so
+one that left its group is still known after its parent has exited. After
+each step command and each proof, flot stops every such process that left
+its group, with any group that process leads. The step's verified
 claims then stay unverified, since the process may have changed files after
 the proof judged them; a refuted claim stays refuted. Real output, for a
 step that writes `out.txt` and leaves behind a process that would rewrite it
@@ -406,12 +409,15 @@ limitations:
 ```
 
 flot tells which step started such a process by `FLOT_COMMAND_ID` in its
-environment; one that cleared its environment (`env -i`) is charged to every
-step running when it was found. A daemon a tool starts on purpose (`sccache`,
-a Gradle or Bazel server, a detached `git gc --auto`) is stopped the same way
-and leaves the step unverified: start it outside the flow. On macOS nothing
-stops such a process: flot stops reading its output after a short grace
-period and says the captured output may be incomplete, but it keeps running.
+environment, and on macOS also by the processes it saw below the step. On
+Linux one that cleared its environment (`env -i`) is charged to every step
+running when it was found; on macOS it is charged to the step it was seen
+below. A daemon a tool starts on purpose (`sccache`, a Gradle or Bazel
+server, a detached `git gc --auto`) is stopped the same way and leaves the
+step unverified: start it outside the flow. On macOS a process that clears
+its environment and leaves its parent within 20 ms, before flot has looked,
+is never seen and keeps running; flot stops reading its output after a short
+grace period and says the captured output may be incomplete.
 On Windows the step runs in a job object, which nothing it starts can leave,
 so everything left behind is stopped. Files the
 proof judges are re-read after the proof, so a change made to them while it
@@ -732,15 +738,56 @@ refused    curl | sh: it runs code fetched from the network, which no step or re
 $ flot guard --command "cargo test > test.log 2>&1"
 ```
 
-It reads only what the command line names. These are not seen, and are what
-`proofs_from` catches, since a proof that differs from the revision proves
-nothing however it was changed:
+It also follows what the line sets and runs:
 
-- a write through a script (`sh x.sh`, `cat x.sh | bash`);
-- a path in a variable (`rm "$f"`, `sh -c 'rm $1' _ check.sh`), even one
-  set on the same line;
-- names another program produces (`find … | xargs rm`);
-- `python -c`.
+- a variable the line sets (`f=check.sh; rm $f`, `for f in …`, `export`)
+  is put in where it is used; one set before a program (`f=x rm $f`) is that
+  program's environment only;
+- a script a command runs is read, up to 1 MiB, and judged as if typed,
+  with its own `cd`: `sh x.sh`, `. x.sh`, `source x.sh`, `./x`, a `#!`
+  program, `sh < x.sh`, and a script the line itself writes first;
+- code given to an interpreter is not run, but it is read for the protected
+  names it holds: `python3 -c`, `node -e`, `perl -e`, `ruby -e`, `php -r`,
+  `deno eval`, `Rscript -e`, `lua -e`, `osascript -e`, code fed on standard
+  input, and an interpreter's script file. Code that names a protected file
+  is refused even if it only reads it;
+- a name built when the line runs (`$(…)`, backquotes) matches every
+  protected path it could spell, and code built for `sh` or `eval` is
+  refused. `$(mktemp …)` is the exception: it prints a name it has just
+  made, so `T=$(mktemp -d); …; rm -rf $T` is allowed.
+
+Any call that names flot's signing key (where `flot key show` says it is,
+`FLOT_SIGNING_KEY` included), a retired copy, `host.secret` or their
+directory is refused, reads included, with or without a flow: an agent that
+reads the key can sign runs as the user. `flot key show` stays allowed.
+Real output:
+
+```text
+$ flot guard --command "f=check.sh; rm $f"
+protected  check.sh: the proof of step `work` reads it
+$ flot guard --command "sh clean.sh"
+protected  check.sh: the proof of step `work` reads it
+$ flot guard --command "python3 -c \"open('check.sh','w').write('exit 0')\""
+protected  check.sh: the proof of step `work` reads it; python3 code names it, and flot cannot tell whether that code writes it
+$ flot guard --command "sh -c \"\$(printf 'rm che%s' ck.sh)\""
+refused    sh $(..): what it runs is built when the command runs, so flot cannot read it before it runs
+$ flot guard --command "cat ~/.config/flot/signing.key"
+secret     ~/.config/flot/signing.key: it is the signing key, or a copy flot keeps of one, and an agent that reads it can sign runs as the user
+$ flot guard --command "T=\$(mktemp -d); cargo test > \$T/log 2>&1; rm -rf \$T"
+$ flot guard --command "python3 -c 'print(1)'"
+```
+
+(`clean.sh` holds `rm -f check.sh`.) It reads text, so some changes stay out
+of its reach, and are what `proofs_from` catches, since a proof that differs
+from the revision proves nothing however it was changed:
+
+- a name code assembles from parts (`open('che'+'ck.sh','w')`);
+- a variable set from what a program reads or prints
+  (`read f < name.txt; rm $f`), and names another program produces
+  (`find … | xargs rm`);
+- a script copied or generated by another program before it runs
+  (`cp scripts/bad.sh x.sh && sh x.sh`);
+- compiled programs, and the build scripts and tests a step runs.
 
 `flot guard --powershell --command` reads the command line as PowerShell:
 
@@ -776,10 +823,28 @@ refused    irm | iex: it runs code fetched from the network, which no step or re
 $ flot guard --powershell --command "cargo test *> test.log"
 ```
 
-As with a shell command, a path held in a variable or computed is not seen
-(`ForEach-Object { Remove-Item $_ }`, `$env:USERPROFILE\…`), and neither
-is what a script run with `-File` or `-EncodedCommand`, or `Start-Process`,
-does. Unlike a shell command, a `cd` or `Set-Location` is not followed.
+As in a shell command line, `$env:NAME`, `${env:NAME}`, `$HOME` and `$PWD`
+are expanded, `$name = 'value'` is followed, and `cd`, `Set-Location` and
+`Push-Location` move the paths after them. `-EncodedCommand` is decoded and
+read (one that does not decode is refused), `Start-Process X -ArgumentList …`
+is read as `X …`, a script run with `-File`, `& ./x.ps1` or `. ./x.ps1` is
+read, and `$_` in `ForEach-Object` is what was piped in. Real output:
+
+```text
+$ flot guard --powershell --command "Set-Content $env:USERPROFILE\.claude\settings.json '{}'"
+protected  ~/.claude/settings.json: it configures Claude Code for this user, including the hook that enforces this guard
+$ flot guard --powershell --command "cd tests; Remove-Item accept.sh"
+protected  tests/accept.sh: the proof of step `work` reads it
+$ flot guard --powershell --command "powershell -EncodedCommand UgBlAG0AbwB2AGUALQBJAHQAZQBtACAAYwBoAGUAYwBrAC4AcwBoAA=="
+protected  check.sh: the proof of step `work` reads it
+$ flot guard --powershell --command "Start-Process cmd -ArgumentList '/c del check.sh'"
+protected  check.sh: the proof of step `work` reads it
+$ flot guard --powershell --command "Get-ChildItem tests | ForEach-Object { Remove-Item $_ }"
+protected  tests: it holds tests/accept.sh: the proof of step `work` reads it
+```
+
+A path a cmdlet returns (`$p = Join-Path $PWD 'check.sh'; Remove-Item $p`)
+is not seen.
 
 `flot guard --hook` reads a Claude Code `PreToolUse` payload on stdin and
 answers with a denial. The [Claude Code plugin](mcp.md#claude-code-plugin)

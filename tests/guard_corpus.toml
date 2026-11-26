@@ -1661,3 +1661,31 @@ command = '{"cwd": "{dir}", "tool_name": "Bash", "tool_input": {"command": "pyth
 protects = ["check.sh is protected", "the python3 script scripts/bad.py names it"]
 status = "closed"
 note = "a script's code, in the denial"
+
+[[row]]
+shell = "sh"
+command = "T=$(mktemp -d); rm -rf $T"
+protects = []
+status = "allowed"
+note = "mktemp prints a name it has just made, never a file a flow protects"
+
+[[row]]
+shell = "sh"
+command = "T=$(mktemp -d) && cd $T && rm -rf *"
+protects = []
+status = "allowed"
+note = "a cd into a fresh temporary directory leaves the project"
+
+[[row]]
+shell = "sh"
+command = "out=$(mktemp); cargo test > $out 2>&1; tail $out"
+protects = []
+status = "allowed"
+note = "output kept in a fresh temporary file"
+
+[[row]]
+shell = "sh"
+command = "rm $(mktemp && echo check.sh)"
+protects = ["check.sh"]
+status = "closed"
+note = "only a lone mktemp prints nothing but a fresh name"

@@ -100,6 +100,25 @@ pub struct Unread {
 /// backquotes, whose output no reading of the line can know.
 pub const BUILT: char = '\u{FFFC}';
 
+/// What `$(mktemp ..)` stands for in a word: `mktemp` prints the name of a
+/// file or directory it has just created, so the name is no file that was
+/// there before, and the agent's `T=$(mktemp -d); ...; rm -rf $T` names
+/// nothing a flow protects. The name is a fixed one outside any project.
+pub const MKTEMP: &str = "/tmp/flot-mktemp.XXXXXX";
+
+/// Put what the substituted command `inner` prints into `word`: the name
+/// `mktemp` makes, or [`BUILT`] for output no reading of the line can know.
+fn push_printed(word: &mut String, inner: &[char]) {
+    let inner: String = inner.iter().collect();
+    let program = inner.split_whitespace().next().unwrap_or_default();
+    let simple = !inner.contains([';', '&', '|', '<', '>', '$', '`', '(', '\n']);
+    if simple && matches!(program, "mktemp" | "/usr/bin/mktemp" | "/bin/mktemp") {
+        word.push_str(MKTEMP);
+    } else {
+        word.push(BUILT);
+    }
+}
+
 /// Why a command whose code is built when the line runs is not seen.
 const BUILT_CODE: &str =
     "what it runs is built when the command runs, so flot cannot read it before it runs";
@@ -335,14 +354,14 @@ fn tokens(command: &str) -> Vec<Token> {
                             if arithmetic(inner) {
                                 word.extend(&chars[at..chars.len().min(close + 1)]);
                             } else {
-                                word.push(BUILT);
+                                push_printed(&mut word, inner);
                             }
                             at = close;
                         }
                         '`' => {
                             let close = backquoted(&chars, at + 1);
                             out.push(Token::Nested(chars[at + 1..close].iter().collect()));
-                            word.push(BUILT);
+                            push_printed(&mut word, &chars[at + 1..close]);
                             at = close;
                         }
                         other => word.push(other),
@@ -386,14 +405,14 @@ fn tokens(command: &str) -> Vec<Token> {
                     // word, which goes on after it.
                     let close = closing(&chars, at + 2, 1, usize::MAX);
                     out.push(Token::Nested(chars[at + 2..close].iter().collect()));
-                    word.push(BUILT);
+                    push_printed(&mut word, &chars[at + 2..close.min(chars.len())]);
                     at = close;
                 }
             }
             '`' => {
                 let close = backquoted(&chars, at + 1);
                 out.push(Token::Nested(chars[at + 1..close].iter().collect()));
-                word.push(BUILT);
+                push_printed(&mut word, &chars[at + 1..close]);
                 at = close;
             }
             '\\' => {

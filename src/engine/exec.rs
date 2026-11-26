@@ -36,8 +36,9 @@ pub struct Outcome {
     /// open after the grace period, so the captured streams may be incomplete.
     pub output_detached: bool,
     /// Processes that left their process group and were still running when
-    /// the command ended, stopped. Linux only, where flot adopts every
-    /// orphan below it and so can find them; elsewhere this is always empty.
+    /// the command ended, stopped. Linux and macOS only, where flot can find
+    /// them; a Windows job cannot be left, and elsewhere this is always
+    /// empty.
     pub escaped: Vec<Escaped>,
     pub started_at_ms: u64,
     pub duration_ms: u64,
@@ -47,7 +48,8 @@ pub struct Outcome {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Escaped {
     pub pid: u32,
-    /// Traced to this command by the token it inherited. Otherwise nothing
+    /// Traced to this command by the token it inherited or, on macOS, by
+    /// having been recorded below the command's leader. Otherwise nothing
     /// tells which command started it, and it is charged to every command
     /// that was running when it was found.
     pub traced: bool,
@@ -231,7 +233,7 @@ pub fn run_confined(
     for (key, value) in env {
         builder.env(key, value);
     }
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     let watch = escape::Watch::new(&mut builder);
     #[cfg(unix)]
     {
@@ -244,9 +246,9 @@ pub fn run_confined(
         use std::os::windows::process::CommandExt;
         builder.creation_flags(job::SPAWN_FLAGS);
     }
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     let spawned = watch.spawn(&mut builder);
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     let spawned = builder.spawn();
     let mut child = spawned.with_context(|| format!("cannot start `{command}`"))?;
     // Windows has no process groups to signal; a job object holds the step
@@ -307,9 +309,9 @@ pub fn run_confined(
     let strays_stopped = ended_on_its_own && stopped_others;
     // Before the output is collected: a process that left the group and
     // still holds the pipes closes them as it is stopped.
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     let escaped = watch.sweep();
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     let escaped = Vec::new();
     let deadline = Instant::now() + DETACHED_GRACE;
     let (stdout, stdout_complete) = stdout_reader.collect(deadline);
@@ -454,24 +456,39 @@ fn stop_group(child: &std::process::Child) -> bool {
 }
 
 /// Processes that leave a command's process group, found and stopped on
-/// Linux.
+/// Linux and macOS.
 ///
 /// A process that calls `setsid` (or `setpgid`) is out of reach of the group
 /// kill, and once its parent exits it would be adopted by init and keep
-/// running, free to rewrite what a proof judged. flot makes itself a child
-/// subreaper instead, so every such orphan below it becomes its child, and
-/// after each command looks for adopted processes that belong to no running
-/// command: those escaped, and are stopped. Each command carries a token in
-/// its environment, which a process inherits whatever group it moves to, so
-/// an escapee is charged to the command that started it; one that dropped
-/// its environment is charged to every command running when it was found.
+/// running, free to rewrite what a proof judged. Each command carries a token
+/// in its environment, which a process inherits whatever group it moves to,
+/// so an escapee is charged to the command that started it.
+///
+/// On Linux flot makes itself a child subreaper, so every such orphan below
+/// it becomes its child, and after each command looks for adopted processes
+/// that belong to no running command: those escaped, and are stopped. One
+/// that dropped its environment is charged to every command running when it
+/// was found.
+///
+/// macOS has no subreaper. While a command runs, a watcher thread records
+/// every `POLL` each process below its leader, so one that left the group
+/// is still known once its parent is gone. After the command, each recorded
+/// process that launchd adopted, outside every running command's group,
+/// escaped, and is stopped and charged to that command, whether or not it
+/// kept its environment. So is such an orphan whose environment still
+/// carries one of flot's tokens, which finds a daemon that forked away
+/// between two looks. A process that dropped its environment and left its
+/// parent within one interval is not found.
+///
 /// A process that moves into flot's own process group is not told apart
 /// from the git processes flot runs itself, and is not found.
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 mod escape {
     use std::collections::{BTreeMap, BTreeSet};
     use std::process::{Child, Command};
     use std::sync::atomic::{AtomicU64, Ordering};
+    #[cfg(target_os = "macos")]
+    use std::sync::Condvar;
     use std::sync::{Mutex, MutexGuard, Once};
     use std::time::{Duration, Instant};
 
@@ -481,6 +498,13 @@ mod escape {
     /// How long a sweep waits for stopped processes to be gone.
     const SETTLE: Duration = Duration::from_secs(2);
 
+    /// How often the macOS watcher records the processes below each running
+    /// command. A process that dropped its environment and left its parent
+    /// within one interval is never seen; a shorter one costs more CPU for
+    /// as long as any command runs.
+    #[cfg(target_os = "macos")]
+    const POLL: Duration = Duration::from_millis(20);
+
     struct Running {
         /// The process group the command leads.
         group: libc::pid_t,
@@ -489,6 +513,11 @@ mod escape {
         ended: bool,
         /// Pid of each process charged to it, and whether it was traced.
         escaped: BTreeMap<u32, bool>,
+        /// The leader and every live process recorded below it, by pid, each
+        /// with the time it started: a pid that is reused names a process
+        /// that started later.
+        #[cfg(target_os = "macos")]
+        tree: BTreeMap<libc::pid_t, (u64, u64)>,
     }
 
     struct State {
@@ -502,7 +531,10 @@ mod escape {
         stopped: BTreeSet::new(),
     });
     static SEQUENCE: AtomicU64 = AtomicU64::new(0);
-    static ADOPT: Once = Once::new();
+    static WATCH_ORPHANS: Once = Once::new();
+    /// Wakes the macOS watcher when a command starts.
+    #[cfg(target_os = "macos")]
+    static STARTED: Condvar = Condvar::new();
 
     fn state() -> MutexGuard<'static, State> {
         STATE.lock().unwrap_or_else(|poison| poison.into_inner())
@@ -518,17 +550,10 @@ mod escape {
     }
 
     impl Watch {
-        /// Mark `command` with a token of its own, and have flot adopt every
-        /// process orphaned below it from now on.
+        /// Mark `command` with a token of its own, and from now on have every
+        /// process orphaned below a command found.
         pub fn new(command: &mut Command) -> Watch {
-            ADOPT.call_once(|| {
-                // SAFETY: sets a flag of this process; no memory is passed.
-                // Should it fail, orphans go to init as before and none is
-                // found.
-                unsafe {
-                    libc::prctl(libc::PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0);
-                }
-            });
+            WATCH_ORPHANS.call_once(watch_orphans);
             let id = SEQUENCE.fetch_add(1, Ordering::Relaxed);
             command.env(TOKEN_ENV, token(id));
             Watch { id }
@@ -538,20 +563,30 @@ mod escape {
         pub fn spawn(&self, command: &mut Command) -> std::io::Result<Child> {
             let mut state = state();
             let child = command.spawn()?;
+            let group = child.id() as libc::pid_t;
             state.running.insert(
                 self.id,
                 Running {
-                    group: child.id() as libc::pid_t,
+                    group,
                     token: token(self.id),
                     ended: false,
                     escaped: BTreeMap::new(),
+                    // Should its start not be readable, nothing is recorded
+                    // below it, and only its token finds what leaves.
+                    #[cfg(target_os = "macos")]
+                    tree: inspect(group)
+                        .map(|leader| (group, leader.start))
+                        .into_iter()
+                        .collect(),
                 },
             );
+            #[cfg(target_os = "macos")]
+            STARTED.notify_one();
             Ok(child)
         }
 
-        /// Once the command's leader is reaped and its group stopped: reap
-        /// what is left of the group, stop every adopted process that left
+        /// Once the command's leader is reaped and its group stopped: finish
+        /// what is left of the group, stop every process found to have left
         /// a group no running command leads, and return the pids of those
         /// charged to this command.
         pub fn sweep(self) -> Vec<super::Escaped> {
@@ -594,6 +629,17 @@ mod escape {
         }
     }
 
+    /// Have flot adopt every process orphaned below it.
+    #[cfg(target_os = "linux")]
+    fn watch_orphans() {
+        // SAFETY: sets a flag of this process; no memory is passed. Should
+        // it fail, orphans go to init as before and none is found.
+        unsafe {
+            libc::prctl(libc::PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0);
+        }
+    }
+
+    #[cfg(target_os = "linux")]
     struct Process {
         pid: libc::pid_t,
         ppid: libc::pid_t,
@@ -603,6 +649,7 @@ mod escape {
 
     /// Every process, read from /proc: after the parenthesized command name
     /// of /proc/<pid>/stat come its state, parent and process group.
+    #[cfg(target_os = "linux")]
     fn processes() -> Vec<Process> {
         let Ok(entries) = std::fs::read_dir("/proc") else {
             return Vec::new();
@@ -628,6 +675,7 @@ mod escape {
     }
 
     /// The token in the environment `pid` was started with, if it kept one.
+    #[cfg(target_os = "linux")]
     fn token_of(pid: libc::pid_t) -> Option<String> {
         let environ = std::fs::read(format!("/proc/{pid}/environ")).ok()?;
         let prefix = format!("{TOKEN_ENV}=");
@@ -640,6 +688,7 @@ mod escape {
 
     /// Reap `process` if it has exited, else stop it. Only for a child of
     /// flot not yet reaped, whose pid therefore names it and nothing else.
+    #[cfg(target_os = "linux")]
     fn finish(process: &Process) {
         // SAFETY: plain system calls on a pid flot's own unreaped child holds.
         unsafe {
@@ -653,6 +702,7 @@ mod escape {
 
     /// One look at flot's children. Returns whether anything is still to be
     /// waited for.
+    #[cfg(target_os = "linux")]
     fn pass(
         state: &mut State,
         me: libc::pid_t,
@@ -722,6 +772,488 @@ mod escape {
             }
         }
         busy
+    }
+
+    /// Start the watcher: while any command runs, it records the processes
+    /// below each every `POLL`, and while none runs it waits. Should no
+    /// thread start, only the token finds what leaves a group.
+    #[cfg(target_os = "macos")]
+    fn watch_orphans() {
+        let _ = std::thread::Builder::new()
+            .name("flot-escape".into())
+            .spawn(|| loop {
+                {
+                    let mut state = state();
+                    while state.running.is_empty() {
+                        state = STARTED
+                            .wait(state)
+                            .unwrap_or_else(|poison| poison.into_inner());
+                    }
+                    record(&mut state);
+                }
+                std::thread::sleep(POLL);
+            });
+    }
+
+    #[cfg(target_os = "macos")]
+    struct Process {
+        pid: libc::pid_t,
+        ppid: libc::pid_t,
+        pgid: libc::pid_t,
+        zombie: bool,
+        /// When it started, in seconds and microseconds.
+        start: (u64, u64),
+    }
+
+    /// launchd, which macOS makes the parent of every process whose parent
+    /// exits.
+    #[cfg(target_os = "macos")]
+    const LAUNCHD: libc::pid_t = 1;
+
+    /// What the kernel tells of `pid`. It tells only of a process of flot's
+    /// own user, unless flot runs as root.
+    #[cfg(target_os = "macos")]
+    fn inspect(pid: libc::pid_t) -> Option<Process> {
+        // SAFETY: proc_bsdinfo holds only integers and arrays of them, for
+        // which zero is a valid value.
+        let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
+        let size = std::mem::size_of::<libc::proc_bsdinfo>() as libc::c_int;
+        // SAFETY: the kernel writes at most `size` bytes into `info`.
+        let written = unsafe {
+            libc::proc_pidinfo(pid, libc::PROC_PIDTBSDINFO, 0, (&raw mut info).cast(), size)
+        };
+        (written == size).then_some(Process {
+            pid,
+            ppid: info.pbi_ppid as libc::pid_t,
+            pgid: info.pbi_pgid as libc::pid_t,
+            zombie: info.pbi_status == libc::SZOMB,
+            start: (info.pbi_start_tvsec, info.pbi_start_tvusec),
+        })
+    }
+
+    /// The pids a libproc listing writes, given a buffer and its size in
+    /// bytes, and returning how many it wrote. A full buffer may have cut
+    /// the list short, so the listing is retried with twice the room.
+    #[cfg(target_os = "macos")]
+    fn pids(list: impl Fn(*mut libc::c_void, libc::c_int) -> libc::c_int) -> Vec<libc::pid_t> {
+        let mut pids: Vec<libc::pid_t> = vec![0; 256];
+        loop {
+            let Ok(room) = libc::c_int::try_from(std::mem::size_of_val(pids.as_slice())) else {
+                return Vec::new();
+            };
+            let Ok(written) = usize::try_from(list(pids.as_mut_ptr().cast(), room)) else {
+                return Vec::new();
+            };
+            if written < pids.len() {
+                pids.truncate(written);
+                return pids;
+            }
+            pids.resize(pids.len() * 2, 0);
+        }
+    }
+
+    /// The pids whose parent is `parent`.
+    #[cfg(target_os = "macos")]
+    fn children(parent: libc::pid_t) -> Vec<libc::pid_t> {
+        // SAFETY: libproc writes at most `room` bytes into `buffer`.
+        pids(|buffer, room| unsafe { libc::proc_listchildpids(parent, buffer, room) })
+    }
+
+    /// Every process the kernel tells of.
+    #[cfg(target_os = "macos")]
+    fn processes() -> Vec<Process> {
+        // SAFETY: libproc writes at most `room` bytes into `buffer`.
+        pids(|buffer, room| unsafe { libc::proc_listallpids(buffer, room) })
+            .into_iter()
+            .filter_map(inspect)
+            .collect()
+    }
+
+    /// The largest block of arguments and environment a process can have.
+    #[cfg(target_os = "macos")]
+    fn argument_space() -> Option<usize> {
+        let mut name = [libc::CTL_KERN, libc::KERN_ARGMAX];
+        let mut space: libc::c_int = 0;
+        let mut size = std::mem::size_of::<libc::c_int>();
+        // SAFETY: the kernel writes at most `size` bytes into `space`.
+        let rc = unsafe {
+            libc::sysctl(
+                name.as_mut_ptr(),
+                2,
+                (&raw mut space).cast(),
+                &mut size,
+                std::ptr::null_mut(),
+                0,
+            )
+        };
+        if rc == 0 {
+            usize::try_from(space).ok()
+        } else {
+            None
+        }
+    }
+
+    /// The token in the environment `pid` was started with, if it kept one.
+    /// KERN_PROCARGS2 gives the process's argument count, then the path it
+    /// was started from, padded with NULs, then each argument and each
+    /// environment entry, NUL terminated; the kernel gives it only for a
+    /// process of flot's own user. `area` is sized once to hold the largest
+    /// such block, and reused from one process to the next.
+    #[cfg(target_os = "macos")]
+    fn token_of(pid: libc::pid_t, area: &mut Vec<u8>) -> Option<String> {
+        if area.is_empty() {
+            area.resize(argument_space()?, 0);
+        }
+        let mut name = [libc::CTL_KERN, libc::KERN_PROCARGS2, pid];
+        let mut size = area.len();
+        // SAFETY: the kernel writes at most `size` bytes into `area`, and
+        // sets `size` to how many it wrote.
+        let rc = unsafe {
+            libc::sysctl(
+                name.as_mut_ptr(),
+                3,
+                area.as_mut_ptr().cast(),
+                &mut size,
+                std::ptr::null_mut(),
+                0,
+            )
+        };
+        if rc != 0 {
+            return None;
+        }
+        let (count, strings) = area.get(..size)?.split_first_chunk::<4>()?;
+        let count = usize::try_from(i32::from_ne_bytes(*count)).ok()?;
+        let mut strings = strings.split(|byte| *byte == 0);
+        strings.next()?;
+        let prefix = format!("{TOKEN_ENV}=");
+        strings
+            .skip_while(|string| string.is_empty())
+            .skip(count)
+            .take_while(|string| !string.is_empty())
+            .find_map(|entry| {
+                entry
+                    .strip_prefix(prefix.as_bytes())
+                    .map(|value| String::from_utf8_lossy(value).into_owned())
+            })
+    }
+
+    /// Add to each running command every process whose parent is recorded
+    /// for it, and the processes below those, after forgetting the recorded
+    /// ones that are gone: their pids may name other processes by now.
+    #[cfg(target_os = "macos")]
+    fn record(state: &mut State) {
+        for running in state.running.values_mut() {
+            running.tree.retain(|&pid, start| {
+                inspect(pid).is_some_and(|now| now.start == *start && !now.zombie)
+            });
+            let mut parents: Vec<libc::pid_t> = running.tree.keys().copied().collect();
+            while let Some(parent) = parents.pop() {
+                for child in children(parent) {
+                    if running.tree.contains_key(&child) {
+                        continue;
+                    }
+                    if let Some(found) = inspect(child).filter(|found| !found.zombie) {
+                        running.tree.insert(child, found.start);
+                        parents.push(child);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Stop `process`, with the group it leads if it leads one, unless its
+    /// pid has come to name another process: a process flot did not start
+    /// can exit, and be reaped by its own parent, at any moment.
+    #[cfg(target_os = "macos")]
+    fn stop(process: &Process) {
+        if !inspect(process.pid).is_some_and(|now| now.start == process.start) {
+            return;
+        }
+        // SAFETY: plain system calls. The pid was just seen to name the
+        // process, which as a group's leader also holds that group's id.
+        unsafe {
+            if process.pgid == process.pid {
+                libc::killpg(process.pid, libc::SIGKILL);
+            } else {
+                libc::kill(process.pid, libc::SIGKILL);
+            }
+        }
+    }
+
+    /// One look at every process, after recording what is new below the
+    /// running commands: stop what is left of the command's group, and each
+    /// orphan outside the groups running commands lead that is recorded
+    /// below one of them or carries a token of flot, whose pid is `me`.
+    /// Returns whether anything is still to be waited for.
+    #[cfg(target_os = "macos")]
+    fn pass(
+        state: &mut State,
+        me: libc::pid_t,
+        own_group: libc::pid_t,
+        group: libc::pid_t,
+    ) -> bool {
+        record(state);
+        let processes = processes();
+        state.stopped.retain(|stopped| {
+            processes
+                .iter()
+                .any(|process| process.pgid == *stopped && !process.zombie)
+        });
+        // A process that started before flot did cannot carry its token.
+        let since = processes
+            .iter()
+            .find(|process| process.pid == me)
+            .map_or((0, 0), |flot| flot.start);
+        let ours = format!("{me}-");
+        let mut area = Vec::new();
+        let mut busy = false;
+        for process in &processes {
+            // It has exited: nothing is left to stop, and its parent reaps
+            // it.
+            if process.zombie {
+                continue;
+            }
+            if process.pgid == group || state.stopped.contains(&process.pgid) {
+                busy = true;
+                stop(process);
+                continue;
+            }
+            // As on Linux, only an orphan escaped: one whose parent still
+            // runs goes with the group of the orphan above it, or is an
+            // orphan itself once that one is stopped. flot's own children
+            // (git) share its group; a running command's leader and its
+            // group are that command's to stop.
+            if process.ppid != LAUNCHD
+                || process.pgid == own_group
+                || state
+                    .running
+                    .values()
+                    .any(|running| running.group == process.pgid)
+            {
+                continue;
+            }
+            let token = if process.start >= since {
+                token_of(process.pid, &mut area).filter(|token| token.starts_with(&ours))
+            } else {
+                None
+            };
+            let recorded = state
+                .running
+                .iter()
+                .find(|(_, running)| running.tree.get(&process.pid) == Some(&process.start))
+                .map(|(&id, _)| id);
+            if token.is_none() && recorded.is_none() {
+                continue;
+            }
+            // Its token names its command; without one, the command it was
+            // recorded below does.
+            let owner = token
+                .as_deref()
+                .and_then(|token| {
+                    state
+                        .running
+                        .iter()
+                        .find(|(_, running)| running.token == token)
+                })
+                .map(|(&id, _)| id)
+                .or(recorded);
+            let pid = process.pid as u32;
+            match owner.and_then(|id| state.running.get_mut(&id)) {
+                // Its command is still running, and will sweep it itself.
+                Some(owner) if !owner.ended => continue,
+                Some(owner) => {
+                    owner.escaped.insert(pid, true);
+                }
+                None => {
+                    for running in state.running.values_mut() {
+                        running.escaped.entry(pid).or_insert(false);
+                    }
+                }
+            }
+            busy = true;
+            stop(process);
+            if process.pgid == process.pid {
+                state.stopped.insert(process.pid);
+            }
+        }
+        busy
+    }
+
+    #[cfg(all(test, target_os = "macos"))]
+    mod tests {
+        use super::*;
+        use std::process::Stdio;
+
+        fn start(command: &mut Command) -> Child {
+            command.stdin(Stdio::null()).spawn().unwrap()
+        }
+
+        /// One command, led by `group`, as its sweep sees it: its leader
+        /// has exited, and `tree` was recorded below it.
+        fn ended(group: libc::pid_t, token: &str, tree: Vec<(libc::pid_t, (u64, u64))>) -> State {
+            let mut state = State {
+                running: BTreeMap::new(),
+                stopped: BTreeSet::new(),
+            };
+            state.running.insert(
+                0,
+                Running {
+                    group,
+                    token: token.to_owned(),
+                    ended: true,
+                    escaped: BTreeMap::new(),
+                    tree: tree.into_iter().collect(),
+                },
+            );
+            state
+        }
+
+        fn alive(process: &Process) -> bool {
+            inspect(process.pid).is_some_and(|now| now.start == process.start && !now.zombie)
+        }
+
+        /// Whether `process` has exited, waiting up to a few seconds for it.
+        fn gone(process: &Process) -> bool {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while alive(process) {
+                if Instant::now() >= deadline {
+                    return false;
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            true
+        }
+
+        /// Start a process with `token` in its environment that leaves its
+        /// group, and wait until it has and its parent is gone. Returns the
+        /// pid of that parent, and the process.
+        fn daemon(token: &str) -> (libc::pid_t, Process) {
+            let parent = start(
+                Command::new("/bin/sh")
+                    .args([
+                        "-c",
+                        "/usr/bin/perl -MPOSIX -e 'setsid(); exec @ARGV' /bin/sleep 5 >/dev/null & echo $!",
+                    ])
+                    .env(TOKEN_ENV, token)
+                    .stdout(Stdio::piped()),
+            );
+            let leader = parent.id() as libc::pid_t;
+            let output = parent.wait_with_output().unwrap();
+            let pid: libc::pid_t = String::from_utf8_lossy(&output.stdout)
+                .trim()
+                .parse()
+                .unwrap();
+            let deadline = Instant::now() + Duration::from_secs(5);
+            loop {
+                if let Some(process) = inspect(pid).filter(|process| process.pgid == pid) {
+                    return (leader, process);
+                }
+                assert!(Instant::now() < deadline, "{pid} never left its group");
+                std::thread::sleep(Duration::from_millis(10));
+            }
+        }
+
+        #[test]
+        fn a_token_is_read_from_the_environment_a_process_started_with() {
+            let mut marked = start(Command::new("/bin/sleep").arg("5").env(TOKEN_ENV, "1-2"));
+            let mut cleared = start(Command::new("/bin/sleep").arg("5").env_clear());
+            // An argument that looks like one is not one.
+            let mut argued = start(
+                Command::new("/bin/sh")
+                    .args(["-c", "sleep 5; :", "sh", &format!("{TOKEN_ENV}=1-3")])
+                    .env_clear(),
+            );
+            let mut area = Vec::new();
+            let mut token = |child: &Child| token_of(child.id() as libc::pid_t, &mut area);
+            assert_eq!(token(&marked).as_deref(), Some("1-2"));
+            assert_eq!(token(&cleared), None);
+            assert_eq!(token(&argued), None);
+            for child in [&mut marked, &mut cleared, &mut argued] {
+                let _ = child.kill();
+                let _ = child.wait();
+            }
+        }
+
+        #[test]
+        fn a_process_stays_recorded_once_its_parent_is_gone() {
+            let mut leader = start(Command::new("/bin/sh").args(["-c", "sleep 5 & sleep 0.3; :"]));
+            let group = leader.id() as libc::pid_t;
+            let mut state = ended(group, "", vec![(group, inspect(group).unwrap().start)]);
+            let deadline = Instant::now() + Duration::from_secs(5);
+            let below = loop {
+                record(&mut state);
+                let tree = &state.running[&0].tree;
+                let below: Vec<libc::pid_t> =
+                    tree.keys().copied().filter(|pid| *pid != group).collect();
+                if below.len() == 2 || Instant::now() >= deadline {
+                    break below;
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            };
+            assert_eq!(below.len(), 2, "both sleeps are recorded: {below:?}");
+            leader.wait().unwrap();
+            std::thread::sleep(Duration::from_millis(100));
+            record(&mut state);
+            let left: Vec<libc::pid_t> = state.running[&0].tree.keys().copied().collect();
+            assert_eq!(left.len(), 1, "only `sleep 5` is left: {left:?}");
+            assert!(below.contains(&left[0]), "{left:?} {below:?}");
+            for pid in left {
+                stop(&inspect(pid).unwrap());
+            }
+        }
+
+        #[test]
+        fn a_pid_that_names_a_later_process_is_neither_kept_nor_stopped() {
+            let mut child = start(Command::new("/bin/sleep").arg("5"));
+            let now = inspect(child.id() as libc::pid_t).unwrap();
+            // What was recorded of an earlier process with the same pid.
+            let earlier = Process {
+                start: (now.start.0 - 1, now.start.1),
+                ..now
+            };
+            stop(&earlier);
+            std::thread::sleep(Duration::from_millis(100));
+            assert!(
+                child.try_wait().unwrap().is_none(),
+                "a later process was stopped"
+            );
+            let mut state = ended(now.pid, "", vec![(now.pid, earlier.start)]);
+            record(&mut state);
+            assert!(
+                state.running[&0].tree.is_empty(),
+                "a later process was kept"
+            );
+            stop(&now);
+            assert!(!child.wait().unwrap().success());
+        }
+
+        #[test]
+        fn an_orphan_is_charged_to_the_command_its_token_names_and_to_no_other_flot() {
+            // SAFETY: getpgrp cannot fail.
+            let own_group = unsafe { libc::getpgrp() };
+            // The tokens of a flot with pid 1, which no real one has: the
+            // flots running these tests, this one included, pass them by.
+            let flot = 1;
+            let (leader, ours) = daemon("1-0");
+            let mut state = ended(leader, "1-0", Vec::new());
+            pass(&mut state, flot, own_group, leader);
+            let charged: Vec<(u32, bool)> = state.running[&0]
+                .escaped
+                .iter()
+                .map(|(&pid, &traced)| (pid, traced))
+                .collect();
+            assert_eq!(charged, [(ours.pid as u32, true)]);
+            assert!(gone(&ours), "the orphan outlived the sweep");
+
+            let (leader, theirs) = daemon("2-0");
+            let mut state = ended(leader, "1-0", Vec::new());
+            pass(&mut state, flot, own_group, leader);
+            assert!(state.running[&0].escaped.is_empty());
+            std::thread::sleep(Duration::from_millis(100));
+            assert!(alive(&theirs), "another flot's orphan was stopped");
+            stop(&theirs);
+            assert!(gone(&theirs));
+        }
     }
 }
 
@@ -1059,15 +1591,16 @@ mod tests {
         ));
         // A new session leaves a POSIX process group, out of reach of the
         // group kill. On Linux flot adopts the escapee once its parent exits
-        // and stops it; on macOS nothing can, and flot only stops waiting
-        // for it. A Windows job cannot be left: the escapee is stopped with
-        // the rest.
-        #[cfg(target_os = "linux")]
+        // and stops it, and on macOS it recorded the escapee below the step
+        // and stops it; on other systems nothing can, and flot only stops
+        // waiting for it. A Windows job cannot be left: the escapee is
+        // stopped with the rest.
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
         assert!(
             !outcome.output_detached && outcome.escaped.len() == 1,
             "{outcome:?}"
         );
-        #[cfg(all(unix, not(target_os = "linux")))]
+        #[cfg(all(unix, not(any(target_os = "linux", target_os = "macos"))))]
         assert!(outcome.output_detached);
         #[cfg(windows)]
         assert!(!outcome.output_detached && outcome.strays_stopped);
@@ -1079,16 +1612,30 @@ mod tests {
         );
     }
 
-    #[cfg(target_os = "linux")]
+    /// `command` with `setsid sh` as this system runs it: macOS ships no
+    /// `setsid` command, so perl's POSIX::setsid stands in.
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    fn with_setsid(command: &str) -> String {
+        if cfg!(target_os = "macos") {
+            command.replace(
+                "setsid sh",
+                "/usr/bin/perl -MPOSIX -e 'setsid(); exec @ARGV' /bin/sh",
+            )
+        } else {
+            command.to_owned()
+        }
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     #[test]
     fn a_process_that_leaves_the_group_is_stopped_before_it_can_write() {
         let dir = tempfile::tempdir().unwrap();
         // Its output goes nowhere, so no pipe held open gives it away.
         let outcome = run_command(
-            concat!(
+            &with_setsid(concat!(
                 "setsid sh -c 'touch left; sleep 1; echo late > late' >/dev/null 2>&1 &\n",
                 "while [ ! -e left ]; do sleep 0.01; done",
-            ),
+            )),
             dir.path(),
             &env(),
             Duration::from_secs(10),
@@ -1109,6 +1656,36 @@ mod tests {
         // What stays in the group and ends with it escaped nothing.
         assert!(run("sleep 0.01 & wait").escaped.is_empty());
         assert!(run("sleep 30 &").escaped.is_empty());
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[test]
+    fn a_daemon_whose_parent_exited_at_once_is_stopped() {
+        let dir = tempfile::tempdir().unwrap();
+        // The shell between the step and the daemon exits as soon as it has
+        // started it, so the daemon has no parent left in the step long
+        // before the step ends; it still carries the step's token.
+        let outcome = run_command(
+            &with_setsid(concat!(
+                "sh -c \"setsid sh -c 'touch left; sleep 1; echo late > late' &\" ",
+                ">/dev/null 2>&1\n",
+                "while [ ! -e left ]; do sleep 0.01; done",
+            )),
+            dir.path(),
+            &env(),
+            Duration::from_secs(10),
+            CAP,
+            &StopSignal::default(),
+        )
+        .unwrap();
+        assert!(outcome.succeeded());
+        assert_eq!(outcome.escaped.len(), 1, "{outcome:?}");
+        assert!(outcome.escaped[0].traced, "it kept the command's token");
+        std::thread::sleep(Duration::from_millis(1500));
+        assert!(
+            !dir.path().join("late").exists(),
+            "the daemon outlived the step"
+        );
     }
 
     #[test]

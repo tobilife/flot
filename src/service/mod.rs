@@ -100,11 +100,13 @@ fn shareable(store: &Store, manifest: &RunManifest, share: Sharing) -> Result<bu
     bundle::export(store, manifest, None)
 }
 
-pub const STARTER_FLOW: &str = r#"# flot flow. Every step records a receipt; every claim needs a proof command.
+/// The flow `flot init` writes, with `{proofs_from}` replaced by
+/// [`starter_proofs_from`].
+const STARTER_FLOW: &str = r#"# flot flow. Every step records a receipt; every claim needs a proof command.
 [flow]
 name = "starter"
 description = "Replace these steps with your own work."
-budget = { timeout_secs = 900, max_inline_bytes = 4096 }
+{proofs_from}budget = { timeout_secs = 900, max_inline_bytes = 4096 }
 
 [[step]]
 id = "inspect"
@@ -120,6 +122,35 @@ run = "echo 'replace me with real work'"
 needs = ["inspect"]
 # No claims: this step's success proves nothing, and flot will say so.
 "#;
+
+/// The `proofs_from` of a starter flow in `root`: the remote's default
+/// branch when the repository names one (`origin/main` after a clone), a
+/// revision an agent working here does not control; else a comment saying
+/// what to set and why.
+fn starter_proofs_from(root: &Path) -> String {
+    let remote = Git::open(root)
+        .and_then(|git| {
+            git.run(
+                &[
+                    "symbolic-ref",
+                    "--quiet",
+                    "--short",
+                    "refs/remotes/origin/HEAD",
+                ],
+                None,
+            )
+        })
+        .ok()
+        .filter(|rev| !rev.is_empty() && !rev.starts_with('-'));
+    match remote {
+        Some(rev) => format!(
+            "# Every proof must match {rev}, which an agent working here does not\n# control: a proof changed along with the work stays unverified.\nproofs_from = {}\n",
+            toml::Value::String(rev.clone())
+        ),
+        None => "# Without proofs_from, a proof edited along with the work it judges passes.\n# Name a revision an agent working here does not control, such as the\n# remote's default branch:\n# proofs_from = \"origin/main\"\n"
+            .to_string(),
+    }
+}
 
 #[derive(Debug, Clone, Serialize)]
 pub struct Plan {
@@ -165,45 +196,1118 @@ pub struct RunSummary {
 /// A file whose change would touch the flow's proofs, and why.
 #[derive(Debug, Clone, Serialize)]
 pub struct Guarded {
-    /// Relative to the flow's directory.
+    /// As the guard names it: relative to the nearest flow's directory or
+    /// its repository, from `~/` in the user's home directory, else absolute.
     pub path: String,
     pub reason: String,
 }
 
-/// `path` relative to `base` (as given or resolved), `/`-separated.
-fn relative_to(path: &Path, base: &Path) -> Option<String> {
-    [Some(base.to_path_buf()), base.canonicalize().ok()]
-        .into_iter()
-        .flatten()
-        .find_map(|base| {
-            let relative = path.strip_prefix(normalize(&base)).ok()?;
-            Some(
-                relative
-                    .components()
-                    .map(|part| part.as_os_str().to_string_lossy())
-                    .collect::<Vec<_>>()
-                    .join("/"),
-            )
-        })
+/// Whether this platform's file systems usually ignore case, so that
+/// `FLOT.TOML` is the flow file.
+const FOLDS_CASE: bool = cfg!(any(windows, target_os = "macos"));
+
+/// How many entries the guard reads below a directory a call changes, for
+/// what no flow names in advance.
+const GUARD_WALK_LIMIT: usize = 5000;
+
+/// `text` as names are compared on this platform.
+fn folded(text: &str) -> String {
+    if FOLDS_CASE {
+        text.to_lowercase()
+    } else {
+        text.to_string()
+    }
 }
 
-/// Why `relative` (to the flow's directory or its repository) decides
-/// whether the evidence is checked at all: the agent's own settings, which
-/// run the hook that enforces the guard, CI workflows, which run the flow,
-/// and git hooks, which run code on their own.
+/// `path` below `base`, or `base` itself as ``, `/`-separated. With `fold`,
+/// a component matches whatever its case.
+fn strip_base(path: &Path, base: &Path, fold: bool) -> Option<String> {
+    let mut parts = path.components();
+    for expected in base.components() {
+        let part = parts.next()?;
+        let same = part == expected
+            || (fold
+                && part.as_os_str().to_string_lossy().to_lowercase()
+                    == expected.as_os_str().to_string_lossy().to_lowercase());
+        if !same {
+            return None;
+        }
+    }
+    Some(
+        parts
+            .map(|part| part.as_os_str().to_string_lossy())
+            .collect::<Vec<_>>()
+            .join("/"),
+    )
+}
+
+/// `path` below the first of `bases` that holds it, `/`-separated.
+fn below(path: &Path, bases: &[PathBuf]) -> Option<String> {
+    bases
+        .iter()
+        .find_map(|base| strip_base(path, base, FOLDS_CASE))
+}
+
+/// `dir` as named, and as resolved when that differs.
+fn spellings(dir: &Path) -> Vec<PathBuf> {
+    let named = normalize(dir);
+    let resolved = resolve(&named);
+    if resolved == named {
+        vec![named]
+    } else {
+        vec![named, resolved]
+    }
+}
+
+/// Where `path` leads: through every link, for as much of it as exists, and
+/// as named below that. A link to a file that does not exist yet leads to
+/// where writing through it would create one.
+fn resolve(path: &Path) -> PathBuf {
+    resolve_through(path, 8)
+}
+
+fn resolve_through(path: &Path, links: u8) -> PathBuf {
+    if let Ok(resolved) = path.canonicalize() {
+        return resolved;
+    }
+    if links > 0 {
+        if let Ok(target) = std::fs::read_link(path) {
+            let parent = path.parent().unwrap_or(Path::new(""));
+            return resolve_through(&normalize(&parent.join(target)), links - 1);
+        }
+    }
+    match (path.parent(), path.file_name()) {
+        (Some(parent), Some(name)) => resolve_through(parent, links).join(name),
+        _ => path.to_path_buf(),
+    }
+}
+
+/// Why `relative` (to a flow's repository, or its directory outside one)
+/// decides whether the evidence is checked at all: the agent's settings,
+/// which run the hook that enforces the guard, wherever in the repository
+/// Claude Code is started; CI workflows, which run the flow; and git hooks
+/// and configuration, which run code on their own.
 fn harness(relative: &str) -> Option<String> {
-    let reason = match relative {
-        ".claude/settings.json" | ".claude/settings.local.json" => {
+    let relative = folded(relative);
+    let parts: Vec<&str> = relative.split('/').collect();
+    let reason = match parts.as_slice() {
+        [.., ".claude", name] if is_settings(name) => {
             "it configures Claude Code, including the hook that enforces this guard"
         }
-        ".git/config" => "it is git configuration, which can point git at other hooks",
-        _ if relative.starts_with(".git/hooks/") => "it is a git hook, code git runs on its own",
-        _ if relative.starts_with(".github/workflows/") => {
-            "it is a CI workflow, which decides what CI checks"
+        [".git", "config"] => "it is git configuration, which can point git at other hooks",
+        [".git", "hooks"] => "it holds git hooks, code git runs on its own",
+        [".git", "hooks", ..] => "it is a git hook, code git runs on its own",
+        [".github", "workflows"] => "it holds CI workflows, which decide what CI checks",
+        [".github", "workflows", ..] => "it is a CI workflow, which decides what CI checks",
+        _ => return None,
+    };
+    Some(reason.to_string())
+}
+
+/// Why `relative` (to the user's home directory) decides whether the guard
+/// runs at all.
+fn user_harness(relative: &str) -> Option<String> {
+    let relative = folded(relative);
+    let parts: Vec<&str> = relative.split('/').collect();
+    let reason = match parts.as_slice() {
+        [".claude", name] if is_settings(name) => {
+            "it configures Claude Code for this user, including the hook that enforces this guard"
+        }
+        [".claude", "plugins"] => {
+            "it holds this user's Claude Code plugins, one of which installs the hook that enforces this guard"
+        }
+        [".claude", "plugins", ..] => {
+            "it is a Claude Code plugin for this user, or part of one, which can install or remove the hook that enforces this guard"
         }
         _ => return None,
     };
     Some(reason.to_string())
+}
+
+/// `settings.json`, `settings.local.json` and the like, which Claude Code
+/// reads.
+fn is_settings(name: &str) -> bool {
+    name.starts_with("settings") && name.ends_with(".json")
+}
+
+/// How the guard matches a proof pattern: as a flow does, ignoring case
+/// where the file system does.
+fn proof_match() -> glob::MatchOptions {
+    glob::MatchOptions {
+        case_sensitive: !FOLDS_CASE,
+        ..crate::engine::keying::match_options()
+    }
+}
+
+/// What `pattern` matches below `dir` on disk; a pattern without wildcards
+/// is the one path it names.
+fn on_disk(dir: &Path, pattern: &str) -> Vec<PathBuf> {
+    if !pattern.contains(['*', '?', '[']) {
+        return vec![dir.join(pattern)];
+    }
+    let pattern = format!(
+        "{}/{pattern}",
+        glob::Pattern::escape(&dir.to_string_lossy())
+    );
+    glob::glob_with(&pattern, proof_match())
+        .map(|paths| paths.flatten().take(GUARD_WALK_LIMIT).collect())
+        .unwrap_or_default()
+}
+
+/// The files below `dir`, without following links, up to `limit` entries.
+#[cfg(unix)]
+fn files_below(dir: &Path, limit: usize) -> Vec<PathBuf> {
+    let mut files = Vec::new();
+    let mut queue = std::collections::VecDeque::from([dir.to_path_buf()]);
+    let mut read = 0;
+    while let Some(next) = queue.pop_front() {
+        let Ok(entries) = std::fs::read_dir(&next) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            read += 1;
+            if read > limit {
+                return files;
+            }
+            match entry.file_type() {
+                Ok(kind) if kind.is_dir() => queue.push_back(entry.path()),
+                Ok(kind) if kind.is_file() => files.push(entry.path()),
+                _ => {}
+            }
+        }
+    }
+    files
+}
+
+/// One flow as the guard reads it, once per call.
+struct Guarding {
+    workspace: Workspace,
+    /// The flow file, resolved, which tells two spellings of one flow apart.
+    key: PathBuf,
+    /// Each proof pattern, compiled and as written, with its step.
+    proofs: Vec<(glob::Pattern, String, String)>,
+    /// The flow's directory, as named and as resolved.
+    roots: Vec<PathBuf>,
+    /// The repository the flow is in, which may hold it in a subdirectory,
+    /// else the flow's own directory; as named and as resolved.
+    tops: Vec<PathBuf>,
+}
+
+impl Guarding {
+    /// Why `relative` (to the flow's directory) is part of this flow's
+    /// evidence, if it is.
+    fn evidence(&self, relative: &str) -> Option<String> {
+        let name = folded(relative);
+        let flow_file = self
+            .workspace
+            .flow_path
+            .file_name()
+            .map(|file| folded(&file.to_string_lossy()));
+        let store = crate::store::STORE_DIR;
+        let reason = if Some(&name) == flow_file.as_ref() {
+            "it is the flow file, which says what proves the work".to_string()
+        } else if name == store || name.starts_with(&format!("{store}/")) {
+            "it is in the flot store, which holds the evidence".to_string()
+        } else if let Some((_, _, step)) = self
+            .proofs
+            .iter()
+            .find(|(pattern, _, _)| pattern.matches_with(relative, proof_match()))
+        {
+            format!("the proof of step `{step}` reads it")
+        } else if name.rsplit('/').next() == Some(DEFAULT_FLOW_FILE) {
+            "it would be another flow file in this flow's project, which can change what proves the work and which flow guards it".to_string()
+        } else {
+            return None;
+        };
+        Some(reason)
+    }
+}
+
+/// What one call is judged against: every flow that could own a file it
+/// changes, each read once, and what outside them decides whether proofs
+/// are checked: the user's Claude Code settings and plugins, and flot.
+pub struct Guard {
+    /// Nearest first: a file is named, and guarded, by the deepest flow
+    /// that holds it.
+    flows: Vec<Guarding>,
+    /// Directories already looked in for a flow file.
+    looked: std::collections::HashSet<PathBuf>,
+    home: Vec<PathBuf>,
+    /// The flot binary running the guard, resolved.
+    exe: Option<PathBuf>,
+}
+
+impl Guard {
+    /// A guard of `workspace`'s flow, if it has one; [`Guard::consult`] adds
+    /// the others.
+    pub fn new(workspace: &Workspace) -> Self {
+        let home = std::env::var_os("HOME")
+            .or_else(|| std::env::var_os("USERPROFILE"))
+            .map(PathBuf::from);
+        let mut guard = Guard {
+            flows: Vec::new(),
+            looked: std::collections::HashSet::new(),
+            home: home.map(|home| spellings(&home)).unwrap_or_default(),
+            exe: std::env::current_exe().ok().map(|exe| resolve(&exe)),
+        };
+        guard.add(workspace);
+        guard
+    }
+
+    fn add(&mut self, workspace: &Workspace) {
+        if !workspace.flow_path.is_file() {
+            return;
+        }
+        let key = resolve(&workspace.flow_path);
+        let top = workspace
+            .root
+            .ancestors()
+            .find(|dir| dir.join(".git").exists())
+            .unwrap_or(&workspace.root);
+        // A flow reached through a link too names its files from there.
+        if let Some(known) = self.flows.iter_mut().find(|known| known.key == key) {
+            for (spellings, dir) in [
+                (&mut known.roots, workspace.root.as_path()),
+                (&mut known.tops, top),
+            ] {
+                for spelling in self::spellings(dir) {
+                    if !spellings.contains(&spelling) {
+                        spellings.push(spelling);
+                    }
+                }
+            }
+            return;
+        }
+        // A flow file that does not parse still guards itself, the store
+        // and the harness.
+        let proofs = workspace
+            .flow()
+            .map(|flow| {
+                flow.steps
+                    .iter()
+                    .flat_map(|step| {
+                        step.verify_inputs.iter().filter_map(|pattern| {
+                            let compiled = glob::Pattern::new(pattern).ok()?;
+                            Some((compiled, pattern.clone(), step.id.clone()))
+                        })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        self.flows.push(Guarding {
+            workspace: workspace.clone(),
+            key,
+            proofs,
+            roots: spellings(&workspace.root),
+            tops: spellings(top),
+        });
+        self.flows
+            .sort_by_key(|flow| std::cmp::Reverse(flow.roots[0].components().count()));
+    }
+
+    /// Add every flow file from `dir` up to the top of its repository: one
+    /// that can be created below a flow does not hide the flow above it.
+    pub fn consult(&mut self, dir: &Path) {
+        for spelling in spellings(dir) {
+            for ancestor in spelling.ancestors() {
+                if !self.looked.insert(ancestor.to_path_buf()) {
+                    break;
+                }
+                let flow_path = ancestor.join(DEFAULT_FLOW_FILE);
+                if flow_path.is_file() {
+                    self.add(&Workspace::beside(&flow_path));
+                }
+                if ancestor.join(".git").exists() {
+                    break;
+                }
+            }
+        }
+    }
+
+    /// Whether any flow guards the call. Where none does, nothing is flot's
+    /// to refuse.
+    pub fn active(&self) -> bool {
+        !self.flows.is_empty()
+    }
+
+    /// The flows found, for a refusal to be noted in.
+    pub fn workspaces(&self) -> impl Iterator<Item = &Workspace> {
+        self.flows.iter().map(|flow| &flow.workspace)
+    }
+
+    /// Why changing `path` (absolute), or anything below it, would touch a
+    /// flow's proofs or decide whether they are checked, if it would. The
+    /// path is judged as named, then where it leads through links, then as
+    /// another name of a guarded file, then, for a directory, by what it
+    /// holds.
+    pub fn judge(&self, path: &Path) -> Option<Guarded> {
+        if self.flows.is_empty() {
+            return None;
+        }
+        let named = normalize(path);
+        if let Some((path, reason)) = self.rule(&named) {
+            return Some(Guarded { path, reason });
+        }
+        let resolved = resolve(&named);
+        let reason = (resolved != named)
+            .then(|| self.rule(&resolved))
+            .flatten()
+            .map(|(to, reason)| format!("it leads to {to}: {reason}"))
+            .or_else(|| {
+                self.hard_link(&resolved)
+                    .map(|(to, reason)| format!("it is a hard link to {to}: {reason}"))
+            })
+            .or_else(|| resolved.is_dir().then(|| self.holds(&resolved)).flatten())?;
+        Some(Guarded {
+            path: self.name(&named),
+            reason,
+        })
+    }
+
+    /// The rule that guards `path` as it is named, without following links
+    /// or looking below it: the name it goes by, from the flow or
+    /// repository whose rule it is, and why.
+    fn rule(&self, path: &Path) -> Option<(String, String)> {
+        for flow in &self.flows {
+            if let Some(relative) = below(path, &flow.roots) {
+                if let Some(reason) = flow.evidence(&relative) {
+                    return Some((relative, reason));
+                }
+            }
+        }
+        for flow in &self.flows {
+            if let Some(relative) = below(path, &flow.tops) {
+                if let Some(reason) = harness(&relative) {
+                    return Some((relative, reason));
+                }
+            }
+        }
+        if let Some(relative) = below(path, &self.home) {
+            if let Some(reason) = user_harness(&relative) {
+                return Some((format!("~/{relative}"), reason));
+            }
+        }
+        let exe = self.exe.as_deref()?;
+        (strip_base(path, exe, FOLDS_CASE).as_deref() == Some("")).then(|| {
+            (
+                path.display().to_string(),
+                "it is the flot binary that enforces this guard".to_string(),
+            )
+        })
+    }
+
+    /// `path` as the guard names it.
+    fn name(&self, path: &Path) -> String {
+        let relative = self
+            .flows
+            .iter()
+            .find_map(|flow| below(path, &flow.roots))
+            .or_else(|| self.flows.iter().find_map(|flow| below(path, &flow.tops)));
+        match relative {
+            Some(relative) if relative.is_empty() => ".".to_string(),
+            Some(relative) => relative,
+            None => match below(path, &self.home) {
+                Some(relative) if relative.is_empty() => "~".to_string(),
+                Some(relative) => format!("~/{relative}"),
+                None => path.display().to_string(),
+            },
+        }
+    }
+
+    /// Where guarded files are known to be, as far as they exist: each
+    /// flow's file, store and proofs (a pattern by its matches), its
+    /// repository's harness, the user's Claude Code settings and plugins,
+    /// and flot itself.
+    fn places(&self) -> Vec<PathBuf> {
+        let mut places = Vec::new();
+        for flow in &self.flows {
+            let root = &flow.workspace.root;
+            places.push(flow.workspace.flow_path.clone());
+            places.push(root.join(crate::store::STORE_DIR));
+            for (_, pattern, _) in &flow.proofs {
+                places.extend(on_disk(root, pattern));
+            }
+            let top = &flow.tops[0];
+            for place in [".git/config", ".git/hooks", ".github/workflows"] {
+                places.push(top.join(place));
+            }
+            for dir in [top, root] {
+                places.extend(on_disk(dir, ".claude/settings*.json"));
+            }
+        }
+        if let Some(home) = self.home.first() {
+            places.extend(on_disk(home, ".claude/settings*.json"));
+            places.push(home.join(".claude/plugins"));
+        }
+        places.extend(self.exe.clone());
+        let mut seen = std::collections::HashSet::new();
+        places.retain(|place| place.symlink_metadata().is_ok() && seen.insert(place.clone()));
+        places
+    }
+
+    /// What the directory `dir` (resolved) holds that is guarded, as a
+    /// reason, if anything: what is known to be there, then what a bounded
+    /// walk finds that no flow names in advance, such as another flow's
+    /// file or Claude Code settings deeper down.
+    fn holds(&self, dir: &Path) -> Option<String> {
+        let mut held: Vec<(String, String)> = Vec::new();
+        let mut note = |found: (String, String)| {
+            if !held.iter().any(|(name, _)| *name == found.0) {
+                held.push(found);
+            }
+        };
+        for place in self.places() {
+            let resolved = resolve(&place);
+            if strip_base(&resolved, dir, FOLDS_CASE).is_some() {
+                if let Some(found) = self.rule(&place).or_else(|| self.rule(&resolved)) {
+                    note(found);
+                }
+            }
+        }
+        let mut queue = std::collections::VecDeque::from([dir.to_path_buf()]);
+        let mut read = 0;
+        'walk: while let Some(next) = queue.pop_front() {
+            let Ok(entries) = std::fs::read_dir(&next) else {
+                continue;
+            };
+            for entry in entries.flatten() {
+                read += 1;
+                if read > GUARD_WALK_LIMIT {
+                    break 'walk;
+                }
+                let path = entry.path();
+                if let Some(found) = self.rule(&path) {
+                    note(found);
+                } else if entry.file_type().is_ok_and(|kind| kind.is_dir())
+                    && entry.file_name() != ".git"
+                {
+                    queue.push_back(path);
+                }
+            }
+        }
+        let ((name, reason), rest) = held.split_first()?;
+        let mut said = format!("it holds {name}: {reason}");
+        if !rest.is_empty() {
+            let shown: Vec<&str> = rest.iter().take(6).map(|(name, _)| name.as_str()).collect();
+            said.push_str(&format!("; also {}", shown.join(", ")));
+            if rest.len() > shown.len() {
+                said.push_str(&format!(" and {} more", rest.len() - shown.len()));
+            }
+        }
+        Some(said)
+    }
+
+    /// The guarded file that `path` (resolved) is another name of, by
+    /// device and inode.
+    #[cfg(unix)]
+    fn hard_link(&self, path: &Path) -> Option<(String, String)> {
+        use std::os::unix::fs::MetadataExt;
+        let meta = std::fs::metadata(path).ok()?;
+        if !meta.is_file() || meta.nlink() < 2 {
+            return None;
+        }
+        let mut files = Vec::new();
+        for place in self.places() {
+            if place.is_dir() {
+                files.extend(files_below(&place, GUARD_WALK_LIMIT));
+            } else {
+                files.push(place);
+            }
+        }
+        files.into_iter().find_map(|file| {
+            let other = std::fs::metadata(&file).ok()?;
+            if (other.dev(), other.ino()) != (meta.dev(), meta.ino()) {
+                return None;
+            }
+            self.rule(&file).or_else(|| self.rule(&resolve(&file)))
+        })
+    }
+
+    #[cfg(not(unix))]
+    fn hard_link(&self, _path: &Path) -> Option<(String, String)> {
+        None
+    }
+}
+
+/// What git is asked, to learn which files a command would change.
+enum GitAsk {
+    /// The changes in the working tree and index, and untracked files too.
+    Status { untracked: bool },
+    /// The files that may change, for each way they may: those that differ
+    /// in every one of its comparisons, each of two revisions or of a
+    /// revision (or, with none, the index) and the working tree. A three-way
+    /// merge, for one, changes only what both sides changed.
+    Diff(Vec<Vec<Vec<String>>>),
+    /// The files these patches touch, with the options that place them.
+    Apply(Vec<String>),
+    /// What `git clean` with these options would remove.
+    Clean(Vec<String>),
+    /// Nothing git can answer, and why.
+    Unknown(&'static str),
+}
+
+/// The operands and options of a git subcommand's `args`, past the options
+/// in `valued` that take the next word as their value, and the paths after
+/// `--`, if any.
+fn git_operands<'a>(
+    args: &'a [String],
+    valued: &[&str],
+) -> (Vec<&'a str>, Vec<&'a str>, Option<Vec<&'a str>>) {
+    let mut operands = Vec::new();
+    let mut options = Vec::new();
+    let mut at = 0;
+    while let Some(arg) = args.get(at) {
+        at += 1;
+        if arg == "--" {
+            let paths = args[at..].iter().map(String::as_str).collect();
+            return (operands, options, Some(paths));
+        }
+        if arg.starts_with('-') && arg.len() > 1 {
+            options.push(arg.as_str());
+            if valued.contains(&arg.as_str()) {
+                at += 1;
+            }
+        } else {
+            operands.push(arg.as_str());
+        }
+    }
+    (operands, options, None)
+}
+
+fn stash_changes(args: &[String]) -> Option<GitAsk> {
+    let (operands, options, _) = git_operands(args, &["-m", "--message"]);
+    let untracked = options
+        .iter()
+        .any(|option| matches!(*option, "-u" | "--include-untracked" | "-a" | "--all"));
+    match operands.first().copied() {
+        None | Some("push" | "save") => Some(GitAsk::Status { untracked }),
+        Some("pop" | "apply") => {
+            let entry = operands.get(1).copied().unwrap_or("stash@{0}");
+            Some(GitAsk::Diff(vec![vec![
+                revisions(&[&format!("{entry}^1"), entry]),
+                revisions(&["HEAD", entry]),
+            ]]))
+        }
+        Some("branch") => Some(GitAsk::Unknown(
+            "`git stash branch` checks out another revision",
+        )),
+        // list, show, drop, clear, create, store: the working tree stays.
+        _ => None,
+    }
+}
+
+fn reset_changes(args: &[String]) -> Option<GitAsk> {
+    let (operands, options, _) = git_operands(args, &[]);
+    if !options
+        .iter()
+        .any(|option| matches!(*option, "--hard" | "--keep" | "--merge"))
+    {
+        return None;
+    }
+    let revision = operands.first().copied().unwrap_or("HEAD");
+    Some(GitAsk::Diff(vec![vec![revisions(&[revision])]]))
+}
+
+/// One comparison `git diff` makes.
+fn revisions(names: &[&str]) -> Vec<String> {
+    names.iter().map(|name| name.to_string()).collect()
+}
+
+/// `checkout` or `switch` to a revision. With paths, the command line names
+/// what it writes.
+fn switch_changes(args: &[String]) -> Option<GitAsk> {
+    let (operands, options, paths) =
+        git_operands(args, &["-b", "-B", "-c", "-C", "--orphan", "--conflict"]);
+    if options
+        .iter()
+        .any(|option| option.starts_with("--pathspec-from-file"))
+    {
+        return Some(GitAsk::Unknown("it reads its paths from a file"));
+    }
+    if paths.is_some() || operands.len() > 1 {
+        return None;
+    }
+    let revision = operands.first().copied().map(|revision| match revision {
+        "-" => "@{-1}",
+        revision => revision,
+    });
+    // `-p` takes back what the working tree changed from the index, or
+    // from the revision.
+    if options
+        .iter()
+        .any(|option| matches!(*option, "-p" | "--patch"))
+    {
+        return Some(GitAsk::Diff(vec![vec![revisions(
+            &revision.into_iter().collect::<Vec<_>>(),
+        )]]));
+    }
+    // Local changes stay across a switch unless it is forced.
+    let force = options
+        .iter()
+        .any(|option| matches!(*option, "-f" | "--force" | "--discard-changes"));
+    let revision = match revision {
+        Some(revision) => revision,
+        None if force => "HEAD",
+        None => return None,
+    };
+    Some(GitAsk::Diff(vec![vec![if force {
+        revisions(&[revision])
+    } else {
+        revisions(&["HEAD", revision])
+    }]]))
+}
+
+/// Whether `options` go on with, or back out of, a merge, rebase,
+/// cherry-pick, revert or `am` that already started; that changes no more
+/// than starting it did, or takes it back.
+fn resumes(options: &[&str]) -> bool {
+    options
+        .iter()
+        .any(|option| matches!(*option, "--abort" | "--continue" | "--quit" | "--skip"))
+}
+
+/// `merge` of revisions, by default the upstream: what each brings since
+/// it and `HEAD` parted.
+fn merge_changes(args: &[String]) -> Option<GitAsk> {
+    let (operands, options, _) = git_operands(
+        args,
+        &[
+            "-m",
+            "-F",
+            "--file",
+            "-s",
+            "--strategy",
+            "-X",
+            "--strategy-option",
+            "--into-name",
+            "--cleanup",
+        ],
+    );
+    if resumes(&options) {
+        return None;
+    }
+    let revisions = if operands.is_empty() {
+        vec!["@{upstream}"]
+    } else {
+        operands
+    };
+    Some(GitAsk::Diff(
+        revisions
+            .into_iter()
+            .map(|revision| {
+                vec![
+                    vec![format!("HEAD...{revision}")],
+                    self::revisions(&["HEAD", revision]),
+                ]
+            })
+            .collect(),
+    ))
+}
+
+/// `rebase`: what differs between the branch and where it lands, and what
+/// both the commits it moves and that place changed, which may conflict;
+/// and, when it names a branch, what switching to it changes.
+fn rebase_changes(args: &[String]) -> Option<GitAsk> {
+    let (operands, options, _) = git_operands(
+        args,
+        &[
+            "--onto",
+            "-s",
+            "--strategy",
+            "-X",
+            "--strategy-option",
+            "-x",
+            "--exec",
+        ],
+    );
+    if resumes(&options)
+        || options.contains(&"--edit-todo")
+        || options.contains(&"--show-current-patch")
+    {
+        return None;
+    }
+    if options.iter().any(|option| {
+        matches!(*option, "-x" | "--root" | "-i" | "--interactive") || option.starts_with("--exec")
+    }) {
+        return Some(GitAsk::Unknown(
+            "an interactive rebase, or one that runs commands, does what it is told as it goes",
+        ));
+    }
+    let upstream = operands.first().copied().unwrap_or("@{upstream}");
+    let branch = operands.get(1).copied().unwrap_or("HEAD");
+    let onto = args
+        .iter()
+        .position(|arg| arg == "--onto")
+        .and_then(|at| args.get(at + 1))
+        .map(String::as_str)
+        .or_else(|| args.iter().find_map(|arg| arg.strip_prefix("--onto=")))
+        .unwrap_or(upstream);
+    let mut changes = vec![
+        vec![revisions(&[branch, onto])],
+        vec![
+            vec![format!("{upstream}...{branch}")],
+            vec![format!("{branch}...{onto}")],
+        ],
+    ];
+    if branch != "HEAD" {
+        changes.push(vec![revisions(&["HEAD", branch])]);
+    }
+    Some(GitAsk::Diff(changes))
+}
+
+/// `cherry-pick` or, with `revert`, the reverse of commits, or of ranges
+/// of them: what each changes that `HEAD` does not already hold.
+fn pick_changes(args: &[String], revert: bool) -> Option<GitAsk> {
+    let (operands, options, _) = git_operands(
+        args,
+        &[
+            "-m",
+            "--mainline",
+            "-s",
+            "--strategy",
+            "-X",
+            "--strategy-option",
+            "--cleanup",
+        ],
+    );
+    if resumes(&options) {
+        return None;
+    }
+    if options.contains(&"--stdin") || operands.is_empty() {
+        return Some(GitAsk::Unknown("it reads its commits from standard input"));
+    }
+    let parent = args
+        .iter()
+        .position(|arg| arg == "-m" || arg == "--mainline")
+        .and_then(|at| args.get(at + 1))
+        .map_or("1", String::as_str);
+    Some(GitAsk::Diff(
+        operands
+            .into_iter()
+            .map(|operand| match operand.split_once("..") {
+                Some((from, to)) => {
+                    let to = to.trim_start_matches('.');
+                    vec![vec![format!(
+                        "{}...{}",
+                        if from.is_empty() { "HEAD" } else { from },
+                        if to.is_empty() { "HEAD" } else { to }
+                    )]]
+                }
+                None => {
+                    let before = format!("{operand}^{parent}");
+                    let after = if revert { before.as_str() } else { operand };
+                    vec![revisions(&[&before, operand]), revisions(&["HEAD", after])]
+                }
+            })
+            .collect(),
+    ))
+}
+
+/// `am` of mailboxes: the files their patches touch.
+fn am_changes(args: &[String]) -> Option<GitAsk> {
+    let (operands, options, _) = git_operands(args, &[]);
+    if resumes(&options) || options.contains(&"--show-current-patch") {
+        return None;
+    }
+    if operands.is_empty() {
+        return Some(GitAsk::Unknown("it reads the patches from standard input"));
+    }
+    // The options `git apply` shares place the paths.
+    let mut ask: Vec<String> = options
+        .into_iter()
+        .filter(|option| {
+            (option.starts_with("-p") && option.len() > 2)
+                || option.starts_with("--directory=")
+                || option.starts_with("--exclude=")
+                || option.starts_with("--include=")
+        })
+        .map(str::to_string)
+        .collect();
+    ask.extend(operands.into_iter().map(str::to_string));
+    Some(GitAsk::Apply(ask))
+}
+
+/// `clean`, unless it only says what it would remove.
+fn clean_changes(args: &[String]) -> Option<GitAsk> {
+    let (operands, options, paths) = git_operands(args, &["-e", "--exclude"]);
+    if options
+        .iter()
+        .any(|option| matches!(*option, "-n" | "--dry-run"))
+    {
+        return None;
+    }
+    // The options that choose what is removed stay; those that force or
+    // ask go, and `--dry-run` takes their place.
+    let mut ask = vec!["--dry-run".to_string()];
+    let mut at = 0;
+    while let Some(arg) = args.get(at) {
+        at += 1;
+        match arg.as_str() {
+            "--" => break,
+            "-e" | "--exclude" => {
+                ask.push(arg.clone());
+                ask.extend(args.get(at).cloned());
+                at += 1;
+            }
+            "-d" | "-x" | "-X" => ask.push(arg.clone()),
+            _ if arg.starts_with("--exclude=") || arg.starts_with("-e") && arg.len() > 2 => {
+                ask.push(arg.clone())
+            }
+            // Bundled short options, such as `-fdx`.
+            _ if arg.starts_with('-') && !arg.starts_with("--") => {
+                for flag in arg[1..]
+                    .chars()
+                    .filter(|flag| matches!(flag, 'd' | 'x' | 'X'))
+                {
+                    ask.push(format!("-{flag}"));
+                }
+            }
+            _ => {}
+        }
+    }
+    ask.push("--".to_string());
+    ask.extend(
+        operands
+            .into_iter()
+            .chain(paths.unwrap_or_default())
+            .map(str::to_string),
+    );
+    Some(GitAsk::Clean(ask))
+}
+
+fn apply_changes(args: &[String]) -> GitAsk {
+    let (operands, options, paths) = git_operands(args, &[]);
+    let patches: Vec<&str> = operands
+        .into_iter()
+        .chain(paths.unwrap_or_default())
+        .collect();
+    if patches.is_empty() || patches.contains(&"-") {
+        return GitAsk::Unknown("it reads the patch from standard input");
+    }
+    // The options that place the paths stay; those that print or apply
+    // instead go.
+    let mut ask: Vec<String> = options
+        .into_iter()
+        .filter(|option| {
+            !matches!(
+                *option,
+                "--stat"
+                    | "--numstat"
+                    | "--summary"
+                    | "--check"
+                    | "--apply"
+                    | "-v"
+                    | "--verbose"
+                    | "--index"
+                    | "--cached"
+                    | "-3"
+                    | "--3way"
+                    | "--reject"
+            )
+        })
+        .map(str::to_string)
+        .collect();
+    ask.extend(patches.into_iter().map(str::to_string));
+    GitAsk::Apply(ask)
+}
+
+/// What a whole-tree git command would change: `git` run in `dir` with
+/// `args`, the words after `git`. `stash`, `reset --hard`, `checkout` or
+/// `switch` to a revision, `checkout -f` or `-p`, `apply`, `am`, `merge`,
+/// `rebase`, `cherry-pick`, `revert` and `clean` change files the command
+/// line does not name, so git is asked which. `None` for any other git
+/// command, whose files the line names itself; an error when git cannot
+/// say, as for `pull`, which fetches first: a change the guard cannot rule
+/// out.
+pub fn git_would_change(dir: &Path, args: &[String]) -> Option<Result<Vec<PathBuf>>> {
+    // The options that choose the repository and its working tree are
+    // passed on; `-c` and the like are not, so a command line cannot
+    // configure the git the guard runs.
+    let mut place: Vec<String> = Vec::new();
+    let mut at = 0;
+    while let Some(arg) = args.get(at) {
+        match arg.as_str() {
+            "-C" | "--git-dir" | "--work-tree" => {
+                place.push(arg.clone());
+                place.extend(args.get(at + 1).cloned());
+                at += 2;
+            }
+            "-c" | "--namespace" | "--config-env" | "--super-prefix" => at += 2,
+            _ if arg.starts_with("--git-dir=") || arg.starts_with("--work-tree=") => {
+                place.push(arg.clone());
+                at += 1;
+            }
+            _ if arg.starts_with('-') => at += 1,
+            _ => break,
+        }
+    }
+    let (command, rest) = args.get(at..)?.split_first()?;
+    let ask = match command.as_str() {
+        "stash" => stash_changes(rest)?,
+        "reset" => reset_changes(rest)?,
+        "checkout" | "switch" => switch_changes(rest)?,
+        "apply" => apply_changes(rest),
+        "merge" => merge_changes(rest)?,
+        "rebase" => rebase_changes(rest)?,
+        "cherry-pick" => pick_changes(rest, false)?,
+        "revert" => pick_changes(rest, true)?,
+        "am" => am_changes(rest)?,
+        "clean" => clean_changes(rest)?,
+        "pull" => GitAsk::Unknown(
+            "`git pull` fetches first; run `git fetch`, then `git merge` or `git rebase`, which can be judged",
+        ),
+        _ => return None,
+    };
+    Some(ask_git(dir, &place, &ask))
+}
+
+fn ask_git(dir: &Path, place: &[String], ask: &GitAsk) -> Result<Vec<PathBuf>> {
+    if let GitAsk::Unknown(why) = ask {
+        bail!("{why}");
+    }
+    let git = |args: &[&str]| -> Result<Vec<u8>> {
+        let output = std::process::Command::new("git")
+            .args(["-c", "core.fsmonitor=false", "-C"])
+            .arg(dir)
+            .args(place)
+            .args(args)
+            .env("GIT_OPTIONAL_LOCKS", "0")
+            .stdin(std::process::Stdio::null())
+            .output()
+            .context("cannot run git")?;
+        if !output.status.success() {
+            let said = String::from_utf8_lossy(&output.stderr);
+            bail!(
+                "{}",
+                said.lines()
+                    .find(|line| !line.trim().is_empty())
+                    .unwrap_or("git failed")
+                    .trim()
+            );
+        }
+        Ok(output.stdout)
+    };
+    // `git apply` also patches outside a repository, from where it runs.
+    let top = match (git(&["rev-parse", "--show-toplevel"]), ask) {
+        (Ok(top), _) => PathBuf::from(String::from_utf8_lossy(&top).trim()),
+        (Err(_), GitAsk::Apply(_)) => dir.to_path_buf(),
+        (Err(error), _) => return Err(error),
+    };
+    let names = match ask {
+        GitAsk::Status { untracked } => status_paths(&git(&[
+            "status",
+            "--porcelain",
+            "-z",
+            if *untracked {
+                "--untracked-files=all"
+            } else {
+                "--untracked-files=no"
+            },
+        ])?),
+        GitAsk::Diff(changes) => {
+            let mut names: Vec<String> = Vec::new();
+            for comparisons in changes {
+                let mut common: Option<Vec<String>> = None;
+                for revisions in comparisons {
+                    let mut args = vec!["diff", "--name-only", "--no-renames", "-z"];
+                    args.extend(revisions.iter().map(String::as_str));
+                    args.push("--");
+                    let differ: Vec<String> = git(&args)?
+                        .split(|byte| *byte == 0)
+                        .filter(|name| !name.is_empty())
+                        .map(|name| String::from_utf8_lossy(name).into_owned())
+                        .collect();
+                    common = Some(match common {
+                        None => differ,
+                        Some(known) => known
+                            .into_iter()
+                            .filter(|name| differ.contains(name))
+                            .collect(),
+                    });
+                }
+                names.extend(common.unwrap_or_default());
+            }
+            names
+        }
+        // Named from where git runs, not from the top.
+        GitAsk::Clean(options) => {
+            let mut args = vec!["-c", "core.quotePath=false", "clean"];
+            args.extend(options.iter().map(String::as_str));
+            let mut cwd = dir.to_path_buf();
+            for pair in place.windows(2) {
+                if pair[0] == "-C" {
+                    cwd = cwd.join(&pair[1]);
+                }
+            }
+            let mut removed = Vec::new();
+            for line in String::from_utf8_lossy(&git(&args)?).lines() {
+                let Some(name) = line.strip_prefix("Would remove ") else {
+                    continue;
+                };
+                if name.starts_with('"') {
+                    bail!("git quotes the name {name}");
+                }
+                removed.push(cwd.join(name));
+            }
+            return Ok(removed);
+        }
+        GitAsk::Apply(patches) => {
+            let mut args = vec!["apply", "--numstat", "-z"];
+            args.extend(patches.iter().map(String::as_str));
+            numstat_paths(&git(&args)?)
+        }
+        GitAsk::Unknown(_) => Vec::new(),
+    };
+    Ok(names.into_iter().map(|name| top.join(name)).collect())
+}
+
+/// The paths in `git status --porcelain -z`: each entry's, and a rename's
+/// source as well.
+fn status_paths(out: &[u8]) -> Vec<String> {
+    let mut paths = Vec::new();
+    let mut records = out
+        .split(|byte| *byte == 0)
+        .filter(|record| !record.is_empty());
+    while let Some(record) = records.next() {
+        if record.len() < 4 {
+            continue;
+        }
+        paths.push(String::from_utf8_lossy(&record[3..]).into_owned());
+        if matches!(record[0], b'R' | b'C') {
+            paths.extend(
+                records
+                    .next()
+                    .map(|from| String::from_utf8_lossy(from).into_owned()),
+            );
+        }
+    }
+    paths
+}
+
+/// The paths in `git apply --numstat -z`: `added TAB deleted TAB path`, or
+/// for a rename an empty path followed by both names.
+fn numstat_paths(out: &[u8]) -> Vec<String> {
+    let mut paths = Vec::new();
+    let mut fields = out.split(|byte| *byte == 0);
+    while let Some(field) = fields.next() {
+        if field.is_empty() {
+            continue;
+        }
+        let text = String::from_utf8_lossy(field);
+        match text.splitn(3, '\t').nth(2) {
+            Some(path) if !path.is_empty() => paths.push(path.to_string()),
+            _ => {
+                for _ in 0..2 {
+                    paths.extend(
+                        fields
+                            .next()
+                            .map(|name| String::from_utf8_lossy(name).into_owned()),
+                    );
+                }
+            }
+        }
+    }
+    paths
 }
 
 /// `path` without `.` and with `..` applied, without touching the disk: the
@@ -376,78 +1480,6 @@ impl Workspace {
         })
     }
 
-    /// Which of `paths` (absolute) changing would touch this flow's proofs:
-    /// the flow file, a file a step's proof reads, the store, or what decides
-    /// whether those are checked at all (see [`harness`]). A flow file that is
-    /// missing guards nothing; one that does not parse still guards itself,
-    /// the store and the harness.
-    pub fn guard(&self, paths: &[PathBuf]) -> Vec<Guarded> {
-        if !self.flow_path.is_file() {
-            return Vec::new();
-        }
-        let flow = self.flow().ok();
-        // The repository the flow is in, which may hold it in a
-        // subdirectory, else the flow's own directory.
-        let top = self
-            .root
-            .ancestors()
-            .find(|dir| dir.join(".git").is_dir())
-            .unwrap_or(&self.root);
-        let home = std::env::var_os("HOME")
-            .or_else(|| std::env::var_os("USERPROFILE"))
-            .map(PathBuf::from);
-        let mut guarded = Vec::new();
-        for path in paths {
-            let path = normalize(path);
-            let found = relative_to(&path, &self.root)
-                .and_then(|relative| {
-                    let reason = self.guarded_in_flow(flow.as_ref(), &relative)?;
-                    Some((relative, reason))
-                })
-                .or_else(|| {
-                    let relative = relative_to(&path, top)?;
-                    harness(&relative).map(|reason| (relative, reason))
-                })
-            .or_else(|| {
-                let relative = relative_to(&path, home.as_deref()?)?;
-                (relative == ".claude/settings.json").then(|| {
-                    (
-                        format!("~/{relative}"),
-                        "it configures Claude Code for this user, including the hook that enforces this guard".to_string(),
-                    )
-                })
-            });
-            if let Some((path, reason)) = found {
-                guarded.push(Guarded { path, reason });
-            }
-        }
-        guarded
-    }
-
-    /// Why `relative` (to the flow's directory) is part of this flow's
-    /// evidence, if it is.
-    fn guarded_in_flow(&self, flow: Option<&Flow>, relative: &str) -> Option<String> {
-        if Some(relative) == self.flow_path.file_name().and_then(|name| name.to_str()) {
-            Some("it is the flow file, which says what proves the work".to_string())
-        } else if relative == crate::store::STORE_DIR
-            || relative.starts_with(&format!("{}/", crate::store::STORE_DIR))
-        {
-            Some("it is in the flot store, which holds the evidence".to_string())
-        } else {
-            flow.into_iter()
-                .flat_map(|flow| &flow.steps)
-                .find_map(|step| {
-                    step.verify_inputs
-                        .iter()
-                        .filter_map(|pattern| glob::Pattern::new(pattern).ok())
-                        .any(|pattern| {
-                            pattern.matches_with(relative, crate::engine::keying::match_options())
-                        })
-                        .then(|| format!("the proof of step `{}` reads it", step.id))
-                })
-        }
-    }
-
     /// Write the starter flow. Refuses to replace an existing file unless
     /// `force` is set.
     pub fn init(&self, force: bool) -> Result<PathBuf> {
@@ -457,7 +1489,8 @@ impl Workspace {
                 self.flow_path.display()
             );
         }
-        std::fs::write(&self.flow_path, STARTER_FLOW)
+        let flow = STARTER_FLOW.replace("{proofs_from}", &starter_proofs_from(&self.root));
+        std::fs::write(&self.flow_path, flow)
             .with_context(|| format!("cannot write {}", self.flow_path.display()))?;
         Ok(self.flow_path.clone())
     }
@@ -553,7 +1586,7 @@ impl Workspace {
         // The flow is optional here: a run can be verified without one.
         let flow = self.flow().ok();
         if let Some(baseline) = self.baseline(flow.as_ref(), proofs_from)? {
-            audit.anchor = Some(audit::anchor(&store, &manifest, &baseline)?);
+            audit.hold_to(audit::anchor(&store, &manifest, &baseline)?);
         }
         Ok(audit)
     }
@@ -993,6 +2026,56 @@ fn attest_recorded(
 mod tests {
     use super::*;
     use std::fs;
+
+    #[test]
+    fn a_path_is_named_below_a_base_in_any_case_where_names_fold() {
+        let base = Path::new("/r/Proj");
+        assert_eq!(
+            strip_base(Path::new("/r/Proj/a/b"), base, false).as_deref(),
+            Some("a/b")
+        );
+        assert_eq!(
+            strip_base(Path::new("/r/Proj"), base, false).as_deref(),
+            Some("")
+        );
+        assert_eq!(strip_base(Path::new("/r/proj/a"), base, false), None);
+        assert_eq!(
+            strip_base(Path::new("/r/proj/A"), base, true).as_deref(),
+            Some("A")
+        );
+        assert_eq!(strip_base(Path::new("/r/Projects/a"), base, true), None);
+    }
+
+    #[test]
+    fn the_files_git_names_are_read_from_its_output() {
+        assert_eq!(
+            status_paths(b" M check.sh\0R  new.sh\0old.sh\0?? x y\0"),
+            ["check.sh", "new.sh", "old.sh", "x y"]
+        );
+        assert_eq!(
+            numstat_paths(b"1\t1\ta\x002\t0\t\0from\0to\0"),
+            ["a", "from", "to"]
+        );
+    }
+
+    #[test]
+    fn a_merge_or_a_pick_changes_only_what_head_does_not_already_hold() {
+        let words = |line: &str| line.split(' ').map(str::to_string).collect::<Vec<_>>();
+        let Some(GitAsk::Diff(changes)) = merge_changes(&words("-m msg topic")) else {
+            panic!("a merge is asked of git");
+        };
+        assert_eq!(changes, [[vec!["HEAD...topic"], vec!["HEAD", "topic"]]]);
+        let Some(GitAsk::Diff(changes)) = pick_changes(&words("abc"), true) else {
+            panic!("a revert is asked of git");
+        };
+        assert_eq!(changes, [[vec!["abc^1", "abc"], vec!["HEAD", "abc^1"]]]);
+        assert!(merge_changes(&words("--abort")).is_none());
+        assert!(clean_changes(&words("-n -fdx")).is_none());
+        let Some(GitAsk::Clean(asked)) = clean_changes(&words("-fdx -e keep")) else {
+            panic!("a clean is asked of git");
+        };
+        assert_eq!(asked, ["--dry-run", "-d", "-x", "-e", "keep", "--"]);
+    }
 
     #[test]
     fn find_flow_root_walks_upward() {

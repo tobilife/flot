@@ -2,7 +2,8 @@
 //!
 //! Exit codes are part of the contract, because CI reads them:
 //! `0` passed, `1` failed or evidence that does not authenticate, `2`
-//! completed with unverified claims, `3` the request itself was invalid, `4`
+//! completed with unverified claims or ran only some of the flow's steps,
+//! `3` the request itself was invalid, `4`
 //! the environment failed (IO, permissions, a busy store; retrying can help).
 
 use std::path::{Path, PathBuf};
@@ -15,9 +16,9 @@ use serde::Serialize;
 use crate::core::attest::{self, Authorship, SignerCheck, VouchedStep, Voucher};
 use crate::core::compare::RunDiff;
 use crate::core::digest;
-use crate::core::receipt::{ClaimStatus, RunManifest, StepStatus, Verdict};
+use crate::core::receipt::{ClaimStatus, Partial, RunManifest, StepStatus, Verdict};
 use crate::core::{powershell, shell};
-use crate::service::audit::Audit;
+use crate::service::audit::{Audit, Outcome};
 use crate::service::bundle::ImportPolicy;
 use crate::service::doctor::Status;
 use crate::service::{
@@ -372,23 +373,32 @@ pub fn main(serve_mcp: fn(&Workspace) -> Result<()>) -> ExitCode {
     }
 }
 
-/// `~/path` from the user's home directory, as a shell would expand it.
-fn home_relative(path: &str) -> PathBuf {
-    match path.strip_prefix("~/") {
-        Some(rest) => std::env::var_os("HOME")
-            .or_else(|| std::env::var_os("USERPROFILE"))
-            .map_or_else(
-                || PathBuf::from(path),
-                |home| PathBuf::from(home).join(rest),
-            ),
-        None => PathBuf::from(path),
+/// The user's home directory, which `~` and `$HOME` name.
+fn home_dir() -> Option<PathBuf> {
+    std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .map(PathBuf::from)
+}
+
+/// `path` with a leading `~` as the home directory, as a shell expands it.
+fn tilde(path: &str) -> PathBuf {
+    match (path.strip_prefix('~'), home_dir()) {
+        (Some(rest), Some(home)) if rest.is_empty() || rest.starts_with(['/', '\\']) => {
+            home.join(rest.trim_start_matches(['/', '\\']))
+        }
+        _ => PathBuf::from(path),
     }
 }
 
 /// Why downloaded code piped into an interpreter is refused.
 const REMOTE: &str = "it runs code fetched from the network, which no step or receipt records";
 
-/// The tools whose calls the Claude Code hook sees.
+/// What a `flot` command the guard leaves to the user does.
+const VERB: &str = "changes whose evidence counts";
+
+/// The tools the Claude Code hook reads by their kind: an edit names its
+/// file, a shell its command line. Any other tool is read for the paths its
+/// input names (see [`PATH_KEYS`]), unless it is named like a read.
 const GUARDED_TOOLS: [&str; 6] = [
     "Edit",
     "Write",
@@ -397,6 +407,108 @@ const GUARDED_TOOLS: [&str; 6] = [
     "Bash",
     "PowerShell",
 ];
+
+/// The keys whose string values, at any depth of another tool's input, are
+/// paths it may change. A `source` is read by a copy but removed by a move.
+const PATH_KEYS: [&str; 9] = [
+    "path",
+    "file_path",
+    "file",
+    "filename",
+    "destination",
+    "target",
+    "notebook_path",
+    "paths",
+    "source",
+];
+
+/// How many paths one written word may expand to.
+const EXPANSION_LIMIT: usize = 1000;
+
+/// Whether `tool` is named like one that only reads, such as `Read`, `LS`,
+/// `WebFetch` or `mcp__filesystem__list_directory`: a word of its name
+/// starts with read, get, list, search, view, find, grep, glob or fetch, or
+/// is ls, tree, stat or info, and none names a change, as in
+/// `search_replace` or `read_and_write`.
+fn reads_only(tool: &str) -> bool {
+    const READS: [&str; 9] = [
+        "read", "get", "list", "search", "view", "find", "grep", "glob", "fetch",
+    ];
+    const CHANGES: [&str; 33] = [
+        "write", "edit", "create", "delete", "remove", "move", "rename", "replace", "update",
+        "set", "put", "patch", "apply", "append", "insert", "save", "upload", "download", "copy",
+        "mkdir", "rm", "mv", "cp", "touch", "exec", "run", "modify", "change", "add", "restore",
+        "reset", "link", "unlink",
+    ];
+    let words = words_of(tool);
+    words.iter().any(|word| {
+        matches!(word.as_str(), "ls" | "tree" | "stat" | "info")
+            || READS.iter().any(|read| word.starts_with(read))
+    }) && !words
+        .iter()
+        .any(|word| CHANGES.iter().any(|change| word.starts_with(change)))
+}
+
+/// `name` in lowercase words, split at what is not a letter or digit and
+/// where camelCase turns upper.
+fn words_of(name: &str) -> Vec<String> {
+    let mut words = Vec::new();
+    let mut word = String::new();
+    let mut after_lower = false;
+    for c in name.chars() {
+        if !c.is_alphanumeric() {
+            if !word.is_empty() {
+                words.push(std::mem::take(&mut word));
+            }
+            after_lower = false;
+            continue;
+        }
+        if c.is_uppercase() && after_lower {
+            words.push(std::mem::take(&mut word));
+        }
+        after_lower = c.is_lowercase() || c.is_ascii_digit();
+        word.extend(c.to_lowercase());
+    }
+    if !word.is_empty() {
+        words.push(word);
+    }
+    words
+}
+
+/// Every string under a key in [`PATH_KEYS`] in a tool's `input`, at any
+/// depth.
+fn named_paths(value: &serde_json::Value, depth: u8, found: &mut dyn FnMut(&str)) {
+    fn strings(value: &serde_json::Value, found: &mut dyn FnMut(&str)) {
+        match value {
+            serde_json::Value::String(text) if !text.is_empty() => found(text),
+            serde_json::Value::Array(items) => {
+                for item in items {
+                    strings(item, found);
+                }
+            }
+            _ => {}
+        }
+    }
+    if depth > 32 {
+        return;
+    }
+    match value {
+        serde_json::Value::Object(map) => {
+            for (key, value) in map {
+                if PATH_KEYS.contains(&key.as_str()) {
+                    strings(value, found);
+                }
+                named_paths(value, depth + 1, found);
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for item in items {
+                named_paths(item, depth + 1, found);
+            }
+        }
+        _ => {}
+    }
+}
 
 /// The language a command line is read in.
 #[derive(Clone, Copy)]
@@ -414,104 +526,817 @@ struct Call {
 }
 
 impl Call {
-    /// A `tool`'s input as Claude Code gives it, run from `base`.
-    fn of(base: &Path, tool: &str, input: &serde_json::Value) -> Call {
+    /// A `tool`'s input as Claude Code gives it, run from `base`. An edit or
+    /// a shell call without the file or command line its tool always names
+    /// cannot be judged, which is an error.
+    fn of(base: &Path, tool: &str, input: &serde_json::Value) -> Result<Call> {
         let mut call = Call::default();
-        for key in ["file_path", "notebook_path"] {
-            if let Some(path) = input[key].as_str() {
-                call.targets.push(base.join(path));
+        let named = |key: &str| {
+            input[key]
+                .as_str()
+                .with_context(|| format!("the {tool} call names no {key}"))
+        };
+        match tool {
+            "Edit" | "Write" | "MultiEdit" => {
+                call.targets.push(base.join(tilde(named("file_path")?)))
             }
+            "NotebookEdit" => call.targets.push(base.join(tilde(named("notebook_path")?))),
+            "Bash" | "PowerShell" => {
+                let shell = if tool == "PowerShell" {
+                    Shell::PowerShell
+                } else {
+                    Shell::Posix
+                };
+                call.commands
+                    .push((base.to_path_buf(), named("command")?.to_string(), shell));
+            }
+            _ if reads_only(tool) => {}
+            _ => named_paths(input, 0, &mut |path| {
+                call.targets.push(base.join(tilde(path)));
+            }),
         }
-        if let Some(command) = input["command"].as_str() {
-            let shell = if tool == "PowerShell" {
-                Shell::PowerShell
-            } else {
-                Shell::Posix
-            };
-            call.commands
-                .push((base.to_path_buf(), command.to_string(), shell));
+        Ok(call)
+    }
+
+    fn is_empty(&self) -> bool {
+        self.targets.is_empty() && self.commands.is_empty()
+    }
+}
+
+/// A command the guard refuses whatever files it names.
+struct Refused {
+    /// The command as spelled, such as `curl | sh` or `flot gc`.
+    shape: String,
+    /// Why, said of the command.
+    why: String,
+    /// The sentence it is noted and denied with.
+    said: String,
+    /// What to do instead, which follows `said` in a denial.
+    instead: &'static str,
+}
+
+impl Refused {
+    fn remote(shape: String) -> Self {
+        Refused {
+            why: REMOTE.to_string(),
+            said: format!("`{shape}` is refused: {REMOTE}"),
+            instead: ". Download the file, read it, and run it as its own command, or ask the user",
+            shape,
         }
-        call
+    }
+
+    fn verb(shape: String) -> Self {
+        Refused {
+            why: format!("it {VERB}; ask the user to run it"),
+            said: format!("`{shape}` {VERB}"),
+            instead: "; ask the user to run it",
+            shape,
+        }
+    }
+
+    /// A whole-tree git command git cannot say the files of.
+    fn unknowable(shape: String, error: &anyhow::Error) -> Self {
+        let why = format!(
+            "git cannot say which files it would change ({error:#}), so it may change a protected one"
+        );
+        Refused {
+            said: format!("`{shape}` is refused: {why}"),
+            why,
+            instead: "; ask the user to run it",
+            shape,
+        }
     }
 }
 
 /// What the guard refuses of one call, and the flows it consulted.
 struct Judged {
     guarded: Vec<Guarded>,
-    /// Downloaded code piped into an interpreter, as the command spelled it.
-    remote: Vec<String>,
+    /// Downloaded code piped into an interpreter, `flot` commands left to
+    /// the user, git commands whose files git cannot name.
+    refused: Vec<Refused>,
+    /// The flows found, each with its flow file.
     flows: Vec<Workspace>,
 }
 
 impl Judged {
     /// Each refusal in a sentence: the protected files first, then the
-    /// downloaded code.
+    /// refused commands.
     fn reasons(&self) -> Vec<String> {
         self.guarded
             .iter()
             .map(|found| format!("{} is protected: {}", found.path, found.reason))
-            .chain(
-                self.remote
-                    .iter()
-                    .map(|shape| format!("`{shape}` is refused: {REMOTE}")),
-            )
+            .chain(self.refused.iter().map(|refused| refused.said.clone()))
             .collect()
+    }
+
+    /// The denial Claude Code shows the agent.
+    fn denial(&self) -> String {
+        let reasons = self.reasons();
+        let mut said: Vec<String> = Vec::new();
+        if !self.guarded.is_empty() {
+            said.push(format!(
+                "{}. Changing it would void the evidence; fix the work under test instead, or ask the user to change the check",
+                reasons[..self.guarded.len()].join("; ")
+            ));
+        }
+        for refused in &self.refused {
+            said.push(format!("{}{}", refused.said, refused.instead));
+        }
+        format!("flot: {}.", said.join(". "))
     }
 }
 
-/// Judge a call against `workspace`'s flow and, when `nearest`, the flow
-/// nearest each file it changes: an edit in a subproject touches that
-/// subproject's proofs.
-fn judge(workspace: &Workspace, nearest: bool, call: Call) -> Result<Judged> {
-    let mut targets = call.targets;
-    let mut remote = Vec::new();
-    for (dir, command, language) in &call.commands {
-        let reading = match language {
-            Shell::Posix => shell::read(command),
-            Shell::PowerShell => powershell::read(command),
-        };
-        targets.extend(
-            reading
-                .writes
-                .iter()
-                .map(|path| dir.join(home_relative(path))),
-        );
-        remote.extend(reading.remote_code);
+/// One simple command of a command line: its words, quotes removed, and
+/// where it is in the line.
+struct Simple {
+    words: Vec<String>,
+    span: std::ops::Range<usize>,
+}
+
+/// The simple commands of `command`, split on unquoted `;`, `&`, `|`,
+/// newlines, parentheses, braces and, in a POSIX shell, backquotes. Close
+/// enough to find a program and what follows it, and no more: what is
+/// found here is only ever a reason to refuse.
+fn simple_commands(command: &str, language: Shell) -> Vec<Simple> {
+    let escape = match language {
+        Shell::Posix => '\\',
+        Shell::PowerShell => '`',
+    };
+    let mut simples = Vec::new();
+    let mut words = Vec::new();
+    let mut word = String::new();
+    let mut quoted = false;
+    let mut start = 0;
+    let mut chars = command.char_indices();
+    let end_word = |word: &mut String, quoted: &mut bool, words: &mut Vec<String>| {
+        if !word.is_empty() || *quoted {
+            words.push(std::mem::take(word));
+        }
+        *quoted = false;
+    };
+    while let Some((at, c)) = chars.next() {
+        let separates = matches!(c, ';' | '&' | '|' | '\n' | '(' | ')' | '{' | '}')
+            || (c == '`' && matches!(language, Shell::Posix));
+        if c == '\'' {
+            quoted = true;
+            for (_, c) in chars.by_ref() {
+                if c == '\'' {
+                    break;
+                }
+                word.push(c);
+            }
+        } else if c == '"' {
+            quoted = true;
+            while let Some((_, c)) = chars.next() {
+                if c == '"' {
+                    break;
+                }
+                if c == escape {
+                    word.extend(chars.next().map(|(_, next)| next));
+                } else {
+                    word.push(c);
+                }
+            }
+        } else if c == escape {
+            word.extend(
+                chars
+                    .next()
+                    .map(|(_, next)| next)
+                    .filter(|next| *next != '\n'),
+            );
+        } else if separates {
+            end_word(&mut word, &mut quoted, &mut words);
+            if !words.is_empty() {
+                simples.push(Simple {
+                    words: std::mem::take(&mut words),
+                    span: start..at,
+                });
+            }
+            start = at + c.len_utf8();
+        } else if c.is_whitespace() {
+            end_word(&mut word, &mut quoted, &mut words);
+        } else {
+            word.push(c);
+        }
     }
-    let mut flows = vec![workspace.clone()];
-    if nearest {
-        for target in &targets {
-            let Some(dir) = target.ancestors().skip(1).find(|dir| dir.is_dir()) else {
-                continue;
-            };
-            let found = Workspace::locate(dir, None)?;
-            if !flows
-                .iter()
-                .any(|flow| flow.flow_path() == found.flow_path())
-            {
-                flows.push(found);
+    end_word(&mut word, &mut quoted, &mut words);
+    if !words.is_empty() {
+        simples.push(Simple {
+            words,
+            span: start..command.len(),
+        });
+    }
+    simples
+}
+
+/// The program a word runs, by its file name, in lowercase.
+fn program_name(word: &str) -> String {
+    word.rsplit(['/', '\\'])
+        .next()
+        .unwrap_or(word)
+        .to_lowercase()
+}
+
+/// Programs whose string arguments are command lines themselves.
+const SHELLS: [&str; 15] = [
+    "sh",
+    "bash",
+    "zsh",
+    "dash",
+    "ksh",
+    "fish",
+    "eval",
+    "cmd",
+    "cmd.exe",
+    "powershell",
+    "powershell.exe",
+    "pwsh",
+    "pwsh.exe",
+    "iex",
+    "invoke-expression",
+];
+
+/// Programs that run the command their arguments spell, and shell words
+/// that a command follows.
+const WRAPPERS: [&str; 30] = [
+    "sudo", "doas", "env", "timeout", "nice", "nohup", "time", "command", "exec", "xargs",
+    "stdbuf", "ionice", "setsid", "chronic", "strace", "ltrace", "unbuffer", "watch", "eval",
+    "cmd", "cmd.exe", "then", "do", "else", "if", "elif", "while", "until", "!", "busybox",
+];
+
+/// Where in a simple command's `words` the program it runs may be: the
+/// first word past `NAME=value` assignments, and, after a wrapper such as
+/// `sudo` or `timeout`, every word after it.
+fn programs(words: &[String]) -> std::ops::Range<usize> {
+    let first = words
+        .iter()
+        .position(|word| {
+            !word
+                .split_once('=')
+                .is_some_and(|(name, _)| !name.is_empty() && !name.contains(['/', '\\']))
+        })
+        .unwrap_or(words.len());
+    let wrapped = words
+        .get(first)
+        .is_some_and(|word| WRAPPERS.contains(&program_name(word).as_str()));
+    first..if wrapped {
+        words.len()
+    } else {
+        (first + 1).min(words.len())
+    }
+}
+
+/// The `flot` commands in `command` that an agent should leave to the user,
+/// as spelled by their verb: `flot init --force`, `flot trust add`, ...
+/// A command run by flot counts, and so does a `flot` word anywhere after
+/// a wrapper such as `timeout 5` or `sudo -u root`, and in a string a
+/// shell is given to run; `echo flot gc` does not.
+fn flot_verbs(command: &str, language: Shell, depth: u8, found: &mut Vec<String>) {
+    for simple in simple_commands(command, language) {
+        for at in programs(&simple.words) {
+            let name = program_name(&simple.words[at]);
+            if name == "flot" || name == "flot.exe" {
+                found.extend(refused_verb(&simple.words[at + 1..]));
+            }
+            if depth < 4 && SHELLS.contains(&name.as_str()) {
+                let inner = if ["cmd", "cmd.exe", "sh", "bash", "zsh", "dash", "ksh", "fish"]
+                    .contains(&name.as_str())
+                    || (name == "eval" && matches!(language, Shell::Posix))
+                {
+                    Shell::Posix
+                } else {
+                    Shell::PowerShell
+                };
+                for argument in &simple.words[at + 1..] {
+                    if argument.contains(char::is_whitespace) {
+                        flot_verbs(argument, inner, depth + 1, found);
+                    }
+                }
             }
         }
     }
-    // One reason per file: flows in one repository guard its harness files
-    // alike.
-    let guarded = targets
-        .iter()
-        .filter_map(|target| {
-            flows
-                .iter()
-                .find_map(|flow| flow.guard(std::slice::from_ref(target)).pop())
-        })
+}
+
+/// The verb of `flot` run with `args`, when it changes whose evidence
+/// counts: who is trusted and with what key, which runs this store holds,
+/// the flow file, or the revision and flow proofs are held to.
+fn refused_verb(args: &[String]) -> Option<String> {
+    let mut words: Vec<&str> = Vec::new();
+    let mut options: Vec<&str> = Vec::new();
+    let mut other_flow = false;
+    let mut at = 0;
+    while let Some(arg) = args.get(at) {
+        at += 1;
+        match arg.as_str() {
+            "--" => {
+                words.extend(args[at..].iter().map(String::as_str));
+                break;
+            }
+            "-f" | "--file" => {
+                other_flow = true;
+                at += 1;
+            }
+            _ if arg.starts_with("--file=")
+                || (arg.starts_with("-f") && !arg.starts_with("--")) =>
+            {
+                other_flow = true;
+            }
+            _ if arg.starts_with('-') => options.push(arg),
+            _ => words.push(arg),
+        }
+    }
+    let has = |flag: &str| {
+        options
+            .iter()
+            .any(|option| *option == flag || option.starts_with(&format!("{flag}=")))
+    };
+    let verb = *words.first()?;
+    let refused = match (verb, words.get(1).copied()) {
+        ("init", _) if has("--force") => "init --force".to_string(),
+        ("trust", Some(action @ ("add" | "remove" | "rotate")))
+        | ("key", Some(action @ ("init" | "rotate"))) => format!("{verb} {action}"),
+        ("sign" | "import" | "pull", _) => verb.to_string(),
+        ("gc", _) if !has("--dry-run") => "gc".to_string(),
+        ("run" | "verify" | "diff", _) if has("--proofs-from") => format!("{verb} --proofs-from"),
+        ("run" | "verify" | "diff", _) if other_flow => format!("{verb} -f"),
+        _ => return None,
+    };
+    Some(format!("flot {refused}"))
+}
+
+/// `word` with its `{a,b}` groups expanded as bash expands them, up to
+/// [`EXPANSION_LIMIT`] words.
+fn braces(word: &str) -> Vec<String> {
+    let mut done = Vec::new();
+    let mut pending = vec![word.to_string()];
+    while let Some(word) = pending.pop() {
+        match brace_group(&word) {
+            Some((open, commas, close)) if done.len() + pending.len() < EXPANSION_LIMIT => {
+                let mut edges = vec![open];
+                edges.extend(commas);
+                edges.push(close);
+                for pair in edges.windows(2) {
+                    pending.push(format!(
+                        "{}{}{}",
+                        &word[..open],
+                        &word[pair[0] + 1..pair[1]],
+                        &word[close + 1..]
+                    ));
+                }
+            }
+            _ => done.push(word),
+        }
+    }
+    done
+}
+
+/// The first `{` whose matching `}` encloses a comma at its own level, not
+/// a `${NAME}`: where it opens, its commas, and where it closes.
+fn brace_group(word: &str) -> Option<(usize, Vec<usize>, usize)> {
+    let bytes = word.as_bytes();
+    for open in 0..bytes.len() {
+        if bytes[open] != b'{' || (open > 0 && bytes[open - 1] == b'$') {
+            continue;
+        }
+        let mut depth = 0;
+        let mut commas = Vec::new();
+        for (close, byte) in bytes.iter().enumerate().skip(open + 1) {
+            match byte {
+                b'{' => depth += 1,
+                b'}' if depth == 0 => {
+                    if !commas.is_empty() {
+                        return Some((open, commas, close));
+                    }
+                    break;
+                }
+                b'}' => depth -= 1,
+                b',' if depth == 0 => commas.push(close),
+                _ => {}
+            }
+        }
+    }
+    None
+}
+
+/// `word` with `~`, `$HOME`, `${HOME}`, `$PWD` and `${PWD}` put in (in
+/// PowerShell, also `$env:HOME` and `$env:USERPROFILE`, in any case): as
+/// the path it names, and as a wildcard pattern with what was put in
+/// escaped.
+fn variables(word: &str, dir: &Path, language: Shell) -> (String, String) {
+    let home = home_dir().map(|home| home.to_string_lossy().into_owned());
+    let here = dir.to_string_lossy().into_owned();
+    let mut literal = String::new();
+    let mut pattern = String::new();
+    let put = |value: &str, literal: &mut String, pattern: &mut String| {
+        literal.push_str(value);
+        pattern.push_str(&glob::Pattern::escape(value));
+    };
+    let mut rest = word;
+    if let (Some(home), Some(after)) = (&home, word.strip_prefix('~')) {
+        if after.is_empty() || after.starts_with('/') {
+            put(home, &mut literal, &mut pattern);
+            rest = after;
+        }
+    }
+    while let Some(at) = rest.find('$') {
+        literal.push_str(&rest[..at]);
+        pattern.push_str(&rest[..at]);
+        let after = &rest[at + 1..];
+        let (name, used) = match after.strip_prefix('{') {
+            Some(inner) => match inner.find('}') {
+                Some(end) => (&inner[..end], end + 2),
+                None => ("", 0),
+            },
+            None => {
+                let end = after
+                    .find(|c: char| {
+                        !(c.is_ascii_alphanumeric()
+                            || c == '_'
+                            || (c == ':' && matches!(language, Shell::PowerShell)))
+                    })
+                    .unwrap_or(after.len());
+                (&after[..end], end)
+            }
+        };
+        let value = match language {
+            Shell::Posix => match name {
+                "HOME" => home.clone(),
+                "PWD" => Some(here.clone()),
+                _ => None,
+            },
+            Shell::PowerShell => match name.to_lowercase().as_str() {
+                "home" | "env:home" | "env:userprofile" => home.clone(),
+                "pwd" => Some(here.clone()),
+                _ => None,
+            },
+        };
+        match value {
+            Some(value) => {
+                put(&value, &mut literal, &mut pattern);
+                rest = &after[used..];
+            }
+            None => {
+                literal.push('$');
+                pattern.push('$');
+                rest = after;
+            }
+        }
+    }
+    literal.push_str(rest);
+    pattern.push_str(rest);
+    (literal, pattern)
+}
+
+/// The paths a written `word` names from `dir`, expanded as the shell
+/// would: braces (in a POSIX shell), then `~`, `$HOME` and `$PWD`, then
+/// wildcards against the disk. A wildcard that matches nothing is the word
+/// itself.
+fn expand(dir: &Path, word: &str, language: Shell) -> Vec<PathBuf> {
+    let words = match language {
+        Shell::Posix => braces(word),
+        // PowerShell on another system takes `\` as a separator too.
+        Shell::PowerShell if cfg!(not(windows)) => vec![word.replace('\\', "/")],
+        Shell::PowerShell => vec![word.to_string()],
+    };
+    let mut paths = Vec::new();
+    for word in words {
+        let (literal, pattern) = variables(&word, dir, language);
+        if literal.contains(['*', '?', '[']) {
+            let pattern = if Path::new(&literal).is_absolute() {
+                pattern
+            } else {
+                format!(
+                    "{}/{pattern}",
+                    glob::Pattern::escape(&dir.to_string_lossy())
+                )
+            };
+            let options = glob::MatchOptions {
+                case_sensitive: !cfg!(any(windows, target_os = "macos")),
+                require_literal_separator: true,
+                require_literal_leading_dot: true,
+            };
+            let matched: Vec<PathBuf> = glob::glob_with(&pattern, options)
+                .map(|found| found.flatten().take(EXPANSION_LIMIT).collect())
+                .unwrap_or_default();
+            if !matched.is_empty() {
+                paths.extend(matched);
+                continue;
+            }
+        }
+        paths.push(dir.join(literal));
+    }
+    paths
+}
+
+/// Judge a call against `workspace`'s flow and, when `nearest`, every flow
+/// from each directory it runs in and each file it changes up to the top
+/// of the repository: an edit in a subproject touches that subproject's
+/// proofs, and a flow file below another does not hide it.
+fn judge(workspace: &Workspace, nearest: bool, call: Call) -> Result<Judged> {
+    let mut guard = crate::service::Guard::new(workspace);
+    let mut targets: Vec<(PathBuf, Option<String>)> = call
+        .targets
+        .into_iter()
+        .map(|target| (target, None))
         .collect();
-    // Downloaded code is refused where a flow is, as files are.
-    if !flows.iter().any(|flow| flow.flow_path().is_file()) {
-        remote.clear();
+    let mut refused = Vec::new();
+    for (dir, command, language) in &call.commands {
+        let read = |text: &str| match language {
+            Shell::Posix => shell::read(text),
+            Shell::PowerShell => powershell::read(text),
+        };
+        let reading = read(command);
+        let mut words = reading.writes;
+        // A whole-tree git command changes what git says it would. It is
+        // asked where the call runs and where a `cd` before it leads, both:
+        // the `cd` may be in a subshell.
+        let mut rest = command.clone();
+        let mut asked = false;
+        let mut here = dir.clone();
+        for simple in simple_commands(command, *language) {
+            let Some(at) = programs(&simple.words)
+                .find(|at| matches!(program_name(&simple.words[*at]).as_str(), "git" | "git.exe"))
+            else {
+                here = moved(&here, &simple.words, *language);
+                continue;
+            };
+            let mut places = vec![dir.clone()];
+            if here != *dir && here.is_dir() {
+                places.push(here.clone());
+                if nearest {
+                    guard.consult(&here);
+                }
+            }
+            let args = unredirected(&simple.words[at + 1..]);
+            let shape = format!("{} {}", simple.words[at], args.join(" "));
+            let shape = shape.trim_end().to_string();
+            let mut answered = false;
+            for place in &places {
+                let Some(answer) = crate::service::git_would_change(place, &args) else {
+                    continue;
+                };
+                answered = true;
+                match answer {
+                    Ok(paths) => {
+                        targets.extend(paths.into_iter().map(|path| (path, Some(shape.clone()))))
+                    }
+                    Err(error) => {
+                        refused.push(Refused::unknowable(shape.clone(), &error));
+                        break;
+                    }
+                }
+            }
+            if answered {
+                asked = true;
+                rest.replace_range(simple.span.clone(), &" ".repeat(simple.span.len()));
+            }
+        }
+        if asked {
+            // A directory only those commands wrote, `.` or the one `-C`
+            // names, is the tree git answered for. A file they wrote, as
+            // by a redirection, is judged still.
+            let others = read(&rest).writes;
+            words.retain(|word| {
+                others.contains(word)
+                    || !expand(dir, word, *language)
+                        .iter()
+                        .all(|path| path.is_dir())
+            });
+            for word in others {
+                if !words.contains(&word) {
+                    words.push(word);
+                }
+            }
+        }
+        for word in &words {
+            targets.extend(
+                expand(dir, word, *language)
+                    .into_iter()
+                    .map(|path| (path, None)),
+            );
+        }
+        refused.extend(reading.remote_code.map(Refused::remote));
+        let mut verbs = Vec::new();
+        flot_verbs(command, *language, 0, &mut verbs);
+        refused.extend(verbs.into_iter().map(Refused::verb));
+        if nearest {
+            guard.consult(dir);
+        }
+    }
+    if nearest {
+        guard.consult(workspace.root());
+        for (target, _) in &targets {
+            if let Some(parent) = target.parent() {
+                guard.consult(parent);
+            }
+        }
+    }
+    // One reason per file, however many names lead to it.
+    let mut guarded: Vec<Guarded> = Vec::new();
+    for (target, via) in &targets {
+        let Some(mut found) = guard.judge(target) else {
+            continue;
+        };
+        if guarded.iter().any(|known| known.path == found.path) {
+            continue;
+        }
+        if let Some(shape) = via {
+            found.reason = format!("{}; `{shape}` would change it", found.reason);
+        }
+        guarded.push(found);
+    }
+    // Commands are refused where a flow is, as files are.
+    if !guard.active() {
+        refused.clear();
     }
     Ok(Judged {
         guarded,
-        remote,
-        flows,
+        refused,
+        flows: guard.workspaces().cloned().collect(),
     })
+}
+
+/// `words` without their redirections, such as `< p.diff` or `2>/dev/null`:
+/// what the program itself is given.
+fn unredirected(words: &[String]) -> Vec<String> {
+    let mut kept = Vec::new();
+    let mut words = words.iter();
+    while let Some(word) = words.next() {
+        let operator = word.trim_start_matches(|c: char| c.is_ascii_digit() || c == '&');
+        if !operator.starts_with(['<', '>']) {
+            kept.push(word.clone());
+            continue;
+        }
+        // An operator alone takes the next word as its target.
+        if operator.trim_start_matches(['<', '>', '&', '|']).is_empty() {
+            words.next();
+        }
+    }
+    kept
+}
+
+/// The directory a simple command of `words` leaves the shell in, from
+/// `here`: where `cd`, `pushd` or `Set-Location` leads, as far as it can
+/// be told; `here` for any other command.
+fn moved(here: &Path, words: &[String], language: Shell) -> PathBuf {
+    let Some(first) = programs(words).next() else {
+        return here.to_path_buf();
+    };
+    if !matches!(
+        program_name(&words[first]).as_str(),
+        "cd" | "pushd" | "chdir" | "set-location" | "sl" | "push-location"
+    ) {
+        return here.to_path_buf();
+    }
+    let operand = words[first + 1..]
+        .iter()
+        .find(|word| !word.starts_with('-') || word.as_str() == "-");
+    match operand.map(String::as_str) {
+        None => home_dir().unwrap_or_else(|| here.to_path_buf()),
+        Some("-") => here.to_path_buf(),
+        Some(operand) => expand(here, operand, language)
+            .into_iter()
+            .next()
+            .unwrap_or_else(|| here.to_path_buf()),
+    }
+}
+
+/// A call the guard could not judge, as a reason to refuse it.
+fn cannot_judge(error: &anyhow::Error) -> String {
+    format!("this call cannot be judged ({error:#}), and a flow is here, so it is refused")
+}
+
+/// `work`'s result, with a panic in it as an error: the hook answers either
+/// way.
+fn unpanicked<T>(work: impl FnOnce() -> Result<T>) -> Result<T> {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(work)).unwrap_or_else(|panic| {
+        let said = panic
+            .downcast_ref::<&str>()
+            .map(|said| said.to_string())
+            .or_else(|| panic.downcast_ref::<String>().cloned())
+            .unwrap_or_else(|| "a panic".to_string());
+        Err(anyhow::anyhow!("the guard failed: {said}"))
+    })
+}
+
+/// `payload` with each lone UTF-16 surrogate escape, such as the half of an
+/// emoji a cut command ends in, replaced by `\ufffd`: a JSON parser refuses
+/// one, and the rest of the payload must still be judged.
+fn repair_surrogates(payload: &str) -> std::borrow::Cow<'_, str> {
+    let bytes = payload.as_bytes();
+    // The code unit of a `\uXXXX` escape at `at`.
+    let unit = |at: usize| -> Option<u16> {
+        if bytes.get(at) != Some(&b'\\') || bytes.get(at + 1) != Some(&b'u') {
+            return None;
+        }
+        let hex = payload.get(at + 2..at + 6)?;
+        if !hex.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            return None;
+        }
+        u16::from_str_radix(hex, 16).ok()
+    };
+    let mut repaired = String::new();
+    let mut copied = 0;
+    let mut at = 0;
+    while at < bytes.len() {
+        if bytes[at] != b'\\' {
+            at += 1;
+            continue;
+        }
+        match unit(at) {
+            Some(0xD800..=0xDBFF) if matches!(unit(at + 6), Some(0xDC00..=0xDFFF)) => at += 12,
+            Some(0xD800..=0xDFFF) => {
+                repaired.push_str(&payload[copied..at]);
+                repaired.push_str("\\ufffd");
+                at += 6;
+                copied = at;
+            }
+            // Any other escape, `\\` among them, is two characters at least.
+            _ => at += 2,
+        }
+    }
+    if copied == 0 {
+        return std::borrow::Cow::Borrowed(payload);
+    }
+    repaired.push_str(&payload[copied..]);
+    std::borrow::Cow::Owned(repaired)
+}
+
+/// Answer a Claude Code `PreToolUse` payload on stdin, for the tool call
+/// it names and whatever `call` already holds: a denial on stdout, noted
+/// in the store for the next run to record, or nothing. The exit stays 0,
+/// so the hook's `|| true` keeps a failure to run flot at all from blocking
+/// every call. A call flot cannot judge (a payload that does not parse or
+/// lacks what its tool always names, or a failure of the guard itself) is
+/// denied where a flow is, since otherwise the agent's own input could
+/// switch the guard off, and left alone elsewhere.
+fn answer_hook(workspace: &Workspace, nearest: bool, cwd: &Path, call: Call) -> Result<ExitCode> {
+    let mut base = cwd.to_path_buf();
+    let mut tool = String::from("a tool");
+    let judged = unpanicked(|| {
+        let mut payload = String::new();
+        std::io::Read::read_to_string(&mut std::io::stdin(), &mut payload)
+            .context("cannot read the hook payload")?;
+        let payload: serde_json::Value = serde_json::from_str(&repair_surrogates(&payload))
+            .context("the hook payload is not JSON")?;
+        if let Some(dir) = payload["cwd"].as_str() {
+            base = PathBuf::from(dir);
+        }
+        tool = payload["tool_name"]
+            .as_str()
+            .context("the hook payload names no tool_name")?
+            .to_string();
+        anyhow::ensure!(
+            payload["tool_input"].is_object(),
+            "the hook payload has no tool_input"
+        );
+        let asked = Call::of(&base, &tool, &payload["tool_input"])?;
+        let mut call = call;
+        call.targets.extend(asked.targets);
+        call.commands.extend(asked.commands);
+        judge(workspace, nearest, call)
+    });
+    let (denial, reasons, flows) = match judged {
+        Ok(judged) => {
+            let reasons = judged.reasons();
+            if reasons.is_empty() {
+                return Ok(ExitCode::SUCCESS);
+            }
+            (judged.denial(), reasons, judged.flows)
+        }
+        Err(error) => {
+            let mut guard = crate::service::Guard::new(workspace);
+            guard.consult(&base);
+            guard.consult(cwd);
+            if !guard.active() {
+                return Ok(ExitCode::SUCCESS);
+            }
+            let reason = cannot_judge(&error);
+            (
+                format!("flot: {reason}; ask the user to make it."),
+                vec![reason],
+                guard.workspaces().cloned().collect(),
+            )
+        }
+    };
+    print_json(&serde_json::json!({
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "deny",
+            "permissionDecisionReason": denial,
+        }
+    }))?;
+    // Kept for the next run to record. The denial stands even when it
+    // cannot be noted. A flow reached through a link too, such as macOS's
+    // /var, is noted in once.
+    let mut noted = std::collections::HashSet::new();
+    for flow in &flows {
+        let root = std::fs::canonicalize(flow.root()).unwrap_or_else(|_| flow.root().to_path_buf());
+        if noted.insert(root) {
+            let _ = flow.note_refusal(&tool, &reasons);
+        }
+    }
+    Ok(ExitCode::SUCCESS)
 }
 
 /// One tool call the hook would have refused, read back from a transcript.
@@ -536,9 +1361,10 @@ struct Replay {
     refused: Vec<Replayed>,
 }
 
-/// Judge every edit and shell command in Claude Code transcripts (JSONL
-/// files, or directories holding them; by default `~/.claude/projects`) as
-/// the hook would today, against the flows as they are now.
+/// Judge every edit, shell command and other call naming a path in Claude
+/// Code transcripts (JSONL files, or directories holding them; by default
+/// `~/.claude/projects`) as the hook would today, against the flows as they
+/// are now.
 fn replay_transcripts(paths: &[PathBuf], json: bool) -> Result<ExitCode> {
     let roots: Vec<PathBuf> = if paths.is_empty() {
         let home = std::env::var_os("HOME")
@@ -574,7 +1400,14 @@ fn replay_transcripts(paths: &[PathBuf], json: bool) -> Result<ExitCode> {
             };
             for item in content {
                 let tool = item["name"].as_str().unwrap_or_default();
-                if item["type"] != "tool_use" || !GUARDED_TOOLS.contains(&tool) {
+                if item["type"] != "tool_use" {
+                    continue;
+                }
+                // Another tool counts when it names a path it may change.
+                let cwd = entry["cwd"].as_str().unwrap_or_default();
+                let base = PathBuf::from(cwd);
+                let call = Call::of(&base, tool, &item["input"]);
+                if !GUARDED_TOOLS.contains(&tool) && call.as_ref().map_or(true, Call::is_empty) {
                     continue;
                 }
                 // A call is written again when its message is.
@@ -584,18 +1417,29 @@ fn replay_transcripts(paths: &[PathBuf], json: bool) -> Result<ExitCode> {
                     }
                 }
                 replay.calls += 1;
-                let cwd = entry["cwd"].as_str().unwrap_or_default();
-                let base = PathBuf::from(cwd);
                 if cwd.is_empty() || !base.is_dir() {
                     replay.unjudged += 1;
                     continue;
                 }
                 let workspace = Workspace::locate(&base, None)?;
-                let judged = judge(&workspace, true, Call::of(&base, tool, &item["input"]))?;
-                if judged.flows.iter().any(|flow| flow.flow_path().is_file()) {
+                // As the hook does, a call that cannot be judged is refused
+                // where a flow is.
+                let (in_a_flow, reasons) = match unpanicked(|| judge(&workspace, true, call?)) {
+                    Ok(judged) => (!judged.flows.is_empty(), judged.reasons()),
+                    Err(error) => {
+                        let mut guard = crate::service::Guard::new(&workspace);
+                        guard.consult(&base);
+                        let reasons = if guard.active() {
+                            vec![cannot_judge(&error)]
+                        } else {
+                            Vec::new()
+                        };
+                        (guard.active(), reasons)
+                    }
+                };
+                if in_a_flow {
                     replay.in_a_flow += 1;
                 }
-                let reasons = judged.reasons();
                 if !reasons.is_empty() {
                     replay.refused.push(Replayed {
                         transcript: file.display().to_string(),
@@ -698,7 +1542,7 @@ fn dispatch(
             if *replay {
                 return replay_transcripts(paths, cli.json);
             }
-            let mut call = Call {
+            let call = Call {
                 targets: paths.iter().map(|path| cwd.join(path)).collect(),
                 commands: command
                     .iter()
@@ -712,72 +1556,16 @@ fn dispatch(
                     })
                     .collect(),
             };
-            let mut tool = String::new();
             if *hook {
-                let mut payload = String::new();
-                std::io::Read::read_to_string(&mut std::io::stdin(), &mut payload)
-                    .context("cannot read the hook payload")?;
-                let payload: serde_json::Value =
-                    serde_json::from_str(&payload).context("the hook payload is not JSON")?;
-                let base = payload["cwd"].as_str().map(PathBuf::from).unwrap_or(cwd);
-                tool = payload["tool_name"]
-                    .as_str()
-                    .unwrap_or("a tool")
-                    .to_string();
-                let asked = Call::of(&base, &tool, &payload["tool_input"]);
-                call.targets.extend(asked.targets);
-                call.commands.extend(asked.commands);
+                return answer_hook(workspace, cli.file.is_none(), &cwd, call);
             }
             let judged = judge(workspace, cli.file.is_none(), call)?;
-            if *hook {
-                // Claude Code reads a denial on stdout; the exit stays 0 so
-                // the hook's `|| true` keeps a failure to run from blocking.
-                let reasons = judged.reasons();
-                if reasons.is_empty() {
-                    return Ok(ExitCode::SUCCESS);
-                }
-                let mut said: Vec<String> = Vec::new();
-                if !judged.guarded.is_empty() {
-                    said.push(format!(
-                        "{}. Changing it would void the evidence; fix the work under test instead, or ask the user to change the check",
-                        reasons[..judged.guarded.len()].join("; ")
-                    ));
-                }
-                for reason in &reasons[judged.guarded.len()..] {
-                    said.push(format!(
-                        "{reason}. Download the file, read it, and run it as its own command, or ask the user"
-                    ));
-                }
-                print_json(&serde_json::json!({
-                    "hookSpecificOutput": {
-                        "hookEventName": "PreToolUse",
-                        "permissionDecision": "deny",
-                        "permissionDecisionReason": format!("flot: {}.", said.join(". ")),
-                    }
-                }))?;
-                // Kept for the next run to record. The denial stands even
-                // when it cannot be noted. A flow reached through a link
-                // too, such as macOS's /var, is noted in once.
-                let mut noted = std::collections::HashSet::new();
-                for flow in judged
-                    .flows
-                    .iter()
-                    .filter(|flow| flow.flow_path().is_file())
-                {
-                    let root = std::fs::canonicalize(flow.root())
-                        .unwrap_or_else(|_| flow.root().to_path_buf());
-                    if noted.insert(root) {
-                        let _ = flow.note_refusal(&tool, &reasons);
-                    }
-                }
-                return Ok(ExitCode::SUCCESS);
-            }
             let refused: Vec<Guarded> = judged
-                .remote
+                .refused
                 .into_iter()
-                .map(|shape| Guarded {
-                    path: shape,
-                    reason: REMOTE.to_string(),
+                .map(|refused| Guarded {
+                    path: refused.shape,
+                    reason: refused.why,
                 })
                 .collect();
             if cli.json {
@@ -844,6 +1632,7 @@ fn dispatch(
             };
             if cli.json {
                 let mut value = serde_json::to_value(&report)?;
+                value["result"] = serde_json::to_value(Outcome::of_run(&report.manifest))?;
                 if let Some(signed) = &signed {
                     value["signed"] = serde_json::to_value(signed)?;
                 }
@@ -854,7 +1643,7 @@ fn dispatch(
                     render_signed(signed);
                 }
             }
-            Ok(exit_for(report.manifest.verdict))
+            Ok(exit_for(Outcome::of_run(&report.manifest)))
         }
         Command::Sign { run } => {
             let signed = workspace.sign(run)?;
@@ -872,7 +1661,7 @@ fn dispatch(
             } else {
                 render_detail(&detail);
             }
-            Ok(exit_for(detail.manifest.verdict))
+            Ok(exit_for(Outcome::of_run(&detail.manifest)))
         }
         Command::Verify {
             run,
@@ -893,15 +1682,7 @@ fn dispatch(
             } else {
                 render_audit(&audit);
             }
-            Ok(if !audit.intact {
-                ExitCode::from(1)
-            } else if audit.verdict == Verdict::Passed
-                && audit.anchor.as_ref().is_some_and(|anchor| !anchor.holds())
-            {
-                exit_for(Verdict::Unverified)
-            } else {
-                exit_for(audit.verdict)
-            })
+            Ok(exit_for(audit.result()))
         }
         Command::Diff { left, right } => {
             let diff = workspace.diff(left, right)?;
@@ -1315,8 +2096,8 @@ fn dispatch(
     }
 }
 
-fn exit_for(verdict: Verdict) -> ExitCode {
-    ExitCode::from(verdict.exit_code() as u8)
+fn exit_for(outcome: Outcome) -> ExitCode {
+    ExitCode::from(outcome.exit_code())
 }
 
 fn print_json<T: Serialize>(value: &T) -> Result<()> {
@@ -1443,7 +2224,7 @@ fn render_run(report: &RunReport) {
     say!();
     say!(
         "{} {}  root {}  {}ms",
-        manifest.verdict.label().to_uppercase(),
+        Outcome::of_run(manifest).label().to_uppercase(),
         manifest.run_id,
         digest::short(&manifest.root_digest),
         manifest.duration_ms
@@ -1606,7 +2387,7 @@ fn render_detail(detail: &RunDetail) {
     }
     say!(
         "verdict {}  claims {}v/{}u/{}r  concurrency {}",
-        manifest.verdict.label(),
+        verdict_text(manifest.verdict, manifest.partial),
         manifest.claims.verified,
         manifest.claims.unverified,
         manifest.claims.refuted,
@@ -1615,6 +2396,24 @@ fn render_detail(detail: &RunDetail) {
     render_spend(manifest);
     render_limitations(manifest);
     render_refusals(manifest);
+}
+
+/// A recorded verdict as a report states it: a run of some of the flow's
+/// steps reads `partial` when they passed, and names its selection.
+fn verdict_text(verdict: Verdict, partial: Option<Partial>) -> String {
+    match partial {
+        None => verdict.label().to_string(),
+        Some(partial) if verdict == Verdict::Passed => format!(
+            "partial ({} of {} steps selected, and they passed)",
+            partial.selected, partial.of
+        ),
+        Some(partial) => format!(
+            "{} ({} of {} steps selected)",
+            verdict.label(),
+            partial.selected,
+            partial.of
+        ),
+    }
 }
 
 fn render_audit(audit: &Audit) {
@@ -1632,8 +2431,8 @@ fn render_audit(audit: &Audit) {
             say!("  - {finding}");
         }
     }
-    say!("verdict {}", audit.verdict.label());
-    if let Some(anchor) = &audit.anchor {
+    say!("verdict {}", verdict_text(audit.verdict, audit.partial));
+    if let Some(anchor) = audit.anchor() {
         if anchor.holds() {
             say!("proofs: as at {}", anchor.baseline);
         } else {
@@ -1729,12 +2528,18 @@ fn markdown_report(audit: &Audit, detail: &RunDetail) -> String {
     use std::fmt::Write;
     let manifest = &detail.manifest;
     // The same judgment as the exit code of `flot verify`.
-    let headline = match &audit.anchor {
-        _ if !audit.intact => "evidence broken".to_string(),
-        Some(anchor) if !anchor.holds() && manifest.verdict == Verdict::Passed => {
+    let headline = match (audit.result(), audit.anchor(), audit.partial) {
+        (Outcome::Broken, _, _) => "evidence broken".to_string(),
+        (Outcome::Unverified, Some(anchor), _)
+            if !anchor.holds() && manifest.verdict == Verdict::Passed =>
+        {
             format!("unverified, proofs differ from {}", md(&anchor.baseline))
         }
-        _ => manifest.verdict.label().to_string(),
+        (Outcome::Partial, _, Some(partial)) => format!(
+            "partial, {} of {} steps selected",
+            partial.selected, partial.of
+        ),
+        (result, _, _) => result.label().to_string(),
     };
     let mut out = String::new();
     let _ = writeln!(out, "### flot: {headline}\n");
@@ -1755,7 +2560,7 @@ fn markdown_report(audit: &Audit, detail: &RunDetail) -> String {
     for finding in &audit.findings {
         let _ = writeln!(out, "  - {}", md(finding));
     }
-    if let Some(anchor) = &audit.anchor {
+    if let Some(anchor) = audit.anchor() {
         if anchor.holds() {
             let _ = writeln!(out, "- Proofs: as at {}", md(&anchor.baseline));
         } else {
@@ -1941,6 +2746,104 @@ fn render_diff(diff: &RunDiff) {
 #[cfg(test)]
 mod tests {
     use super::terminal_safe;
+    use super::{braces, flot_verbs, reads_only, repair_surrogates, unpanicked, words_of, Shell};
+
+    #[test]
+    fn a_lone_surrogate_escape_is_replaced_and_a_pair_is_kept() {
+        assert_eq!(
+            repair_surrogates(r#"{"a":"x\ud83d"}"#),
+            r#"{"a":"x\ufffd"}"#
+        );
+        assert_eq!(
+            repair_surrogates(r#""\ude00 \ud83d\ude00""#),
+            r#""\ufffd \ud83d\ude00""#
+        );
+        assert_eq!(repair_surrogates(r#""\\ud83d""#), r#""\\ud83d""#);
+        assert_eq!(repair_surrogates(r#""\ud83d"#), r#""\ufffd"#);
+        let value: serde_json::Value =
+            serde_json::from_str(&repair_surrogates(r#"{"c":"rm check.sh \ud83d"}"#)).unwrap();
+        assert_eq!(value["c"], "rm check.sh \u{fffd}");
+    }
+
+    #[test]
+    fn a_panic_in_the_guard_is_an_error() {
+        let failed = unpanicked(|| -> anyhow::Result<()> { panic!("boom") });
+        assert!(format!("{:#}", failed.unwrap_err()).contains("boom"));
+        assert_eq!(unpanicked(|| Ok(1)).unwrap(), 1);
+    }
+
+    #[test]
+    fn braces_expand_as_bash_expands_them() {
+        let mut found = braces("{check,tests/accept}.sh");
+        found.sort();
+        assert_eq!(found, ["check.sh", "tests/accept.sh"]);
+        let mut found = braces("a{b,{c,d}}e");
+        found.sort();
+        assert_eq!(found, ["abe", "ace", "ade"]);
+        assert_eq!(braces("${HOME}/x"), ["${HOME}/x"]);
+        assert_eq!(braces("{solo}.sh"), ["{solo}.sh"]);
+        assert!(braces(&"{a,b}".repeat(20)).len() <= super::EXPANSION_LIMIT + 2);
+    }
+
+    #[test]
+    fn a_tool_is_read_only_by_its_name_unless_it_names_a_change() {
+        assert_eq!(
+            words_of("mcp__fs__read_text_file"),
+            ["mcp", "fs", "read", "text", "file"]
+        );
+        assert_eq!(words_of("NotebookEdit"), ["notebook", "edit"]);
+        for tool in [
+            "Read",
+            "LS",
+            "Glob",
+            "Grep",
+            "WebFetch",
+            "mcp__fs__list_directory",
+        ] {
+            assert!(reads_only(tool), "{tool}");
+        }
+        for tool in [
+            "Write",
+            "mcp__fs__write_file",
+            "mcp__fs__move_file",
+            "search_replace",
+            "readAndWrite",
+            "download_file",
+            "TodoWrite",
+        ] {
+            assert!(!reads_only(tool), "{tool}");
+        }
+    }
+
+    #[test]
+    fn a_flot_command_is_found_where_it_runs_and_not_where_it_is_text() {
+        let verbs = |command: &str| {
+            let mut found = Vec::new();
+            flot_verbs(command, Shell::Posix, 0, &mut found);
+            found
+        };
+        for (command, verb) in [
+            ("flot gc", "flot gc"),
+            ("timeout 5 flot gc", "flot gc"),
+            ("FOO=1 ./target/debug/flot sign r", "flot sign"),
+            ("bash -c 'flot trust add a b'", "flot trust add"),
+            ("true && flot -f other.toml run", "flot run -f"),
+            ("flot run --proofs-from=main", "flot run --proofs-from"),
+            ("flot init --force", "flot init --force"),
+        ] {
+            assert_eq!(verbs(command), [verb], "{command}");
+        }
+        for command in [
+            "echo flot gc",
+            "git commit -m 'flot gc'",
+            "flot gc --dry-run",
+            "flot verify",
+            "flot trust list",
+            "flot init",
+        ] {
+            assert!(verbs(command).is_empty(), "{command}");
+        }
+    }
 
     #[test]
     fn control_sequences_and_bidi_overrides_are_made_visible() {

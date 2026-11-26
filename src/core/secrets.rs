@@ -159,6 +159,48 @@ const SHAPES: &[Shape] = &[
         max: None,
     },
     Shape {
+        kind: "Slack token",
+        prefix: b"xoxs-",
+        body: dashed,
+        min: 10,
+        max: None,
+    },
+    Shape {
+        kind: "Slack token",
+        prefix: b"xapp-",
+        body: dashed,
+        min: 10,
+        max: None,
+    },
+    Shape {
+        kind: "Stripe key",
+        prefix: b"sk_live_",
+        body: alnum,
+        min: 24,
+        max: None,
+    },
+    Shape {
+        kind: "Stripe key",
+        prefix: b"rk_live_",
+        body: alnum,
+        min: 24,
+        max: None,
+    },
+    Shape {
+        kind: "Hugging Face token",
+        prefix: b"hf_",
+        body: alnum,
+        min: 34,
+        max: Some(34),
+    },
+    Shape {
+        kind: "PyPI token",
+        prefix: b"pypi-",
+        body: dashed,
+        min: 50,
+        max: None,
+    },
+    Shape {
         kind: "npm token",
         prefix: b"npm_",
         body: alnum,
@@ -169,6 +211,39 @@ const SHAPES: &[Shape] = &[
 
 const PRIVATE_KEY_HEAD: &[u8] = b"-----BEGIN ";
 const PRIVATE_KEY_TAIL: &[u8] = b"PRIVATE KEY-----";
+
+/// `://user:password@`, as in `postgres://app:hunter2@db/app`. A password
+/// that starts like a placeholder (`$`, `<`, `{`, `*`) is not one.
+fn url_password_at(text: &[u8], at: usize) -> Option<(Finding, usize)> {
+    let after = text[at..].strip_prefix(b"://")?;
+    let user = after
+        .iter()
+        .take_while(|byte| byte.is_ascii_alphanumeric() || b"._~%-".contains(byte))
+        .count();
+    if user == 0 || user > 64 || after.get(user) != Some(&b':') {
+        return None;
+    }
+    let password = &after[user + 1..];
+    let length = password
+        .iter()
+        .take_while(|byte| !byte.is_ascii_whitespace() && !b"@/'\"".contains(byte))
+        .count();
+    if length == 0 || length > 128 || password.get(length) != Some(&b'@') {
+        return None;
+    }
+    if b"$<{*".contains(&password[0]) {
+        return None;
+    }
+    let end = at + 3 + user + 1 + length + 1;
+    Some((
+        Finding {
+            kind: "password in a URL",
+            shown: format!("://{}:…@", String::from_utf8_lossy(&after[..user])),
+            offset: at,
+        },
+        end,
+    ))
+}
 
 /// Every credential-shaped token in `text`, in order.
 pub fn scan(text: &[u8]) -> Vec<Finding> {
@@ -187,6 +262,9 @@ pub fn scan(text: &[u8]) -> Vec<Finding> {
 }
 
 fn token_at(text: &[u8], at: usize) -> Option<(Finding, usize)> {
+    if let Some(found) = url_password_at(text, at) {
+        return Some(found);
+    }
     // A token starts where a word does: inside a longer run of word
     // characters (a digest, base64) a prefix is a coincidence.
     if at > 0 && dashed(text[at - 1]) {
@@ -284,6 +362,28 @@ mod tests {
             ),
             (token("xo", &format!("xb-{}", "1234-abcd-")), "Slack token"),
             (token("np", &format!("m_{}", "r".repeat(36))), "npm token"),
+            (token("xo", &format!("xs-{}", "1234-abcd-")), "Slack token"),
+            (token("xa", &format!("pp-{}", "1-A0B1C2-99")), "Slack token"),
+            (
+                token("sk_", &format!("live_{}", "Ab3".repeat(9))),
+                "Stripe key",
+            ),
+            (
+                token("rk_", &format!("live_{}", "Ab3".repeat(9))),
+                "Stripe key",
+            ),
+            (
+                token("hf", &format!("_{}", "aB".repeat(17))),
+                "Hugging Face token",
+            ),
+            (
+                token("py", &format!("pi-{}", "AgEIcHlwaS5vcmc-".repeat(4))),
+                "PyPI token",
+            ),
+            (
+                token("postgres:", "//app:hunter2@db.internal/app"),
+                "password in a URL",
+            ),
             (
                 token("-----BEGIN ", "OPENSSH PRIVATE KEY-----"),
                 "private key",
@@ -303,6 +403,11 @@ mod tests {
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].shown, "ghp_…");
         assert_eq!(found[0].offset, 9);
+
+        let url = token("redis:", "//cache:s3cret@host:6379");
+        let found = scan(url.as_bytes());
+        assert_eq!(found[0].shown, "://cache:…@");
+        assert!(!format!("{found:?}").contains("s3cret"));
     }
 
     #[test]
@@ -318,6 +423,13 @@ mod tests {
             token("sk-", &"a".repeat(39)),
             token("-----BEGIN ", "PUBLIC KEY-----"),
             token("-----BEGIN ", "CERTIFICATE-----"),
+            token("hf", &format!("_{}", "a".repeat(35))),
+            // URLs without a password, or with a placeholder for one.
+            "https://github.com/tobilife/flot".into(),
+            "ssh://git@github.com/tobilife/flot".into(),
+            token("postgres:", "//app:${DB_PASSWORD}@db/app"),
+            token("postgres:", "//app:<password>@db/app"),
+            "see http://localhost:8080/path".into(),
             // What receipts are full of.
             "sha256:5c8d316a79ba7f6e0d1b2c3a4f5e6d7c8b9a0f1e2d3c4b5a69788796a5b4c3d2".into(),
             "ed25519:3a9f3136fc4fc8b7d3d96d45cf987653063fbf0ca394dcc75cac2424da9097c9".into(),

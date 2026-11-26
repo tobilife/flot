@@ -12,6 +12,7 @@ use std::sync::{mpsc, Mutex};
 use anyhow::{anyhow, Result};
 use serde_json::{json, Map, Value};
 
+use crate::service::audit::Outcome;
 use crate::service::{RunOptions, StopSignal, Workspace};
 
 /// Protocol revisions this server speaks. The first is preferred.
@@ -174,7 +175,7 @@ impl Server {
             return error_response(id, -32602, &format!("{name}: {problem}"));
         }
         match self.invoke(name, &arguments, stop) {
-            Ok(result) => success(id, tool_result(&result, false)),
+            Ok((result, is_error)) => success(id, tool_result(&result, is_error)),
             Err(error) => success(
                 id,
                 tool_result(
@@ -188,7 +189,9 @@ impl Server {
         }
     }
 
-    fn invoke(&self, name: &str, arguments: &Value, stop: &StopSignal) -> Result<Value> {
+    /// A tool's reply, and whether it reports an error: evidence that does
+    /// not authenticate is one, as it is to the CLI.
+    fn invoke(&self, name: &str, arguments: &Value, stop: &StopSignal) -> Result<(Value, bool)> {
         let text = |key: &str| {
             arguments
                 .get(key)
@@ -205,6 +208,7 @@ impl Server {
                 .map(|value| value as usize)
         };
         let workspace = &self.workspace;
+        let mut is_error = false;
 
         let value = match name {
             "flot_plan" => serde_json::to_value(workspace.plan(&RunOptions {
@@ -212,18 +216,34 @@ impl Server {
                 force: flag("force"),
                 ..RunOptions::default()
             })?)?,
-            "flot_run" => serde_json::to_value(workspace.run(&RunOptions {
-                only: text("only"),
-                force: flag("force"),
-                jobs: count("jobs"),
-                max_cost_usd: arguments.get("max_cost_usd").and_then(Value::as_f64),
-                stop: stop.clone(),
-                // Not an argument: the agent calling the tool must not choose
-                // the revision its own proofs are checked against.
-                proofs_from: None,
-            })?)?,
+            "flot_run" => {
+                // The flow's ceiling is the user's, in a file the guard keeps
+                // agents from editing: the agent calling the tool may only
+                // lower it.
+                let asked = arguments.get("max_cost_usd").and_then(Value::as_f64);
+                let report = workspace.run(&RunOptions {
+                    only: text("only"),
+                    force: flag("force"),
+                    jobs: count("jobs"),
+                    max_cost_usd: match (asked, workspace.flow()?.meta.max_cost_usd) {
+                        (Some(asked), Some(ceiling)) => Some(asked.min(ceiling)),
+                        (asked, _) => asked,
+                    },
+                    stop: stop.clone(),
+                    // Not an argument: the agent calling the tool must not choose
+                    // the revision its own proofs are checked against.
+                    proofs_from: None,
+                })?;
+                let mut value = serde_json::to_value(&report)?;
+                value["result"] = serde_json::to_value(Outcome::of_run(&report.manifest))?;
+                value
+            }
             "flot_show" => serde_json::to_value(workspace.show(&run_selector())?)?,
-            "flot_verify" => serde_json::to_value(workspace.verify(&run_selector(), None)?)?,
+            "flot_verify" => {
+                let audit = workspace.verify(&run_selector(), None)?;
+                is_error = audit.result() == Outcome::Broken;
+                serde_json::to_value(audit)?
+            }
             "flot_diff" => serde_json::to_value(workspace.diff(
                 &text("left").unwrap_or_else(|| "latest~1".into()),
                 &text("right").unwrap_or_else(|| "latest".into()),
@@ -253,7 +273,7 @@ impl Server {
             )?)?,
             other => unreachable!("`call` admits only catalog tools, not `{other}`"),
         };
-        Ok(value)
+        Ok((value, is_error))
     }
 }
 
@@ -518,12 +538,12 @@ fn tool_catalog() -> Vec<Value> {
         tool(
             "flot_run",
             Effect::Runs,
-            "Execute the flow and record a receipt per step. The verdict is `passed` only when every step succeeded and every claim was proven; `unverified` means work completed without proof. A step with `cached: true` was not executed again because the same command already succeeded over byte-identical inputs and upstream receipts; its reused receipt is as strong as a fresh run, so do not force a re-run to double-check it. A reused step whose manifest entry has `vouched_by` did not run on this host: its receipt came from an imported run, and `vouched` lists each such step's signers with `confirmed` (this store holds a run the key signed that kept the same receipt) and `trusted_as` (the name this host trusts a confirmed key under). A step's inline output keeps its first and last lines; flot_step_output returns all of it.",
+            "Execute the flow and record a receipt per step. Act on `result`: `passed` only when every step of the flow succeeded and every claim was proven; `partial` when every selected step passed but `only` left steps out, so nothing is known of those (the manifest's `partial` gives `selected` and `of`; its `verdict` still reads `passed`, which is not a pass of the flow); `unverified` when work completed but a claim has no proof; `failed` when a step failed or a claim was refuted. A step with `cached: true` was not executed again because the same command already succeeded over byte-identical inputs and upstream receipts, and every file it created, edited or deleted is still as it left it (its outputs are put back); its reused receipt is as strong as a fresh run, so do not force a re-run to double-check it. A reused step whose manifest entry has `vouched_by` did not run on this host: its receipt came from an imported run, and `vouched` lists each such step's signers with `confirmed` (this store holds a run the key signed that kept the same receipt) and `trusted_as` (the name this host trusts a confirmed key under). A step's inline output keeps its first and last lines; flot_step_output returns all of it.",
             json!({
                 "only": { "type": "string", "description": "Limit to one step and its dependencies." },
                 "force": { "type": "boolean", "description": "Execute every selected step even when an identical receipt could be reused; for steps that are flaky or depend on something undeclared." },
                 "jobs": { "type": "integer", "minimum": 1, "description": "Run up to this many independent steps at once." },
-                "max_cost_usd": { "type": "number", "minimum": 0, "description": "Stop starting new steps once executed steps have reported this many dollars through $FLOT_METRICS." }
+                "max_cost_usd": { "type": "number", "minimum": 0, "description": "Stop starting new steps once executed steps have reported this many dollars through $FLOT_METRICS. It can only lower the flow's own `max_cost_usd`: when the flow sets one, the lower of the two applies." }
             }),
             &[],
         ),
@@ -537,7 +557,7 @@ fn tool_catalog() -> Vec<Value> {
         tool(
             "flot_verify",
             Effect::Reads,
-            "Re-authenticate a recorded run from the store alone: receipt bodies against their ids, dependency references, every evidence object re-read against its digest, and the run root. Signatures are judged against this host's trust list.",
+            "Re-authenticate a recorded run from the store alone: receipt bodies against their ids, dependency references, every evidence object re-read against its digest, and the run root. Act on `result`, the worst that holds, which is also what `flot verify` exits with: `broken` (exit 1, and `isError`) when the evidence does not authenticate, as `findings` says, and `verdict` is then only what the altered record claims; `failed` (exit 1) when a step failed or a claim was refuted; `unverified` (exit 2) when a claim has no proof or the proofs differ from the revision in `anchor`; `partial` (exit 2) when every selected step passed but the run left steps of the flow out, as `partial` gives `selected` of `of`; `passed` (exit 0) only otherwise. `authorship` says who vouched for the run, judged against this host's trust list now: `unsigned`; `untrusted` (validly signed by no key this host trusts); `this_host` (signed by this host's own key, which is not on its trust list: a label, not trust: anything running here as this user, an agent included, can sign with it); `trusted` (validly signed by a key on the trust list, named in `signers`). `vouched` lists the steps the run reused from imported runs, each with its signers marked `confirmed` (this store holds a run the key signed that kept the same receipt) and `trusted_as`; a signer not confirmed is a name the run gives, not a signature.",
             json!({ "run": { "type": "string", "description": "Run selector; defaults to latest." } }),
             &[],
         ),
@@ -776,6 +796,105 @@ claims = ["the migration is safe"]
         let audit = call(&server, "flot_verify", json!({}))["structuredContent"].clone();
         assert_eq!(audit["intact"], true);
         assert_eq!(audit["verdict"], "passed");
+        assert_eq!(audit["result"], "passed");
+    }
+
+    #[test]
+    fn verify_of_tampered_evidence_is_broken_and_an_error() {
+        let (dir, server) = project(PROVEN);
+        call(&server, "flot_run", json!({}));
+        let mut dirs = vec![dir.path().join(".flot/objects")];
+        while let Some(objects) = dirs.pop() {
+            for entry in std::fs::read_dir(objects).unwrap().flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    dirs.push(path);
+                    continue;
+                }
+                let mut permissions = std::fs::metadata(&path).unwrap().permissions();
+                #[allow(clippy::permissions_set_readonly_false)]
+                permissions.set_readonly(false);
+                std::fs::set_permissions(&path, permissions).unwrap();
+                let mut bytes = std::fs::read(&path).unwrap();
+                bytes.extend_from_slice(b"x\n");
+                std::fs::write(&path, bytes).unwrap();
+            }
+        }
+        let verified = call(&server, "flot_verify", json!({}));
+        assert_eq!(verified["isError"], true, "{verified}");
+        let audit = &verified["structuredContent"];
+        assert_eq!(audit["intact"], false);
+        // What the altered record says, which `result` does not repeat.
+        assert_eq!(audit["verdict"], "passed");
+        assert_eq!(audit["result"], "broken");
+    }
+
+    #[test]
+    fn a_run_of_some_steps_is_partial_not_passed() {
+        let (_dir, server) = project(&format!(
+            "{PROVEN}\n[[step]]\nid = \"other\"\nrun = \"false\"\n"
+        ));
+        let run = call(&server, "flot_run", json!({ "only": "write" }));
+        assert_eq!(run["isError"], false, "{run}");
+        assert_eq!(run["structuredContent"]["result"], "partial");
+        assert_eq!(
+            run["structuredContent"]["manifest"]["partial"],
+            json!({ "selected": 1, "of": 2 })
+        );
+        let verified = call(&server, "flot_verify", json!({}));
+        assert_eq!(verified["isError"], false, "{verified}");
+        assert_eq!(verified["structuredContent"]["result"], "partial");
+    }
+
+    /// Two steps that each report 60 cents, under a flow ceiling of 50.
+    const CAPPED: &str = r#"
+[flow]
+name = "capped"
+max_cost_usd = 0.5
+
+[[step]]
+id = "a"
+run = '''echo '{"cost_usd": 0.6}' > "$FLOT_METRICS"'''
+
+[[step]]
+id = "b"
+needs = ["a"]
+run = '''echo '{"cost_usd": 0.6}' > "$FLOT_METRICS"'''
+"#;
+
+    #[test]
+    fn flot_run_cannot_raise_the_flows_cost_ceiling() {
+        let (dir, server) = project(CAPPED);
+        let run = call(&server, "flot_run", json!({ "max_cost_usd": 100000 }));
+        let manifest = &run["structuredContent"]["manifest"];
+        assert_eq!(manifest["max_cost_micro_usd"], 500_000, "{run}");
+        assert_eq!(manifest["verdict"], "failed");
+        assert_eq!(manifest["steps"][1]["status"], "cancelled");
+        assert_eq!(run["structuredContent"]["result"], "failed");
+
+        // It can lower it.
+        let run = call(
+            &server,
+            "flot_run",
+            json!({ "max_cost_usd": 0.25, "force": true }),
+        );
+        let manifest = &run["structuredContent"]["manifest"];
+        assert_eq!(manifest["max_cost_micro_usd"], 250_000, "{run}");
+
+        // Without a ceiling in the flow, the argument is the ceiling.
+        std::fs::write(
+            dir.path().join("flot.toml"),
+            CAPPED.replace("max_cost_usd = 0.5\n", ""),
+        )
+        .unwrap();
+        let run = call(
+            &server,
+            "flot_run",
+            json!({ "max_cost_usd": 100000, "force": true }),
+        );
+        let manifest = &run["structuredContent"]["manifest"];
+        assert_eq!(manifest["max_cost_micro_usd"], 100_000_000_000u64, "{run}");
+        assert_eq!(manifest["verdict"], "passed");
     }
 
     #[test]

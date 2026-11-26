@@ -49,7 +49,7 @@ needs = ["toolchain", "build"]
 inputs = [
   "src/**/*.rs", "tests/**/*.rs", "Cargo.toml", "README.md", "docs/readme/*.md",
   "docs/ci.md", "action.yml", "plugins/claude-code/.claude-plugin/plugin.json",
-  ".claude-plugin/marketplace.json",
+  ".claude-plugin/marketplace.json", "tests/guard_corpus.toml",
 ]
 claims = [
   "the unit suite passes",

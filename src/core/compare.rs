@@ -87,6 +87,7 @@ mod tests {
             flow_digest: "sha256:flow".into(),
             root_digest: RunManifest::root_of(&pairs),
             verdict: Verdict::Passed,
+            partial: None,
             claims: ClaimCounts::default(),
             steps,
             limitations: vec![],

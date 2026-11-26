@@ -3,7 +3,8 @@
 //! A flow can say that a step gets no network and may write only beneath
 //! some paths. That is enforced by the kernel, not asked of the agent: on
 //! Linux, a new user and network namespace (only an unconfigured loopback
-//! inside) and a Landlock ruleset that handles every kind of write; on
+//! inside) and a Landlock ruleset that handles every kind of write, which
+//! needs Landlock ABI 3 (Linux 6.2) to include truncation; on
 //! macOS, a Seatbelt profile that `sandbox-exec` applies before it runs the
 //! step's shell. Reads are not restricted. Where the policy cannot be
 //! enforced the step is not run: a step that asked to be confined is never
@@ -182,11 +183,13 @@ impl Prepared {
     fn apply(&self, _command: &mut Command) {}
 }
 
-/// Whether a step confined to write only beneath `root`, without network,
-/// can start here: the policy is prepared and a trivial child is confined
-/// with it. Returns the mechanism that would enforce it.
-pub fn probe(root: &Path) -> Result<String> {
-    let prepared = prepare(false, Some(&[root.to_path_buf()]), &[])?;
+/// Whether a step without network, and when `write` is set confined to
+/// write only beneath `root`, can start here: the policy is prepared and a
+/// trivial child is confined with it. Returns the mechanism that would
+/// enforce it.
+pub fn probe(root: &Path, write: bool) -> Result<String> {
+    let root = [root.to_path_buf()];
+    let prepared = prepare(false, write.then_some(&root[..]), &[])?;
     let status = prepared
         .command(Path::new("sh"))
         .args(["-c", "exit 0"])
@@ -257,6 +260,27 @@ mod landlock {
         parent_fd: i32,
     }
 
+    /// The writes a ruleset handles on Landlock ABI `abi`: every one there
+    /// is. Below ABI 3 the kernel cannot deny truncating a file, so a step
+    /// confined there could still empty any file it can open; it is not run.
+    pub fn handled_for(abi: i64) -> Result<u64> {
+        if abi < 3 {
+            bail!("cannot deny truncation on Landlock ABI {abi}; ABI 3 (Linux 6.2) is required");
+        }
+        Ok(WRITE_FILE
+            | REMOVE_DIR
+            | REMOVE_FILE
+            | MAKE_CHAR
+            | MAKE_DIR
+            | MAKE_REG
+            | MAKE_SOCK
+            | MAKE_FIFO
+            | MAKE_BLOCK
+            | MAKE_SYM
+            | REFER
+            | TRUNCATE)
+    }
+
     /// A ruleset that handles every write the kernel's Landlock ABI knows,
     /// allowing them beneath `paths`, and that ABI.
     pub fn ruleset(paths: &[PathBuf]) -> Result<(OwnedFd, i64)> {
@@ -275,22 +299,7 @@ mod landlock {
                 std::io::Error::last_os_error()
             );
         }
-        let mut handled = WRITE_FILE
-            | REMOVE_DIR
-            | REMOVE_FILE
-            | MAKE_CHAR
-            | MAKE_DIR
-            | MAKE_REG
-            | MAKE_SOCK
-            | MAKE_FIFO
-            | MAKE_BLOCK
-            | MAKE_SYM;
-        if abi >= 2 {
-            handled |= REFER;
-        }
-        if abi >= 3 {
-            handled |= TRUNCATE;
-        }
+        let handled = handled_for(abi)?;
         let attr = RulesetAttr {
             handled_access_fs: handled,
         };
@@ -353,5 +362,27 @@ mod landlock {
             }
         }
         Ok((ruleset, abi))
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn a_landlock_abi_that_cannot_deny_truncation_confines_nothing() {
+            for abi in [1, 2] {
+                let refused = handled_for(abi).unwrap_err().to_string();
+                assert_eq!(
+                    refused,
+                    format!("cannot deny truncation on Landlock ABI {abi}; ABI 3 (Linux 6.2) is required")
+                );
+            }
+            for abi in [3, 4, 7] {
+                let handled = handled_for(abi).unwrap();
+                assert_eq!(handled & TRUNCATE, TRUNCATE, "ABI {abi}");
+                assert_eq!(handled & REFER, REFER, "ABI {abi}");
+                assert_eq!(handled & WRITE_FILE, WRITE_FILE, "ABI {abi}");
+            }
+        }
     }
 }

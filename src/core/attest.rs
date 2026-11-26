@@ -422,6 +422,7 @@ mod tests {
             flow_digest: "sha256:flow".into(),
             root_digest: root.into(),
             verdict: Verdict::Passed,
+            partial: None,
             steps: Vec::new(),
             claims: ClaimCounts::default(),
             limitations: Vec::new(),

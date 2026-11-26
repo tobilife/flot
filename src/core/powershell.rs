@@ -11,6 +11,8 @@
 //! to `Invoke-Expression`. A write through a variable, a script or a
 //! computed path is not seen; that is left to `proofs_from`.
 
+use std::collections::HashSet;
+
 use super::shell::{self, Reading};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -238,6 +240,10 @@ const CMDLETS: &[(&[&str], Kind)] = &[
             "ac",
             "clear-content",
             "clc",
+            "clear-item",
+            "cli",
+            "set-item",
+            "si",
             "out-file",
             "remove-item",
             "rm",
@@ -253,6 +259,12 @@ const CMDLETS: &[(&[&str], Kind)] = &[
             "export-clixml",
             "set-itemproperty",
             "sp",
+            "clear-itemproperty",
+            "clp",
+            "remove-itemproperty",
+            "rp",
+            "new-itemproperty",
+            "set-acl",
         ],
         Kind::Changes,
     ),
@@ -268,7 +280,7 @@ const CMDLETS: &[(&[&str], Kind)] = &[
 
 /// Parameters whose value is the path a cmdlet acts on.
 const PATH_PARAMETERS: &[&str] = &["path", "literalpath", "filepath", "pspath", "lp"];
-/// Other parameters that take a value.
+/// Other parameters that take a value, the common parameters among them.
 const VALUE_PARAMETERS: &[&str] = &[
     "value",
     "encoding",
@@ -292,6 +304,26 @@ const VALUE_PARAMETERS: &[&str] = &[
     "method",
     "headers",
     "body",
+    "erroraction",
+    "ea",
+    "warningaction",
+    "wa",
+    "informationaction",
+    "infa",
+    "progressaction",
+    "proga",
+    "errorvariable",
+    "ev",
+    "warningvariable",
+    "wv",
+    "informationvariable",
+    "iv",
+    "outvariable",
+    "ov",
+    "outbuffer",
+    "ob",
+    "pipelinevariable",
+    "pv",
 ];
 /// Parameters that take no value.
 const SWITCHES: &[&str] = &[
@@ -302,21 +334,34 @@ const SWITCHES: &[&str] = &[
     "noclobber",
     "passthru",
     "confirm",
+    "cf",
     "whatif",
+    "wi",
+    "verbose",
+    "vb",
+    "debug",
+    "db",
+    "usetransaction",
+    "usetx",
     "asbytestream",
     "container",
     "notypeinformation",
 ];
 
-/// A parameter as written, `-Dest` or `-Path:x`, by its full name: the one
-/// name it is a prefix of. No name here is a prefix of another.
+/// A parameter as written, `-Dest` or `-Path:x`, by its full name: the
+/// name or alias written in full, or else the one name it is a prefix of.
 fn parameter(written: &str) -> Option<&'static str> {
     let written = written.to_ascii_lowercase();
-    let mut prefixed = PATH_PARAMETERS
-        .iter()
-        .chain(VALUE_PARAMETERS)
-        .chain(SWITCHES)
-        .filter(|name| name.starts_with(&written));
+    let names = || {
+        PATH_PARAMETERS
+            .iter()
+            .chain(VALUE_PARAMETERS)
+            .chain(SWITCHES)
+    };
+    if let Some(exact) = names().find(|name| **name == written) {
+        return Some(exact);
+    }
+    let mut prefixed = names().filter(|name| name.starts_with(&written));
     match (prefixed.next(), prefixed.next()) {
         (Some(only), None) => Some(only),
         _ => None,
@@ -334,6 +379,32 @@ const FETCHERS: &[&str] = &[
 ];
 const EVALUATORS: &[&str] = &["invoke-expression", "iex"];
 
+/// How deep code handed over as a string is read again; past it, every
+/// word is taken for a path it may write.
+const DEPTH: usize = 8;
+
+/// Cmdlets whose file is never piped in: what is piped is what they write.
+const WRITES_INPUT: &[&str] = &[
+    "out-file",
+    "tee-object",
+    "tee",
+    "export-csv",
+    "epcsv",
+    "export-clixml",
+];
+/// Cmdlets a piped string is the content of, not the path to.
+const CONTENT_INPUT: &[&str] = &["set-content", "sc", "add-content", "ac", "new-item", "ni"];
+
+/// What a statement pipes into the next that may name paths.
+#[derive(Default)]
+struct Piped {
+    paths: Vec<String>,
+    /// Items from `Get-Item` or `Get-ChildItem`, which a cmdlet binds to
+    /// its path by property name; a string binds only where the path is
+    /// taken by value.
+    items: bool,
+}
+
 /// One argument: a word, or words joined by commas into an array.
 type Argument = Vec<(String, bool)>;
 
@@ -350,8 +421,75 @@ fn command_name(word: &str) -> String {
         .unwrap_or(name)
 }
 
-/// The paths a cmdlet or a native program changes through its arguments.
-fn changed_by(arguments: &[Argument]) -> Vec<String> {
+/// A cmdlet's arguments, bound to the parameters this reader knows.
+struct Bound {
+    named: Vec<(&'static str, Vec<String>)>,
+    positional: Vec<Vec<String>>,
+    /// A parameter this reader does not know was given: any positional
+    /// argument may be its value or the path.
+    unknown: bool,
+}
+
+impl Bound {
+    fn new(arguments: &[Argument]) -> Self {
+        let mut bound = Bound {
+            named: Vec::new(),
+            positional: Vec::new(),
+            unknown: false,
+        };
+        let mut rest = arguments.iter();
+        while let Some(argument) = rest.next() {
+            let words: Vec<String> = argument.iter().map(|(word, _)| word.clone()).collect();
+            let flag = match argument.as_slice() {
+                [(word, false)] if word.len() > 1 && word.starts_with('-') => Some(&word[1..]),
+                _ => None,
+            };
+            let Some(flag) = flag else {
+                bound.positional.push(words);
+                continue;
+            };
+            let (written, inline) = match flag.split_once(':') {
+                Some((written, value)) => (written, Some(value.to_string())),
+                None => (flag, None),
+            };
+            match parameter(written) {
+                Some(name) if SWITCHES.contains(&name) => {}
+                Some(name) => {
+                    let values = match inline {
+                        Some(value) => vec![value],
+                        None => rest
+                            .next()
+                            .map(|value| value.iter().map(|(word, _)| word.clone()).collect())
+                            .unwrap_or_default(),
+                    };
+                    bound.named.push((name, values));
+                }
+                None => bound.unknown = true,
+            }
+        }
+        bound
+    }
+
+    /// The values given to `wanted` by name, else the positional argument
+    /// at `position`.
+    fn values(&self, wanted: &[&str], position: usize) -> Vec<String> {
+        let found: Vec<String> = self
+            .named
+            .iter()
+            .filter(|(name, _)| wanted.contains(name))
+            .flat_map(|(_, values)| values.clone())
+            .collect();
+        if found.is_empty() {
+            self.positional.get(position).cloned().unwrap_or_default()
+        } else {
+            found
+        }
+    }
+}
+
+/// What a cmdlet or a native program changes through its arguments; a
+/// cmdlet given no path changes what is piped into it, `input`.
+fn changed_at(arguments: &[Argument], input: &Piped, depth: usize) -> Reading {
     // `$x = Remove-Item y`: the command is past the assignment.
     let arguments = match arguments {
         [variable, operator, rest @ ..]
@@ -364,15 +502,29 @@ fn changed_by(arguments: &[Argument]) -> Vec<String> {
         _ => arguments,
     };
     let Some(first) = arguments.first().and_then(|argument| argument.first()) else {
-        return Vec::new();
+        return Reading::default();
     };
     let name = command_name(&first.0);
+    if EVALUATORS.contains(&name.as_str()) {
+        // `iex "Remove-Item x"` runs its string, or the one piped into it.
+        let code: Vec<&str> = arguments[1..]
+            .iter()
+            .flatten()
+            .filter(|(word, quoted)| *quoted || !word.starts_with('-'))
+            .map(|(word, _)| word.as_str())
+            .collect();
+        let code = if code.is_empty() {
+            input.paths.join("\n")
+        } else {
+            code.join(" ")
+        };
+        return read_at(&code, depth + 1);
+    }
     let Some(kind) = CMDLETS
         .iter()
         .find(|(names, _)| names.contains(&name.as_str()))
         .map(|(_, kind)| *kind)
     else {
-        // A native program: the shell reader knows what it changes.
         let words: Vec<String> = std::iter::once(name)
             .chain(
                 arguments
@@ -382,97 +534,58 @@ fn changed_by(arguments: &[Argument]) -> Vec<String> {
                     .map(|(word, _)| word.clone()),
             )
             .collect();
-        return shell::changed_by(&words);
+        return native(&words, depth);
     };
-    let mut named: Vec<(&str, Vec<String>)> = Vec::new();
-    let mut positional: Vec<Vec<String>> = Vec::new();
-    let mut rest = arguments[1..].iter().peekable();
-    while let Some(argument) = rest.next() {
-        let words: Vec<String> = argument.iter().map(|(word, _)| word.clone()).collect();
-        let flag = match argument.as_slice() {
-            [(word, false)] if word.len() > 1 && word.starts_with('-') => Some(&word[1..]),
-            _ => None,
-        };
-        let Some(flag) = flag else {
-            positional.push(words);
-            continue;
-        };
-        let (written, inline) = match flag.split_once(':') {
-            Some((written, value)) => (written, Some(value.to_string())),
-            None => (flag, None),
-        };
-        match parameter(written) {
-            Some(name) if !SWITCHES.contains(&name) => {
-                let values = match inline {
-                    Some(value) => vec![value],
-                    None => rest
-                        .next()
-                        .map(|value| value.iter().map(|(word, _)| word.clone()).collect())
-                        .unwrap_or_default(),
-                };
-                named.push((name, values));
-            }
-            // A switch, or a parameter this reader does not know.
-            _ => {}
-        }
+    let bound = Bound::new(&arguments[1..]);
+    let mut paths = bound.values(PATH_PARAMETERS, 0);
+    let name = name.as_str();
+    let binds = !WRITES_INPUT.contains(&name) && (input.items || !CONTENT_INPUT.contains(&name));
+    if paths.is_empty() && kind != Kind::Downloads && binds {
+        paths = input.paths.clone();
     }
-    let values = |wanted: &[&str], position: usize| -> Vec<String> {
-        let found: Vec<String> = named
-            .iter()
-            .filter(|(name, _)| wanted.contains(name))
-            .flat_map(|(_, values)| values.clone())
-            .collect();
-        if found.is_empty() {
-            positional.get(position).cloned().unwrap_or_default()
-        } else {
-            found
-        }
-    };
-    let paths = values(PATH_PARAMETERS, 0);
     // A positional argument binds to the first position not bound by name:
     // with `-Path` named, the first one is the destination or new name.
-    let second = if named.iter().any(|(name, _)| PATH_PARAMETERS.contains(name)) {
+    let second = if bound
+        .named
+        .iter()
+        .any(|(name, _)| PATH_PARAMETERS.contains(name))
+    {
         0
     } else {
         1
     };
-    match kind {
+    let mut changed = match kind {
         Kind::Changes => paths,
         Kind::Creates => {
-            let names = values(&["name"], usize::MAX);
+            let names = bound.values(&["name"], usize::MAX);
             if names.is_empty() {
-                return paths;
-            }
-            let bases = if paths.is_empty() {
-                vec![String::new()]
-            } else {
                 paths
-            };
-            bases
-                .iter()
-                .flat_map(|base| names.iter().map(move |name| joined(base, name)))
-                .collect()
+            } else {
+                let bases = if paths.is_empty() {
+                    vec![String::new()]
+                } else {
+                    paths
+                };
+                bases
+                    .iter()
+                    .flat_map(|base| names.iter().map(move |name| joined(base, name)))
+                    .collect()
+            }
         }
         Kind::Moves | Kind::Copies => {
-            let destinations = values(&["destination"], second);
             let mut changed = if kind == Kind::Moves {
                 paths.clone()
             } else {
                 Vec::new()
             };
-            for destination in &destinations {
-                changed.push(destination.clone());
-                // Into a directory, each source keeps its name.
-                for source in &paths {
-                    let name = source.rsplit(['/', '\\']).next().unwrap_or(source);
-                    changed.push(joined(destination, name));
-                }
+            for destination in bound.values(&["destination"], second) {
+                changed.extend(into(&destination, &paths));
             }
             changed
         }
         Kind::Renames => {
             let mut changed = paths.clone();
-            for new_name in values(&["newname"], second) {
+            for new_name in bound.values(&["newname"], second) {
                 for source in &paths {
                     let dir = source.rsplit_once(['/', '\\']).map_or("", |(dir, _)| dir);
                     changed.push(joined(dir, &new_name));
@@ -480,101 +593,500 @@ fn changed_by(arguments: &[Argument]) -> Vec<String> {
             }
             changed
         }
-        Kind::Downloads => values(&["outfile"], usize::MAX),
+        Kind::Downloads => bound.values(&["outfile"], usize::MAX),
+    };
+    if bound.unknown {
+        changed.extend(bound.positional.iter().flatten().cloned());
     }
+    Reading {
+        writes: changed,
+        remote_code: None,
+    }
+}
+
+/// What a native program changes: the string `cmd /c` or `powershell
+/// -Command` runs, read again; any other as the shell reader reads it.
+fn native(words: &[String], depth: usize) -> Reading {
+    let Some((name, args)) = words.split_first() else {
+        return Reading::default();
+    };
+    let name = command_name(name);
+    match name.as_str() {
+        "cmd" => {
+            let code = args.iter().position(|arg| {
+                ["/c", "/k", "/r"]
+                    .iter()
+                    .any(|flag| arg.eq_ignore_ascii_case(flag))
+            });
+            Reading {
+                writes: code
+                    .map(|at| cmd(&args[at + 1..].join(" "), depth + 1))
+                    .unwrap_or_default(),
+                remote_code: None,
+            }
+        }
+        "powershell" | "pwsh" => code(args)
+            .map(|code| read_at(&code, depth + 1))
+            .unwrap_or_default(),
+        _ => {
+            let words: Vec<String> = std::iter::once(name).chain(args.iter().cloned()).collect();
+            Reading {
+                writes: shell::changed_by(&words),
+                remote_code: None,
+            }
+        }
+    }
+}
+
+/// The code `powershell` or `pwsh` runs: after `-Command`, or the
+/// arguments after its options; `None` for a script or encoded code.
+fn code(args: &[String]) -> Option<String> {
+    const VALUES: &[&str] = &[
+        "executionpolicy",
+        "ep",
+        "ex",
+        "windowstyle",
+        "w",
+        "workingdirectory",
+        "wd",
+        "inputformat",
+        "if",
+        "inp",
+        "outputformat",
+        "of",
+        "o",
+        "configurationname",
+        "config",
+        "version",
+        "v",
+        "settingsfile",
+        "settings",
+        "custompipename",
+    ];
+    let mut at = 0;
+    while let Some(flag) = args.get(at).and_then(|arg| arg.strip_prefix('-')) {
+        let flag = flag.to_ascii_lowercase();
+        at += 1;
+        if flag == "c" || (flag.len() > 2 && "command".starts_with(&flag)) {
+            break;
+        }
+        if VALUES.contains(&flag.as_str())
+            || (flag.len() > 2 && VALUES.iter().any(|name| name.starts_with(&flag)))
+        {
+            at += 1;
+        } else if flag == "f"
+            || flag == "e"
+            || ["fi", "ec", "en"]
+                .iter()
+                .any(|prefix| flag.starts_with(prefix))
+        {
+            return None;
+        }
+    }
+    let code = args.get(at..)?.join(" ");
+    (!code.is_empty()).then_some(code)
+}
+
+/// What `cmd /c` runs, read with cmd's rules: `&`, `&&`, `||`, `|` and
+/// parentheses separate commands, `"` quotes, `^` escapes, and `>` writes
+/// the word after it.
+fn cmd(command: &str, depth: usize) -> Vec<String> {
+    if depth > DEPTH {
+        return command.split_whitespace().map(str::to_string).collect();
+    }
+    let chars: Vec<char> = command.chars().collect();
+    let mut writes = Vec::new();
+    let mut words: Vec<String> = Vec::new();
+    let mut word = String::new();
+    let mut quoted = false;
+    // The word being read is a redirection's target, `Some(true)`, or a
+    // file only read, `Some(false)`.
+    let mut redirect: Option<bool> = None;
+    let mut at = 0;
+    loop {
+        let c = chars.get(at).copied();
+        // `2>` names a stream, not a word.
+        if c == Some('>') && !quoted && matches!(word.as_str(), "1" | "2") {
+            word.clear();
+        }
+        let ends = matches!(
+            c,
+            None | Some(' ' | '\t' | '&' | '|' | '(' | ')' | '\n' | '\r' | '<' | '>')
+        );
+        if ends && (!word.is_empty() || quoted) {
+            let done = std::mem::take(&mut word);
+            match redirect.take() {
+                Some(true) if !done.eq_ignore_ascii_case("nul") => writes.push(done),
+                Some(_) => {}
+                None => words.push(done),
+            }
+            quoted = false;
+        }
+        match c {
+            None => {
+                writes.extend(builtin(&words, depth));
+                break;
+            }
+            Some('"') => {
+                quoted = true;
+                at += 1;
+                while at < chars.len() && chars[at] != '"' {
+                    word.push(chars[at]);
+                    at += 1;
+                }
+            }
+            Some('^') => {
+                at += 1;
+                word.extend(chars.get(at));
+            }
+            Some('&' | '|' | '(' | ')' | '\n' | '\r') => {
+                writes.extend(builtin(&words, depth));
+                words.clear();
+                if matches!(c, Some('&' | '|')) && chars.get(at + 1).copied() == c {
+                    at += 1;
+                }
+            }
+            Some('>') => {
+                if chars.get(at + 1) == Some(&'>') {
+                    at += 1;
+                }
+                if chars.get(at + 1) == Some(&'&') {
+                    // `2>&1` merges a stream.
+                    at += 2;
+                } else {
+                    redirect = Some(true);
+                }
+            }
+            Some('<') => redirect = Some(false),
+            Some(' ' | '\t') => {}
+            Some(other) => word.push(other),
+        }
+        at += 1;
+    }
+    writes
+}
+
+/// What one command `cmd` runs changes: its built-ins `del`, `rd`, `copy`,
+/// `move` and `ren` by cmd's rules, any other program as [`native`] reads
+/// it.
+fn builtin(words: &[String], depth: usize) -> Vec<String> {
+    let Some((name, args)) = words.split_first() else {
+        return Vec::new();
+    };
+    let operands: Vec<String> = args
+        .iter()
+        .filter(|arg| !arg.starts_with('/'))
+        .cloned()
+        .collect();
+    let name = command_name(name.trim_start_matches('@'));
+    match name.as_str() {
+        "del" | "erase" | "rd" | "rmdir" => operands,
+        "copy" | "move" => {
+            let Some((destination, sources)) = operands.split_last() else {
+                return Vec::new();
+            };
+            if sources.is_empty() {
+                // `copy x` copies it here, or what it holds when it is a
+                // directory.
+                return vec![base(destination).to_string(), ".".to_string()];
+            }
+            let mut written = if name == "move" {
+                sources.to_vec()
+            } else {
+                // A directory copied puts what it holds in the destination.
+                vec![destination.clone()]
+            };
+            written.extend(into(destination, sources));
+            written
+        }
+        // What the source holds lands in the destination, by default here.
+        "xcopy" | "robocopy" => match operands.as_slice() {
+            [_] => vec![".".to_string()],
+            [_, destination, ..] => vec![destination.clone()],
+            [] => Vec::new(),
+        },
+        "ren" | "rename" => match operands.as_slice() {
+            [path, new_name, ..] => {
+                let dir = path.rsplit_once(['/', '\\']).map_or("", |(dir, _)| dir);
+                vec![path.clone(), joined(dir, new_name)]
+            }
+            _ => Vec::new(),
+        },
+        "mklink" => operands.first().cloned().into_iter().collect(),
+        "echo" | "rem" | "type" | "dir" | "cd" | "chdir" | "pushd" | "popd" | "set" => Vec::new(),
+        _ => native(words, depth).writes,
+    }
+}
+
+/// What copying or moving `sources` to `destination` writes: the
+/// destination when it may be the file written, and each source's name in
+/// it when it may be a directory; a trailing separator, `.` or several
+/// sources make it one.
+fn into(destination: &str, sources: &[String]) -> Vec<String> {
+    let directory = destination.ends_with(['/', '\\'])
+        || matches!(destination, "." | "..")
+        || sources.len() > 1;
+    let mut written = if directory {
+        Vec::new()
+    } else {
+        vec![destination.to_string()]
+    };
+    written.extend(
+        sources
+            .iter()
+            .map(|source| joined(destination, base(source))),
+    );
+    written
+}
+
+/// The last name in `path`.
+fn base(path: &str) -> &str {
+    let path = path.trim_end_matches(['/', '\\']);
+    path.rsplit(['/', '\\']).next().unwrap_or(path)
 }
 
 fn joined(base: &str, name: &str) -> String {
-    let base = base.trim_end_matches(['/', '\\']);
-    if base.is_empty() {
-        name.to_string()
-    } else {
-        format!("{base}/{name}")
+    let trimmed = base.trim_end_matches(['/', '\\']);
+    match trimmed {
+        "" if !base.is_empty() => format!("/{name}"),
+        "" | "." => name.to_string(),
+        _ => format!("{trimmed}/{name}"),
     }
 }
 
-/// `[IO.File]::Method` (or `[System.IO.File]`, `[IO.Directory]`) and the
-/// positions of the arguments it changes.
-fn dotnet_writes(word: &str) -> Option<&'static [usize]> {
+/// What a `[System.IO]` method does with the arguments it is given.
+enum Method {
+    /// Writes, creates or deletes the arguments at these positions.
+    Changes(&'static [usize]),
+    /// Opens its first argument with the access its others name.
+    Opens,
+}
+
+/// A `[System.IO]` type's static method or constructor, `None` for what
+/// only reads: `ReadAllText`, `Exists`, `Get*`, `OpenRead`, a reader, or
+/// `[IO.Path]`. Any other method of such a type is taken to change its
+/// path.
+fn dotnet(word: &str) -> Option<Method> {
+    const READERS: &[&str] = &[
+        "path",
+        "streamreader",
+        "binaryreader",
+        "stringreader",
+        "stringwriter",
+        "memorystream",
+        "fileinfo",
+        "directoryinfo",
+        "driveinfo",
+        "filesystemwatcher",
+    ];
+    const READS: &[&str] = &[
+        "read",
+        "get",
+        "exists",
+        "enumerate",
+        "openread",
+        "opentext",
+        "setcurrentdirectory",
+        "equals",
+        "referenceequals",
+        "tostring",
+    ];
     let lower = word.to_ascii_lowercase();
-    let (class, method) = lower.trim_start_matches('[').split_once("]::")?;
+    let (class, method) = lower.strip_prefix('[')?.split_once("]::")?;
     let class = class.strip_prefix("system.").unwrap_or(class);
-    match (class, method) {
-        ("io.file", "move" | "replace") | ("io.directory", "move") => Some(&[0, 1]),
-        ("io.file", "copy") => Some(&[1]),
-        ("io.file", method)
-            if method.starts_with("write")
-                || method.starts_with("append")
-                || method.starts_with("create")
-                || method == "delete" =>
-        {
-            Some(&[0])
-        }
-        ("io.directory", "delete") => Some(&[0]),
-        _ => None,
-    }
-}
-
-/// A path as PowerShell names it, `/`-separated; `None` for what is not a
-/// file: `$null`, a variable, or a provider path such as `Env:X`.
-fn file_path(path: &str) -> Option<String> {
-    let provider = path.split_once(':').is_some_and(|(drive, _)| {
-        drive.len() > 1 && drive.chars().all(|c| c.is_ascii_alphabetic())
-    });
-    if path.is_empty() || path.contains('$') || provider {
+    let class = class.strip_prefix("io.")?;
+    if READERS.contains(&class) || READS.iter().any(|read| method.starts_with(read)) {
         return None;
     }
-    Some(path.replace('\\', "/"))
+    Some(match (class, method) {
+        (_, "open") | ("filestream", "new") => Method::Opens,
+        (_, "copy") => Method::Changes(&[1]),
+        (_, "move" | "replace") => Method::Changes(&[0, 1, 2]),
+        _ => Method::Changes(&[0]),
+    })
+}
+
+/// Whether a file is opened only to read: an access of `Read`, and no
+/// mode that creates, truncates or appends. Without an access, `Open`
+/// gives read and write.
+fn reads_only(words: &[String]) -> bool {
+    let words: Vec<String> = words.iter().map(|word| word.to_ascii_lowercase()).collect();
+    words
+        .iter()
+        .any(|word| word.rsplit("::").next() == Some("read"))
+        && !words.iter().any(|word| {
+            ["write", "create", "truncate", "append"]
+                .iter()
+                .any(|mode| word.contains(mode))
+        })
+}
+
+/// A path as PowerShell names it, `/`-separated and past a `FileSystem::`
+/// provider; `$PWD` and `$HOME` are left for the caller to expand. `None`
+/// for what is not a file: `$null`, another variable, or another
+/// provider's path such as `Env:X`.
+fn file_path(path: &str) -> Option<String> {
+    let path = match path.split_once("::") {
+        Some((provider, rest)) => {
+            let provider = provider.rsplit('\\').next().unwrap_or(provider);
+            if !provider.eq_ignore_ascii_case("filesystem") {
+                return None;
+            }
+            rest
+        }
+        None => path,
+    };
+    let (variable, rest) = ["$PWD", "$HOME"]
+        .iter()
+        .find_map(|variable| {
+            let head = path.get(..variable.len())?;
+            let rest = &path[variable.len()..];
+            (head.eq_ignore_ascii_case(variable)
+                && (rest.is_empty() || rest.starts_with(['/', '\\'])))
+            .then_some((*variable, rest))
+        })
+        .unwrap_or(("", path));
+    let provider = rest.split_once(':').is_some_and(|(drive, _)| {
+        drive.len() > 1 && drive.chars().all(|c| c.is_ascii_alphabetic())
+    });
+    if path.is_empty() || rest.contains('$') || provider {
+        return None;
+    }
+    Some(format!("{variable}{rest}").replace('\\', "/"))
+}
+
+/// What a statement pipes on that names paths: literal strings
+/// (`'a', 'b' |`), what `Write-Output` is given, or the items `Get-Item`
+/// and `Get-ChildItem` are given (`.` for none).
+fn piped(arguments: &[Argument]) -> Piped {
+    let Some((first, _)) = arguments.first().and_then(|argument| argument.first()) else {
+        return Piped::default();
+    };
+    if arguments.iter().flatten().all(|(_, quoted)| *quoted) {
+        return Piped {
+            paths: arguments
+                .iter()
+                .flatten()
+                .map(|(word, _)| word.clone())
+                .collect(),
+            items: false,
+        };
+    }
+    let bound = Bound::new(&arguments[1..]);
+    let (paths, items) = match command_name(first).as_str() {
+        "write-output" | "echo" | "write" => (bound.positional.concat(), false),
+        "get-item" | "gi" => (bound.values(PATH_PARAMETERS, 0), true),
+        "get-childitem" | "gci" | "ls" | "dir" => {
+            let paths = bound.values(PATH_PARAMETERS, 0);
+            if paths.is_empty() {
+                (vec![".".to_string()], true)
+            } else {
+                (paths, true)
+            }
+        }
+        _ => (Vec::new(), false),
+    };
+    Piped { paths, items }
+}
+
+/// Ends a statement: names its command, adds what it changes, and returns
+/// what it pipes on when `piping`.
+fn end(
+    arguments: &mut Vec<Argument>,
+    input: &Piped,
+    piping: bool,
+    depth: usize,
+    found: &mut Reading,
+    names: &mut Vec<String>,
+) -> Piped {
+    if let Some((word, _)) = arguments.first().and_then(|argument| argument.first()) {
+        names.push(command_name(word));
+    }
+    let changed = changed_at(arguments, input, depth);
+    found.writes.extend(changed.writes);
+    if found.remote_code.is_none() {
+        found.remote_code = changed.remote_code;
+    }
+    let on = if piping {
+        piped(arguments)
+    } else {
+        Piped::default()
+    };
+    arguments.clear();
+    on
 }
 
 /// Read a PowerShell `command` for the writes and downloads it names.
 pub fn read(command: &str) -> Reading {
+    read_at(command, 0)
+}
+
+/// Read `command`, code handed over as a string `depth` times.
+fn read_at(command: &str, depth: usize) -> Reading {
     let tokens = tokens(command);
-    let mut writes: Vec<String> = Vec::new();
+    if depth > DEPTH {
+        let writes = tokens
+            .iter()
+            .filter_map(|token| match token {
+                Token::Word(word, _) => file_path(word),
+                _ => None,
+            })
+            .collect();
+        return Reading {
+            writes,
+            remote_code: None,
+        };
+    }
+    // What the statements change, and downloaded code nested code names.
+    let mut found = Reading::default();
     let mut names: Vec<String> = Vec::new();
     let mut arguments: Vec<Argument> = Vec::new();
+    // What the statement before pipes into this one.
+    let mut input = Piped::default();
     let mut joining = false;
-    let flush =
-        |arguments: &mut Vec<Argument>, writes: &mut Vec<String>, names: &mut Vec<String>| {
-            if let Some((word, _)) = arguments.first().and_then(|argument| argument.first()) {
-                names.push(command_name(word));
-            }
-            writes.extend(changed_by(arguments));
-            arguments.clear();
-        };
     let mut at = 0;
     while at < tokens.len() {
         match &tokens[at] {
             Token::Word(word, quoted) => {
-                if let (Some(changes), Some(Token::Open)) =
-                    (dotnet_writes(word), tokens.get(at + 1))
-                {
+                if let (Some(method), Some(Token::Open)) = (dotnet(word), tokens.get(at + 1)) {
                     // The method's arguments, up to its closing parenthesis.
-                    let mut depth = 0;
+                    let mut nesting = 0;
                     let mut position = 0;
                     let mut taken: Vec<Option<String>> = Vec::new();
+                    // The words after its first argument.
+                    let mut rest: Vec<String> = Vec::new();
                     at += 1;
                     while at < tokens.len() {
                         match &tokens[at] {
-                            Token::Open => depth += 1,
+                            Token::Open => nesting += 1,
                             Token::Close => {
-                                depth -= 1;
-                                if depth == 0 {
+                                nesting -= 1;
+                                if nesting == 0 {
                                     break;
                                 }
                             }
-                            Token::Comma if depth == 1 => position += 1,
-                            // An argument's first word: a literal path, or
-                            // the start of an expression.
-                            Token::Word(argument, _) if depth == 1 && taken.len() <= position => {
-                                taken.resize(position + 1, None);
-                                taken[position] = Some(argument.clone());
+                            Token::Comma if nesting == 1 => position += 1,
+                            Token::Word(argument, _) => {
+                                // An argument's first word: a literal path,
+                                // or the start of an expression.
+                                if nesting == 1 && taken.len() <= position {
+                                    taken.resize(position + 1, None);
+                                    taken[position] = Some(argument.clone());
+                                }
+                                if position > 0 {
+                                    rest.push(argument.clone());
+                                }
                             }
                             _ => {}
                         }
                         at += 1;
                     }
-                    writes.extend(
+                    let changes: &[usize] = match method {
+                        Method::Changes(positions) => positions,
+                        Method::Opens if reads_only(&rest) => &[],
+                        Method::Opens => &[0],
+                    };
+                    found.writes.extend(
                         changes
                             .iter()
                             .filter_map(|position| taken.get(*position).cloned().flatten()),
@@ -594,18 +1106,26 @@ pub fn read(command: &str) -> Reading {
             Token::Comma => joining = true,
             Token::WriteTo => {
                 if let Some(Token::Word(target, _)) = tokens.get(at + 1) {
-                    writes.push(target.clone());
+                    found.writes.push(target.clone());
                     at += 1;
                 }
             }
-            Token::Pipe | Token::Break | Token::Open | Token::Close => {
-                flush(&mut arguments, &mut writes, &mut names);
+            token => {
+                let piping = *token == Token::Pipe;
+                input = end(
+                    &mut arguments,
+                    &input,
+                    piping,
+                    depth,
+                    &mut found,
+                    &mut names,
+                );
                 joining = false;
             }
         }
         at += 1;
     }
-    flush(&mut arguments, &mut writes, &mut names);
+    end(&mut arguments, &input, false, depth, &mut found, &mut names);
 
     // Downloaded code handed to `Invoke-Expression`, in either order:
     // `irm x | iex`, `iex (irm x)`, `iex ((New-Object Net.WebClient)
@@ -626,11 +1146,16 @@ pub fn read(command: &str) -> Reading {
         )),
         _ => None,
     };
-    let mut writes: Vec<String> = writes.iter().filter_map(|path| file_path(path)).collect();
-    writes.dedup();
+    let mut seen = HashSet::new();
+    let writes = found
+        .writes
+        .iter()
+        .filter_map(|path| file_path(path))
+        .filter(|path| seen.insert(path.clone()))
+        .collect();
     Reading {
         writes,
-        remote_code,
+        remote_code: remote_code.or(found.remote_code),
     }
 }
 
@@ -684,10 +1209,17 @@ mod tests {
             writes("Move-Item check.sh old.sh"),
             ["check.sh", "old.sh", "old.sh/check.sh"]
         );
+        // Into a directory, only what lands in it; one source to a name
+        // that may be a file, both.
         assert_eq!(
             writes("Copy-Item -Path C:\\tmp\\fake.sh -Destination tests\\"),
-            ["tests/", "tests/fake.sh"]
+            ["tests/fake.sh"]
         );
+        assert_eq!(
+            writes("Copy-Item a.sh, b.sh tests"),
+            ["tests/a.sh", "tests/b.sh"]
+        );
+        assert_eq!(writes("Copy-Item x.sh tests"), ["tests", "tests/x.sh"]);
         assert_eq!(
             writes("Rename-Item -LiteralPath tests\\check.sh old.sh"),
             ["tests/check.sh", "tests/old.sh"]
@@ -784,5 +1316,151 @@ mod tests {
         for (command, expected) in cases {
             assert_eq!(read(command).remote_code.as_deref(), expected, "{command}");
         }
+    }
+
+    /// Commands measured as allowed by flot 0.2.6, each with a path it
+    /// must name.
+    const WRITERS: &[(&str, &str)] = &[
+        (
+            "Remove-Item -ErrorAction SilentlyContinue check.sh",
+            "check.sh",
+        ),
+        ("Remove-Item -ea 0 check.sh", "check.sh"),
+        (
+            "Set-Content -ErrorAction Stop check.sh 'exit 0'",
+            "check.sh",
+        ),
+        (
+            "Set-Content -WarningAction:Ignore -OutVariable o check.sh x",
+            "check.sh",
+        ),
+        ("Remove-Item -Frobnicate x check.sh", "check.sh"),
+        ("Remove-Item -Verbose -WhatIf check.sh", "check.sh"),
+        ("'check.sh' | Remove-Item", "check.sh"),
+        ("'a.sh', 'check.sh' | Remove-Item -Force", "check.sh"),
+        ("Get-ChildItem tests | Remove-Item -Recurse", "tests"),
+        ("cmd /c del check.sh", "check.sh"),
+        ("cmd.exe /s /c \"del /q check.sh\"", "check.sh"),
+        ("cmd /c \"echo exit 0 > check.sh\"", "check.sh"),
+        ("cmd /c \"copy /y x.sh check.sh\"", "check.sh"),
+        ("cmd /c \"ren check.sh old.sh\"", "check.sh"),
+        ("cmd /c \"rd /s /q tests\"", "tests"),
+        ("cmd /c \"copy C:\\tmp\\fake tests\\\"", "tests/"),
+        ("cmd /c \"xcopy /e /y C:\\tmp\\fake tests\\\"", "tests/"),
+        ("cmd /c robocopy C:\\tmp\\fake tests /mir", "tests"),
+        ("cmd /c \"cd x & git checkout -- check.sh\"", "check.sh"),
+        ("powershell -Command \"Remove-Item check.sh\"", "check.sh"),
+        (
+            "pwsh -NoProfile -ExecutionPolicy Bypass -c 'Set-Content check.sh x'",
+            "check.sh",
+        ),
+        ("powershell.exe \"Remove-Item check.sh\"", "check.sh"),
+        ("iex \"Remove-Item check.sh\"", "check.sh"),
+        (
+            "Invoke-Expression -Command 'Remove-Item check.sh'",
+            "check.sh",
+        ),
+        ("[IO.File]::OpenWrite('check.sh')", "check.sh"),
+        ("[IO.StreamWriter]::new('check.sh')", "check.sh"),
+        (
+            "[System.IO.File]::AppendAllText('check.sh', 'x')",
+            "check.sh",
+        ),
+        ("[IO.File]::Open('check.sh', 'Create')", "check.sh"),
+        (
+            "[IO.File]::Open('check.sh', [IO.FileMode]::Open)",
+            "check.sh",
+        ),
+        (
+            "[IO.FileStream]::new('check.sh', 'Truncate', 'Write')",
+            "check.sh",
+        ),
+        (
+            "[IO.File]::SetLastWriteTime('check.sh', (Get-Date))",
+            "check.sh",
+        ),
+        (
+            "[IO.File]::WriteAllText(\"$PWD\\check.sh\", 'x')",
+            "$PWD/check.sh",
+        ),
+        ("Set-Content FileSystem::check.sh 'exit 0'", "check.sh"),
+        (
+            "Set-Content Microsoft.PowerShell.Core\\FileSystem::check.sh x",
+            "check.sh",
+        ),
+        ("curl.exe -o check.sh https://x.example/p", "check.sh"),
+        ("bash -c 'rm check.sh'", "check.sh"),
+        ("Clear-Item check.sh", "check.sh"),
+        ("Clear-Content check.sh", "check.sh"),
+        ("'x' | Out-File check.sh", "check.sh"),
+        ("Add-Content check.sh x", "check.sh"),
+        ("New-Item -Force check.sh", "check.sh"),
+        ("Set-Content *.sh x", "*.sh"),
+        ("Remove-Item -Recurse tests", "tests"),
+    ];
+
+    #[test]
+    fn common_parameters_take_their_values() {
+        assert_eq!(
+            writes("Remove-Item -ErrorAction SilentlyContinue check.sh"),
+            ["check.sh"]
+        );
+        assert_eq!(
+            writes("Remove-Item -ea 0 -WarningVariable w check.sh"),
+            ["check.sh"]
+        );
+        assert_eq!(
+            writes("Set-Content -OutVariable o check.sh x"),
+            ["check.sh"]
+        );
+        // Not known, the parameter may take the path or a value.
+        assert_eq!(
+            writes("Remove-Item -Frobnicate x check.sh"),
+            ["x", "check.sh"]
+        );
+    }
+
+    #[test]
+    fn the_probe_commands_name_what_they_write() {
+        let missed: Vec<String> = WRITERS
+            .iter()
+            .filter_map(|(command, path)| {
+                let found = writes(command);
+                (!found.iter().any(|written| written == path))
+                    .then(|| format!("{command:?} names {found:?}, not {path:?}"))
+            })
+            .collect();
+        assert!(missed.is_empty(), "{}", missed.join("\n"));
+    }
+
+    #[test]
+    fn reading_commands_do_not_name_what_they_read() {
+        let named: Vec<String> = [
+            "Get-Content -ErrorAction Stop check.sh",
+            "[IO.File]::ReadAllText('check.sh')",
+            "[System.IO.File]::Exists('check.sh')",
+            "[IO.File]::Open('check.sh', 'Open', 'Read')",
+            "[IO.FileStream]::new('check.sh', [IO.FileMode]::Open, [IO.FileAccess]::Read)",
+            "[IO.StreamReader]::new('check.sh')",
+            "[IO.Path]::Combine('tests', 'check.sh')",
+            "Test-Path check.sh",
+            "Get-Item check.sh | Select-Object Name",
+            "'check.sh' | Select-String exit",
+            "cmd /c type check.sh",
+            "cmd /c \"echo check.sh > nul\"",
+            "powershell -Command \"Get-Content check.sh\"",
+            "pwsh -File check.ps1",
+            "iex 'Get-Content check.sh'",
+        ]
+        .iter()
+        .filter_map(|command| {
+            let found = writes(command);
+            found
+                .iter()
+                .any(|path| path == "check.sh" || path == "tests" || path.starts_with("tests/"))
+                .then(|| format!("{command:?} names {found:?}"))
+        })
+        .collect();
+        assert!(named.is_empty(), "{}", named.join("\n"));
     }
 }

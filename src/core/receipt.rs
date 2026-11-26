@@ -449,6 +449,10 @@ pub struct RunManifest {
     /// Fold of the ordered step receipt ids. Deterministic flows reproduce it.
     pub root_digest: String,
     pub verdict: Verdict,
+    /// Set when the run selected only some of the flow's steps: its verdict
+    /// speaks for those, not for the flow. Absent from a run of every step.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub partial: Option<Partial>,
     pub steps: Vec<RunStep>,
     pub claims: ClaimCounts,
     pub limitations: Vec<String>,
@@ -465,6 +469,15 @@ pub struct RunManifest {
     /// executed here finished, up to the end of this one.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub refusals: Vec<Refusal>,
+}
+
+/// How many of a flow's steps a run selected, when not all of them: the step
+/// asked for and every step it needs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Partial {
+    pub selected: usize,
+    /// The steps the flow has.
+    pub of: usize,
 }
 
 /// An edit or a shell command the guard refused an agent.
@@ -516,6 +529,25 @@ impl RunManifest {
                 "run id `{}` is not derived from its start time and root",
                 self.run_id
             ));
+        }
+        // Whether a run selected every step cannot be read off its receipts;
+        // a signature covers that. What can be checked is that a selection
+        // lists the steps it names and leaves some out.
+        if let Some(partial) = self.partial {
+            if partial.selected >= partial.of {
+                found.push(format!(
+                    "partial run of {} of {} steps leaves no step out",
+                    partial.selected, partial.of
+                ));
+            }
+            if partial.selected != self.steps.len() {
+                found.push(format!(
+                    "partial run of {} of {} steps lists {} step(s)",
+                    partial.selected,
+                    partial.of,
+                    self.steps.len()
+                ));
+            }
         }
         let mut seen = std::collections::BTreeSet::new();
         let mut statuses = Vec::new();
@@ -1139,6 +1171,7 @@ mod tests {
             flow_digest: String::new(),
             root_digest,
             verdict: verdict_for(&steps, receipt.claim_counts()),
+            partial: None,
             claims: receipt.claim_counts(),
             limitations: receipt
                 .identity
@@ -1168,6 +1201,35 @@ mod tests {
             Observed::default(),
         )]);
         manifest.disagreements(&receipts, &observations)
+    }
+
+    #[test]
+    fn a_selection_lists_the_steps_it_names_and_a_signature_covers_it() {
+        let receipt = Receipt::seal(identity("a", "out"), Observed::default());
+        let mut partial = coherent(&receipt);
+        partial.partial = Some(Partial { selected: 1, of: 2 });
+        assert_eq!(judge(&partial, &receipt), Vec::<String>::new());
+        // A run of every step records no selection, so its bytes are as
+        // they were before selections were recorded.
+        assert!(!serde_json::to_string(&coherent(&receipt))
+            .unwrap()
+            .contains("partial"));
+
+        for (selected, of, expected) in [
+            (1, 1, "partial run of 1 of 1 steps leaves no step out"),
+            (2, 3, "partial run of 2 of 3 steps lists 1 step(s)"),
+        ] {
+            let mut forged = coherent(&receipt);
+            forged.partial = Some(Partial { selected, of });
+            assert_eq!(judge(&forged, &receipt), vec![expected.to_string()]);
+        }
+
+        // Dropping the selection from a signed run breaks the signature.
+        let attestation = crate::core::attest::sign(&[7; 32], &partial);
+        assert_eq!(crate::core::attest::check(&attestation, &partial), Ok(()));
+        let mut whole = partial.clone();
+        whole.partial = None;
+        assert!(crate::core::attest::check(&attestation, &whole).is_err());
     }
 
     #[test]

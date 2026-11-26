@@ -7,18 +7,89 @@ use crate::core::attest::{self, Authorship, Endorsements, SignerCheck, VouchedSt
 use crate::core::digest;
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::core::receipt::{Observed, Receipt, RunManifest, Verdict};
+use crate::core::receipt::{Observed, Partial, Receipt, RunManifest, Verdict};
 use crate::engine::baseline::Baseline;
 use crate::service::keys;
 use crate::store::Store;
 
+/// A run in one word, worst first: what to act on, and what the exit code of
+/// `flot verify` says (`flot run` and `flot show` say it of the run as
+/// recorded).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Outcome {
+    /// The evidence does not authenticate; the verdict is only what the
+    /// altered record says.
+    Broken,
+    /// A step failed, timed out, or a claim was refuted.
+    Failed,
+    /// A claim has no proof, or the proofs differ from the revision they are
+    /// held to.
+    Unverified,
+    /// Every selected step passed, but the run selected only some of the
+    /// flow's steps: it says nothing of the others.
+    Partial,
+    /// Every step of the flow passed with every claim proven, and the
+    /// evidence authenticates.
+    Passed,
+}
+
+impl Outcome {
+    /// A run as it was recorded, before anything re-checks it.
+    pub fn of_run(manifest: &RunManifest) -> Outcome {
+        result_of(true, manifest.verdict, manifest.partial, None)
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Outcome::Broken => "broken",
+            Outcome::Failed => "failed",
+            Outcome::Unverified => "unverified",
+            Outcome::Partial => "partial",
+            Outcome::Passed => "passed",
+        }
+    }
+
+    /// `0` passed, `1` failed or broken, `2` unverified or partial.
+    pub fn exit_code(self) -> u8 {
+        match self {
+            Outcome::Passed => 0,
+            Outcome::Broken | Outcome::Failed => 1,
+            Outcome::Unverified | Outcome::Partial => 2,
+        }
+    }
+}
+
+/// The one rule for [`Outcome`]: the worst of what holds.
+fn result_of(
+    intact: bool,
+    verdict: Verdict,
+    partial: Option<Partial>,
+    anchor: Option<&Anchor>,
+) -> Outcome {
+    match verdict {
+        _ if !intact => Outcome::Broken,
+        Verdict::Failed => Outcome::Failed,
+        Verdict::Unverified => Outcome::Unverified,
+        Verdict::Passed if anchor.is_some_and(|anchor| !anchor.holds()) => Outcome::Unverified,
+        Verdict::Passed if partial.is_some() => Outcome::Partial,
+        Verdict::Passed => Outcome::Passed,
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct Audit {
     pub run_id: String,
+    /// Integrity, verdict, selection and anchor in one word. Kept in step
+    /// with the anchor: only [`Audit::hold_to`] sets one.
+    result: Outcome,
     pub intact: bool,
     pub root_digest: String,
     pub recomputed_root: String,
     pub verdict: Verdict,
+    /// Set when the run selected only some of the flow's steps.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub partial: Option<Partial>,
     pub checked_receipts: usize,
     pub findings: Vec<String>,
     /// Who vouched for this run, judged against this store's trust list. A
@@ -32,7 +103,23 @@ pub struct Audit {
     pub vouched: Vec<VouchedStep>,
     /// How the run's proofs compare with a revision, when checked against one.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub anchor: Option<Anchor>,
+    anchor: Option<Anchor>,
+}
+
+impl Audit {
+    pub fn result(&self) -> Outcome {
+        self.result
+    }
+
+    pub fn anchor(&self) -> Option<&Anchor> {
+        self.anchor.as_ref()
+    }
+
+    /// Hold the run's proofs to a revision; the result follows.
+    pub fn hold_to(&mut self, anchor: Anchor) {
+        self.result = result_of(self.intact, self.verdict, self.partial, Some(&anchor));
+        self.anchor = Some(anchor);
+    }
 }
 
 /// A recorded run's proofs held to a git revision.
@@ -178,12 +265,15 @@ pub fn audit(store: &Store, manifest: &RunManifest) -> Result<Audit> {
         ));
     }
 
+    let intact = findings.is_empty();
     Ok(Audit {
         run_id: manifest.run_id.clone(),
-        intact: findings.is_empty(),
+        result: result_of(intact, manifest.verdict, manifest.partial, None),
+        intact,
         root_digest: manifest.root_digest.clone(),
         recomputed_root,
         verdict: manifest.verdict,
+        partial: manifest.partial,
         checked_receipts: checked,
         findings,
         authorship,
@@ -221,4 +311,52 @@ pub fn vouched(store: &Store, manifest: &RunManifest) -> Result<Vec<VouchedStep>
         &store.trusted_keys()?,
         &endorsements,
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn anchor(holds: bool) -> Anchor {
+        Anchor {
+            baseline: "main (1a2b)".into(),
+            drifted: Vec::new(),
+            missing: if holds { Vec::new() } else { vec!["b".into()] },
+            unread: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn the_result_is_the_worst_that_holds() {
+        let some = Some(Partial { selected: 1, of: 2 });
+        let (holds, differs) = (anchor(true), anchor(false));
+        let (holds, differs) = (Some(&holds), Some(&differs));
+        for (intact, verdict, partial, anchor, expected) in [
+            (true, Verdict::Passed, None, None, Outcome::Passed),
+            (true, Verdict::Passed, None, holds, Outcome::Passed),
+            (true, Verdict::Passed, some, None, Outcome::Partial),
+            (true, Verdict::Passed, some, holds, Outcome::Partial),
+            (true, Verdict::Passed, None, differs, Outcome::Unverified),
+            (true, Verdict::Passed, some, differs, Outcome::Unverified),
+            (true, Verdict::Unverified, some, None, Outcome::Unverified),
+            (true, Verdict::Failed, some, differs, Outcome::Failed),
+            (false, Verdict::Passed, None, None, Outcome::Broken),
+            (false, Verdict::Failed, some, None, Outcome::Broken),
+        ] {
+            assert_eq!(
+                result_of(intact, verdict, partial, anchor),
+                expected,
+                "{intact} {verdict:?} {partial:?}"
+            );
+        }
+        // A whole run exits as its verdict always did.
+        for verdict in [Verdict::Passed, Verdict::Unverified, Verdict::Failed] {
+            assert_eq!(
+                i32::from(result_of(true, verdict, None, None).exit_code()),
+                verdict.exit_code()
+            );
+        }
+        assert_eq!(Outcome::Partial.exit_code(), 2);
+        assert_eq!(Outcome::Broken.exit_code(), 1);
+    }
 }

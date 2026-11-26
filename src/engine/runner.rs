@@ -564,6 +564,25 @@ impl<'a> Runner<'a> {
         let mut silent: Vec<String> = Vec::new();
         let mut unpriced: Vec<String> = Vec::new();
         let mut limitations: Vec<String> = Vec::new();
+        // Held to no revision, a proof can be edited along with the work it
+        // judges; what it read last time here is the one thing to compare.
+        let proofs_before = match self.baseline {
+            Some(_) => HashMap::new(),
+            None => {
+                // Only a step with a proof has one to compare, and the store
+                // is read until each such step is found.
+                let proven: Vec<String> = order
+                    .iter()
+                    .filter(|step_id| {
+                        self.flow
+                            .step(step_id)
+                            .is_some_and(|step| step.verify.is_some())
+                    })
+                    .cloned()
+                    .collect();
+                self.proofs_before(&proven)
+            }
+        };
 
         // Assemble in dependency order, never in completion order: the run root
         // must not depend on which worker finished first.
@@ -575,6 +594,15 @@ impl<'a> Runner<'a> {
             let cached = entry.cached;
             let mut step_limitations = receipt.identity.limitations.clone();
             step_limitations.extend(entry.notes.iter().cloned());
+            if let Some((run_id, Some(earlier))) = proofs_before.get(step_id) {
+                let changed = proof_changes(earlier, &receipt.identity);
+                if !changed.is_empty() {
+                    step_limitations.push(format!(
+                        "its proof changed since run {run_id} ({}); read the change before trusting the verdict",
+                        changed.join(", ")
+                    ));
+                }
+            }
             let counts = receipt.claim_counts();
             totals.add(counts);
             let mut attempts = Vec::new();
@@ -717,12 +745,27 @@ impl<'a> Runner<'a> {
                     missing.join(", ")
                 ));
             }
+        } else if order.iter().any(|step_id| {
+            self.flow
+                .step(step_id)
+                .is_some_and(|step| step.verify.is_some())
+        }) {
+            limitations.push(
+                "proofs are held to no revision: an edited proof passes here; set proofs_from (flows.md#proofs-from-a-revision)"
+                    .into(),
+            );
         }
-        if order.len() < self.flow.steps.len() {
+        // A selection that leaves steps out is recorded, so no report reads
+        // its verdict as the flow's.
+        let partial =
+            (order.len() < self.flow.steps.len()).then_some(crate::core::receipt::Partial {
+                selected: order.len(),
+                of: self.flow.steps.len(),
+            });
+        if let Some(partial) = partial {
             limitations.push(format!(
                 "partial run: {} of {} steps selected",
-                order.len(),
-                self.flow.steps.len()
+                partial.selected, partial.of
             ));
         }
         if let Some(ceiling) = ceiling_micro_usd {
@@ -778,6 +821,7 @@ impl<'a> Runner<'a> {
             flow_digest: self.flow.digest(),
             root_digest,
             verdict,
+            partial,
             steps: manifest_steps,
             claims: totals,
             limitations,
@@ -1639,6 +1683,8 @@ impl<'a> Runner<'a> {
                 "a process that left the step's process group still held its output; captured output may be incomplete".into(),
             );
         }
+        // Processes that left their group, from the step and from its proofs.
+        let mut escaped = outcome.escaped.clone();
 
         let mut tolerated = false;
         let status = if outcome.timed_out {
@@ -1769,6 +1815,7 @@ impl<'a> Runner<'a> {
                         timeout,
                         budget.max_output_bytes,
                         stop,
+                        &mut escaped,
                     ) {
                         Err(error) => ProofOutcome::Failed(format!("{error:#}")),
                         Ok((proof, proof_metrics, proof_notes)) => {
@@ -1804,13 +1851,52 @@ impl<'a> Runner<'a> {
                 .any(|claim| claim.status == ClaimStatus::Verified)
         {
             let (red, red_metrics, red_notes) =
-                self.red(step, timeout, budget.max_output_bytes, stop);
+                self.red(step, timeout, budget.max_output_bytes, stop, &mut escaped);
             step_metrics = match (step_metrics, red_metrics) {
                 (Some(step), Some(red)) => Some(step.plus(red)),
                 (step, red) => step.or(red),
             };
             metrics_notes.extend(red_notes);
             claims = claims::hold_before(claims, red, &mut limitations);
+        }
+        if !escaped.is_empty() {
+            // It may still have been at work while the proof ran, or after:
+            // whatever the proof said is not evidence.
+            let pids = |traced: bool| -> Option<String> {
+                let mut pids: Vec<u32> = escaped
+                    .iter()
+                    .filter(|escapee| escapee.traced == traced)
+                    .map(|escapee| escapee.pid)
+                    .collect();
+                pids.sort_unstable();
+                pids.dedup();
+                let named: Vec<String> = pids.iter().map(u32::to_string).collect();
+                (!named.is_empty()).then(|| {
+                    format!(
+                        "{} {}",
+                        if named.len() == 1 { "pid" } else { "pids" },
+                        named.join(", ")
+                    )
+                })
+            };
+            if let Some(pids) = pids(true) {
+                limitations.push(format!(
+                    "a process it started left its process group and was stopped ({pids})"
+                ));
+            }
+            if let Some(pids) = pids(false) {
+                limitations.push(format!(
+                    "a process that left its process group was stopped while this step ran ({pids}); nothing tells which step started it, so each step running then answers for it"
+                ));
+            }
+            // A refutation stands: the step is not let off by what escaped.
+            for claim in &mut claims {
+                if claim.status == ClaimStatus::Verified {
+                    claim.status = ClaimStatus::Unverified;
+                    claim.reason =
+                        Some("a process left its process group while the step ran".into());
+                }
+            }
         }
 
         let (stdout_inline, stdout_truncated) =
@@ -1908,6 +1994,42 @@ impl<'a> Runner<'a> {
         kept
     }
 
+    /// For each of `steps`, the newest run executed here that has it, and its
+    /// receipt there (`None` when that receipt is unreadable). Imported runs
+    /// are not this host's, and a run of another flow is not this step's.
+    fn proofs_before(
+        &self,
+        steps: &[String],
+    ) -> HashMap<String, (String, Option<ReceiptIdentity>)> {
+        let mut found = HashMap::new();
+        for run_id in self.store.list_runs().unwrap_or_default() {
+            if found.len() == steps.len() {
+                break;
+            }
+            if self.store.is_imported(&run_id) {
+                continue;
+            }
+            let Ok(run) = self.store.resolve_run(&run_id) else {
+                continue;
+            };
+            if run.flow != self.flow.meta.name {
+                continue;
+            }
+            for entry in run.steps {
+                if found.contains_key(&entry.step_id) || !steps.contains(&entry.step_id) {
+                    continue;
+                }
+                let earlier = self
+                    .store
+                    .load_receipt(&entry.receipt_id)
+                    .ok()
+                    .map(|receipt| receipt.identity);
+                found.insert(entry.step_id, (run_id.clone(), earlier));
+            }
+        }
+        found
+    }
+
     /// Recorded outputs that now differ from what was recorded, or that are
     /// gone, and files matching an output pattern that appeared since.
     fn changed_outputs(&self, step: &Step, recorded: &[FileDigest]) -> Vec<String> {
@@ -1951,6 +2073,7 @@ impl<'a> Runner<'a> {
         timeout: Duration,
         max_output_bytes: usize,
         stop: &exec::StopSignal,
+        escaped: &mut Vec<exec::Escaped>,
     ) -> (Red, Option<Metrics>, Vec<String>) {
         let Some(baseline) = self.baseline else {
             return (Red::NoRevision, None, Vec::new());
@@ -1962,8 +2085,15 @@ impl<'a> Runner<'a> {
         let mut spent: Option<Metrics> = None;
         let mut notes = Vec::new();
         let mut prove = |place: &Path| -> Result<Proof> {
-            let (proof, metrics, proof_notes) =
-                self.prove(step, command, place, timeout, max_output_bytes, stop)?;
+            let (proof, metrics, proof_notes) = self.prove(
+                step,
+                command,
+                place,
+                timeout,
+                max_output_bytes,
+                stop,
+                escaped,
+            )?;
             spent = match (spent.take(), metrics) {
                 (Some(spent), Some(more)) => Some(spent.plus(more)),
                 (spent, more) => spent.or(more),
@@ -2002,7 +2132,9 @@ impl<'a> Runner<'a> {
     /// Run a proof command in `place`, the flow root or a copy of it, and
     /// keep its combined output as evidence. A proof can spend too, an agent
     /// asked to review for instance, so it reports through its own
-    /// `$FLOT_METRICS`, counted as the step's spend.
+    /// `$FLOT_METRICS`, counted as the step's spend. Processes it started
+    /// that left its process group are added to `escaped`.
+    #[allow(clippy::too_many_arguments)]
     fn prove(
         &self,
         step: &Step,
@@ -2011,6 +2143,7 @@ impl<'a> Runner<'a> {
         timeout: Duration,
         max_output_bytes: usize,
         stop: &exec::StopSignal,
+        escaped: &mut Vec<exec::Escaped>,
     ) -> Result<(Proof, Option<Metrics>, Vec<String>)> {
         let (mut env, metrics_path) = self.metered_env(step)?;
         if place != self.root {
@@ -2025,6 +2158,7 @@ impl<'a> Runner<'a> {
         }
         let verification = exec::run_command(command, place, &env, timeout, max_output_bytes, stop)
             .with_context(|| format!("verify command for step `{}` could not start", step.id))?;
+        escaped.extend(verification.escaped.iter().cloned());
         let (metrics, notes) = read_metrics(&metrics_path);
         let notes = notes
             .into_iter()
@@ -2049,6 +2183,33 @@ impl<'a> Runner<'a> {
 }
 
 /// How one attempt ended, in a word or two: `held`, or why not.
+/// What differs between the proofs two receipts of a step record: the files
+/// it read, its command and its claims. A command neither receipt records is
+/// not compared.
+fn proof_changes(earlier: &ReceiptIdentity, now: &ReceiptIdentity) -> Vec<String> {
+    let mut changed = keying::changed_paths(&earlier.verify_inputs, &now.verify_inputs);
+    let command = |identity: &ReceiptIdentity| {
+        identity
+            .claims
+            .iter()
+            .find_map(|claim| claim.verify_command.clone())
+    };
+    if let (Some(before), Some(after)) = (command(earlier), command(now)) {
+        if before != after {
+            changed.push("the verify command".into());
+        }
+    }
+    if !earlier
+        .claims
+        .iter()
+        .map(|claim| &claim.text)
+        .eq(now.claims.iter().map(|claim| &claim.text))
+    {
+        changed.push("the claims".into());
+    }
+    changed
+}
+
 fn outcome(receipt: &Receipt) -> String {
     let counts = receipt.claim_counts();
     if !receipt.identity.status.is_ok() {

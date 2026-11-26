@@ -53,6 +53,18 @@ impl Output {
         self
     }
 
+    /// A run of some of the flow's steps, each of which passed: not a pass.
+    fn partial(&self) -> &Self {
+        assert!(
+            self.code == 2,
+            "expected exit 2 for a partial run, got {}\nstdout:\n{}\nstderr:\n{}",
+            self.code,
+            self.stdout,
+            self.stderr
+        );
+        self
+    }
+
     fn has(&self, needle: &str) -> &Self {
         assert!(
             self.stdout.contains(needle) || self.stderr.contains(needle),
@@ -486,10 +498,10 @@ id = "unrelated"
 run = "touch unrelated-ran.txt"
 "#,
     );
-    project.flot(&["run", "--only", "second"]).ok();
+    project.flot(&["run", "--only", "second"]).partial();
     assert!(!project.path().join("unrelated-ran.txt").exists());
     let show = project.flot(&["show", "--json"]);
-    show.ok();
+    show.partial();
     let steps = show.json()["steps"].as_array().unwrap().len();
     assert_eq!(steps, 2);
     show.has("partial run");
@@ -3723,7 +3735,7 @@ fn a_proof_that_passes_before_the_change_proves_nothing() {
         .replace("fails_before = true\n", "");
     let plain = Project::new(&unchecked);
     plain.write("check.sh", "true\n");
-    plain.flot(&["run", "--only", "edited"]).ok();
+    plain.flot(&["run", "--only", "edited"]).partial();
     plain.write("flot.toml", &RED.replace("proofs_from = \"main\"\n", ""));
     plain
         .flot(&["run", "--only", "edited"])
@@ -3848,6 +3860,258 @@ fn a_proof_that_differs_from_the_baseline_proves_nothing() {
     let missing = project.flot(&["run", "--proofs-from", "nowhere"]);
     assert_eq!(missing.code, 4, "{}", missing.stderr);
     missing.has("which is not a commit in this repository");
+}
+
+#[test]
+fn a_proof_held_to_no_revision_says_so_and_names_what_changed_in_it() {
+    let project = Project::new(&ANCHORED.replace("proofs_from = \"main\"\n", ""));
+    project.write("check.sh", "grep -q 1 out.txt\n");
+    let first = project.flot(&["run"]);
+    first
+        .ok()
+        .has("  - proofs are held to no revision: an edited proof passes here; set proofs_from (flows.md#proofs-from-a-revision)")
+        .lacks("its proof changed since");
+    assert_eq!(first.stdout.matches("held to no revision").count(), 1);
+    let before = run_id(&project);
+
+    // The proof is weakened along with the work: the run still passes, and
+    // names the change for whoever reads it.
+    project.write("check.sh", "exit 0\n");
+    let weakened = project.flot(&["run"]);
+    weakened.ok().has(&format!(
+        "  - work: its proof changed since run {before} (check.sh); read the change before trusting the verdict"
+    ));
+    let weakened_id = run_id(&project);
+    project
+        .flot(&["show", &weakened_id])
+        .has(&format!("its proof changed since run {before}"));
+    project
+        .flot(&["verify", &weakened_id, "--markdown"])
+        .has("its proof changed since run");
+    // Against the run before it, nothing changed.
+    project.flot(&["run"]).ok().lacks("its proof changed since");
+    // Its command and its claims are the proof too.
+    let unchanged = run_id(&project);
+    project.write(
+        "flot.toml",
+        &ANCHORED
+            .replace("proofs_from = \"main\"\n", "")
+            .replace("verify = \"sh check.sh\"", "verify = \"true\"")
+            .replace("out.txt holds 1", "it ran"),
+    );
+    project.flot(&["run"]).ok().has(&format!(
+        "  - work: its proof changed since run {unchanged} (the verify command, the claims); read the change"
+    ));
+
+    // A flow that proves nothing has no proof to hold.
+    Project::new(TWO_STEPS)
+        .flot(&["run"])
+        .ok()
+        .lacks("held to no revision");
+
+    // Held to a revision, the revision judges the change instead.
+    let anchored = anchored_project();
+    anchored.flot(&["run"]).ok().lacks("held to no revision");
+    anchored.write("check.sh", "true\n");
+    anchored
+        .flot(&["run"])
+        .has("the proof differs from main")
+        .lacks("held to no revision")
+        .lacks("its proof changed since");
+}
+
+#[test]
+fn init_holds_proofs_to_the_remote_default_branch_when_there_is_one() {
+    let seed = tempfile::tempdir().unwrap();
+    git_in(seed.path(), &["init", "-q", "-b", "main"]);
+    std::fs::write(seed.path().join("README"), "seed\n").unwrap();
+    commit(seed.path(), "seed");
+    let remote = tempfile::tempdir().unwrap();
+    let origin = remote.path().join("origin.git");
+    git_in(
+        remote.path(),
+        &[
+            "clone",
+            "-q",
+            "--bare",
+            seed.path().to_str().unwrap(),
+            "origin.git",
+        ],
+    );
+    let project = Project {
+        dir: tempfile::tempdir().unwrap(),
+    };
+    git_in(
+        project.path(),
+        &["clone", "-q", origin.to_str().unwrap(), "."],
+    );
+    project.flot(&["init"]).ok();
+    let flow = read(&project, "flot.toml");
+    assert!(flow.contains("\nproofs_from = \"origin/main\"\n"), "{flow}");
+    // Until the flow is on that branch, nothing it claims is proven.
+    let early = project.flot(&["run"]);
+    assert_eq!(early.code, 2, "{}", early.stdout);
+    early.has("the flow file is not there");
+    commit(project.path(), "flow");
+    git_in(project.path(), &["push", "-q", "origin", "main"]);
+    project
+        .flot(&["run"])
+        .ok()
+        .has("proofs checked against origin/main");
+
+    // No remote to name: the setting is explained, not guessed.
+    let alone = Project {
+        dir: tempfile::tempdir().unwrap(),
+    };
+    git_in(alone.path(), &["init", "-q", "-b", "main"]);
+    alone.flot(&["init"]).ok();
+    let flow = read(&alone, "flot.toml");
+    assert!(
+        flow.contains("\n# proofs_from = \"origin/main\"\n"),
+        "{flow}"
+    );
+    assert!(!flow.contains("\nproofs_from"), "{flow}");
+    alone
+        .flot(&["run"])
+        .ok()
+        .has("proofs are held to no revision");
+}
+
+#[test]
+fn doctor_warns_of_a_proof_that_reads_no_declared_file() {
+    let home = tempfile::tempdir().unwrap();
+    let project = Project::new(&format!(
+        "{PROVEN}\n[[step]]\nid = \"held\"\nrun = \"true\"\nclaims = [\"check.sh passes\"]\nverify = \"sh check.sh\"\nverify_inputs = [\"check.sh\"]\n\n[[step]]\nid = \"bare\"\nrun = \"true\"\nclaims = [\"nothing checks this\"]\n"
+    ));
+    project.write("check.sh", "true\n");
+    let output = Command::new(flot_bin())
+        .args(["doctor"])
+        .current_dir(project.path())
+        .env("HOME", home.path())
+        .env("FLOT_SIGNING_KEY", project.key_path())
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "a warning fails nothing: {stdout}"
+    );
+    assert!(
+        stdout.contains("warn  proof inputs    proof of write reads no declared file, so an edit to it cannot be detected or guarded"),
+        "{stdout}"
+    );
+    assert_eq!(stdout.matches("proof inputs").count(), 1, "{stdout}");
+}
+
+/// A step that waits for its sibling to start, then leaves behind a process
+/// that left its process group.
+#[cfg(target_os = "linux")]
+const ESCAPING: &str = r#"
+[flow]
+name = "escaping"
+
+[[step]]
+id = "leaves"
+run = """
+while [ ! -e .stays ]; do sleep 0.01; done
+env -i setsid sh -c 'touch .left; sleep 3' >/dev/null 2>&1 &
+while [ ! -e .left ]; do sleep 0.01; done
+rm .left
+"""
+claims = ["it ran"]
+verify = "true"
+
+[[step]]
+id = "stays"
+run = "touch .stays; sleep 1; rm .stays"
+claims = ["it ran"]
+verify = "true"
+"#;
+
+#[cfg(target_os = "linux")]
+#[test]
+fn a_process_that_leaves_its_process_group_is_stopped_and_proves_nothing() {
+    let project = Project::new(
+        r#"
+[flow]
+name = "escape"
+
+[[step]]
+id = "work"
+run = """
+echo 1 > out.txt
+setsid sh -c 'touch .left; sleep 1; echo 0 > out.txt' >/dev/null 2>&1 &
+while [ ! -e .left ]; do sleep 0.01; done
+rm .left
+"""
+claims = ["out.txt holds 1"]
+verify = "grep -q 1 out.txt"
+"#,
+    );
+    let run = project.flot(&["run"]);
+    assert_eq!(run.code, 2, "{}", run.stdout);
+    run.has("claims 0v/1u/0r")
+        .has("  - work: a process it started left its process group and was stopped (pid ");
+    std::thread::sleep(std::time::Duration::from_millis(1500));
+    assert_eq!(
+        read(&project, "out.txt"),
+        "1\n",
+        "the escapee outlived the run"
+    );
+
+    // A proof is held to the same: what it leaves behind voids its pass,
+    // and a refutation still stands.
+    for (last, code, claims) in [
+        ("true", 2, "claims 0v/1u/0r"),
+        ("false", 1, "claims 0v/0u/1r"),
+    ] {
+        let proof = Project::new(&format!(
+            r#"
+[flow]
+name = "escape"
+
+[[step]]
+id = "work"
+run = "true"
+claims = ["it ran"]
+verify = """
+setsid sh -c 'touch .left; sleep 3' >/dev/null 2>&1 &
+while [ ! -e .left ]; do sleep 0.01; done
+rm .left
+{last}
+"""
+"#
+        ));
+        let run = proof.flot(&["run"]);
+        assert_eq!(run.code, code, "{}", run.stdout);
+        run.has(claims)
+            .has("  - work: a process it started left its process group and was stopped (pid ");
+    }
+
+    // One that dropped its environment cannot be traced, so every step
+    // running when it was found answers for it.
+    let pair = Project::new(ESCAPING);
+    let untraced = pair.flot(&["run", "--jobs", "2"]);
+    assert_eq!(untraced.code, 2, "{}", untraced.stdout);
+    untraced.has(
+        "  - leaves, stays: a process that left its process group was stopped while this step ran (pid ",
+    );
+    // One that kept it is charged to the step that started it alone.
+    pair.write("flot.toml", &ESCAPING.replace("env -i ", ""));
+    let traced = pair.flot(&["run", "--jobs", "2"]);
+    assert_eq!(traced.code, 2, "{}", traced.stdout);
+    traced
+        .has("  - leaves: a process it started left its process group and was stopped (pid ")
+        .lacks("while this step ran");
+    assert!(
+        traced
+            .stdout
+            .lines()
+            .any(|line| line.starts_with("ran      stays") && line.contains("claims 1v/0u/0r")),
+        "{}",
+        traced.stdout
+    );
 }
 
 #[test]
@@ -4308,6 +4572,593 @@ fn guard_names_the_files_that_prove_the_work() {
     assert_eq!(allowed.ok().stdout.trim(), "");
 }
 
+/// A flow whose proof reads `check.sh` and `tests/accept.sh`, in a
+/// repository with a CI workflow and Claude Code settings.
+const TWO_PROOFS: &str = r#"
+[flow]
+name = "g"
+
+[[step]]
+id = "work"
+run = "echo 1 > out.txt"
+claims = ["out.txt holds 1"]
+verify = "sh check.sh && sh tests/accept.sh"
+verify_inputs = ["check.sh", "tests/accept.sh"]
+"#;
+
+fn two_proofs_project() -> Project {
+    let project = Project::new(TWO_PROOFS);
+    project.write("check.sh", "grep -q 1 out.txt\n");
+    project.write("tests/accept.sh", "grep -q 1 out.txt\n");
+    project.write(".github/workflows/ci.yml", "on: push\n");
+    project.write(".claude/settings.json", "{}\n");
+    git_in(project.path(), &["init", "-q"]);
+    project
+}
+
+/// `flot` run in `dir` with `home` as the home directory, given `stdin`.
+fn flot_from(project: &Project, dir: &Path, home: &Path, args: &[&str], stdin: &str) -> Output {
+    use std::io::Write;
+    let mut child = Command::new(flot_bin())
+        .args(args)
+        .current_dir(dir)
+        .env("HOME", home)
+        .env("USERPROFILE", home)
+        .env("FLOT_SIGNING_KEY", project.key_path())
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("flot runs");
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(stdin.as_bytes())
+        .unwrap();
+    let output = child.wait_with_output().expect("flot runs");
+    Output {
+        code: output.status.code().unwrap_or(-1),
+        stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+    }
+}
+
+/// A Claude Code `PreToolUse` payload: `tool` called with `input` in `cwd`.
+fn hook_payload(cwd: &Path, tool: &str, input: serde_json::Value) -> String {
+    serde_json::json!({ "cwd": cwd, "tool_name": tool, "tool_input": input }).to_string()
+}
+
+#[test]
+fn the_hook_refuses_a_call_it_cannot_judge_where_a_flow_is() {
+    let project = two_proofs_project();
+    let hook = |payload: &str| project.flot_stdin(&["guard", "--hook"], payload);
+    let bash = |command: &str| {
+        hook_payload(
+            project.path(),
+            "Bash",
+            serde_json::json!({ "command": command }),
+        )
+    };
+    // A command cut in the middle of an emoji carries a lone surrogate,
+    // which JSON parsers refuse. It is repaired, and the command judged.
+    for half in ["\\ud83d", "\\ude00", "\\ud83d\\ud83d"] {
+        hook(&bash("rm check.sh # X").replace(" # X", &format!(" # {half}")))
+            .ok()
+            .has("\"permissionDecision\": \"deny\"")
+            .has("check.sh is protected: the proof of step `work` reads it");
+    }
+    // A whole pair stands, and an escaped backslash before `u` is text.
+    for allowed in ["echo \u{1F600} > notes.md", "echo \\ud83d > notes.md"] {
+        let answer = hook(&bash(allowed));
+        assert_eq!(answer.ok().stdout.trim(), "", "{allowed}");
+    }
+    for broken in [
+        "not json".to_string(),
+        serde_json::json!({ "cwd": project.path(), "tool_input": { "command": "true" } })
+            .to_string(),
+        serde_json::json!({ "cwd": project.path(), "tool_name": "Bash" }).to_string(),
+        hook_payload(
+            project.path(),
+            "Edit",
+            serde_json::json!({ "old_string": "a" }),
+        ),
+        hook_payload(project.path(), "Bash", serde_json::json!({ "command": 7 })),
+    ] {
+        hook(&broken)
+            .ok()
+            .has("\"permissionDecision\": \"deny\"")
+            .has("this call cannot be judged");
+    }
+    // Outside any flow, the hook says nothing, whatever it is given.
+    let elsewhere = tempfile::tempdir().unwrap();
+    let outside = flot_from(
+        &project,
+        elsewhere.path(),
+        elsewhere.path(),
+        &["guard", "--hook"],
+        "not json",
+    );
+    assert_eq!(
+        (outside.code, outside.stdout.trim()),
+        (0, ""),
+        "{}",
+        outside.stderr
+    );
+}
+
+#[test]
+fn guard_refuses_a_directory_that_holds_what_proves_the_work() {
+    let project = two_proofs_project();
+    project.write("build/out.o", "x");
+    for (command, named) in [
+        ("rm -rf tests", "tests/accept.sh"),
+        ("rm -rf .github", ".github/workflows"),
+        ("rm -rf .git/hooks", ".git/hooks"),
+        ("rm -rf .git", ".git/config"),
+        ("rm -rf .claude", ".claude/settings.json"),
+        ("rm -rf .", "flot.toml"),
+        ("cp -r /tmp/fake/tests .", "tests/accept.sh"),
+        ("git checkout HEAD~1 -- tests", "tests/accept.sh"),
+    ] {
+        let guarded = project.flot(&["guard", "--command", command]);
+        assert_eq!(guarded.code, 2, "{command}: {}", guarded.stdout);
+        guarded.has(named);
+    }
+    project
+        .flot(&["guard", "tests"])
+        .has("protected  tests: it holds tests/accept.sh: the proof of step `work` reads it");
+    // A new file in such a directory is only that file.
+    project.flot(&["guard", "tests/new.sh"]).ok();
+    project
+        .flot(&["guard", "--command", "cp /tmp/x tests/new.sh"])
+        .ok();
+    project.flot(&["guard", "--command", "rm -rf build"]).ok();
+}
+
+#[test]
+fn a_whole_tree_git_command_is_refused_when_it_would_change_a_proof() {
+    let project = anchored_project();
+    let dir = project.path();
+    // A staged change that is not a proof.
+    project.write("notes.md", "draft\n");
+    git_in(dir, &["add", "notes.md"]);
+    for command in [
+        "git stash",
+        "git stash -u",
+        "git reset --hard",
+        "git checkout -f",
+        "git checkout main",
+    ] {
+        project.flot(&["guard", "--command", command]).ok();
+    }
+    // The proof itself is changed: each of these would put it back.
+    project.write("check.sh", "true\n");
+    for command in [
+        "git stash",
+        "git stash push -u",
+        "git reset --hard",
+        "git reset --hard HEAD",
+        "git checkout -f",
+        "cargo test && git -C . stash",
+    ] {
+        let guarded = project.flot(&["guard", "--command", command]);
+        assert_eq!(guarded.code, 2, "{command}: {}", guarded.stdout);
+        guarded.has("protected  check.sh: the proof of step `work` reads it; `git ");
+    }
+    // Switching keeps the change, so only what differs at the revision counts.
+    project
+        .flot(&["guard", "--command", "git checkout main"])
+        .ok();
+    git_in(dir, &["checkout", "-q", "check.sh"]);
+    git_in(dir, &["checkout", "-q", "-b", "weak"]);
+    project.write("check.sh", "true\n");
+    commit(dir, "weaken");
+    git_in(dir, &["checkout", "-q", "main"]);
+    for command in [
+        "git checkout weak",
+        "git switch weak",
+        "git reset --hard weak",
+    ] {
+        let guarded = project.flot(&["guard", "--command", command]);
+        assert_eq!(guarded.code, 2, "{command}: {}", guarded.stdout);
+        guarded.has("protected  check.sh");
+    }
+    // When git cannot say, the command is refused.
+    let unsure = project.flot(&["guard", "--command", "git reset --hard nowhere"]);
+    assert_eq!(unsure.code, 2, "{}", unsure.stdout);
+    unsure.has("refused    git reset --hard nowhere: git cannot say which files it would change");
+    // The rest of the line is still read.
+    let both = project.flot(&["guard", "--command", "git stash; rm -rf ."]);
+    assert_eq!(both.code, 2, "{}", both.stdout);
+    both.has("protected  .: it holds flot.toml");
+}
+
+#[test]
+fn guard_expands_wildcards_and_braces_against_the_disk() {
+    let project = two_proofs_project();
+    for (command, named) in [
+        ("sed -i s/1/0/ *.sh", "protected  check.sh"),
+        ("rm ch?ck.sh", "protected  check.sh"),
+        ("rm [c]heck.sh", "protected  check.sh"),
+        ("rm tests/*", "protected  tests/accept.sh"),
+        ("mv check.sh{,.bak}", "protected  check.sh"),
+        ("echo 0 > {notes,check}.sh", "protected  check.sh"),
+    ] {
+        let guarded = project.flot(&["guard", "--command", command]);
+        assert_eq!(guarded.code, 2, "{command}: {}", guarded.stdout);
+        guarded.has(named);
+    }
+    for command in ["rm *.txt", "rm notes{1,2}.md", "rm -f build/*"] {
+        project.flot(&["guard", "--command", command]).ok();
+    }
+    let powershell = project.flot(&["guard", "--powershell", "--command", "Remove-Item *.sh"]);
+    assert_eq!(powershell.code, 2, "{}", powershell.stdout);
+    powershell.has("protected  check.sh");
+}
+
+#[test]
+fn guard_judges_the_file_a_path_leads_to() {
+    let project = two_proofs_project();
+    let home = tempfile::tempdir().unwrap();
+    let guard = |command: &str| {
+        flot_from(
+            &project,
+            project.path(),
+            home.path(),
+            &["guard", "--command", command],
+            "",
+        )
+    };
+    for (command, said) in [
+        ("rm \"$PWD/check.sh\"", "protected  check.sh"),
+        ("rm ${PWD}/tests/accept.sh", "protected  tests/accept.sh"),
+        (
+            "echo '{}' > $HOME/.claude/settings.json",
+            "protected  ~/.claude/settings.json",
+        ),
+        (
+            "echo '{}' > ${HOME}/.claude/settings.local.json",
+            "protected  ~/.claude/settings.local.json",
+        ),
+        (
+            "rm ~/.claude/settings.json",
+            "protected  ~/.claude/settings.json",
+        ),
+    ] {
+        let guarded = guard(command);
+        assert_eq!(guarded.code, 2, "{command}: {}", guarded.stdout);
+        guarded.has(said);
+    }
+    #[cfg(unix)]
+    {
+        let dir = project.path();
+        std::os::unix::fs::symlink("check.sh", dir.join("alias.sh")).unwrap();
+        std::os::unix::fs::symlink("tests", dir.join("t")).unwrap();
+        std::os::unix::fs::symlink(".claude/settings.local.json", dir.join("local.json")).unwrap();
+        std::fs::hard_link(dir.join("check.sh"), dir.join("h.sh")).unwrap();
+        for (command, said) in [
+            (
+                "echo 'exit 0' > alias.sh",
+                "protected  alias.sh: it leads to check.sh: the proof of step `work` reads it",
+            ),
+            (
+                "rm t/accept.sh",
+                "protected  t/accept.sh: it leads to tests/accept.sh",
+            ),
+            (
+                "echo '{}' > local.json",
+                "protected  local.json: it leads to .claude/settings.local.json",
+            ),
+            (
+                "echo 'exit 0' > h.sh",
+                "protected  h.sh: it is a hard link to check.sh: the proof of step `work` reads it",
+            ),
+        ] {
+            let guarded = guard(command);
+            assert_eq!(guarded.code, 2, "{command}: {}", guarded.stdout);
+            guarded.has(said);
+        }
+    }
+    #[cfg(any(windows, target_os = "macos"))]
+    {
+        let guarded = project.flot(&["guard", "FLOT.TOML", "Check.SH"]);
+        assert_eq!(guarded.code, 2, "{}", guarded.stdout);
+        guarded
+            .has("protected  FLOT.TOML: it is the flow file")
+            .has("protected  Check.SH: the proof of step `work` reads it");
+    }
+}
+
+#[test]
+fn guard_consults_every_flow_above_a_file() {
+    let project = two_proofs_project();
+    let home = tempfile::tempdir().unwrap();
+    let flot_in =
+        |dir: &Path, args: &[&str], stdin: &str| flot_from(&project, dir, home.path(), args, stdin);
+    // Another flow file inside the project cannot be created...
+    let decoy = project.flot(&["guard", "tests/flot.toml"]);
+    assert_eq!(decoy.code, 2, "{}", decoy.stdout);
+    decoy.has("protected  tests/flot.toml: it would be another flow file");
+    // ...and one that is there does not hide the flow above it.
+    project.write("tests/flot.toml", "[flow]\nname = \"decoy\"\n");
+    let tests = project.path().join("tests");
+    let edit = hook_payload(
+        &tests,
+        "Edit",
+        serde_json::json!({ "file_path": tests.join("accept.sh") }),
+    );
+    flot_in(&tests, &["guard", "--hook"], &edit)
+        .ok()
+        .has("\"permissionDecision\": \"deny\"")
+        .has("tests/accept.sh is protected: the proof of step `work` reads it");
+    let from_tests = flot_in(&tests, &["guard", "accept.sh"], "");
+    assert_eq!(from_tests.code, 2, "{}", from_tests.stdout);
+
+    // Claude Code settings anywhere in the repository, as a subproject
+    // with its own flow names them.
+    project.write(
+        "pkg/flot.toml",
+        "[flow]\nname = \"p\"\n\n[[step]]\nid = \"s\"\nrun = \"true\"\n",
+    );
+    let settings = flot_in(
+        &project.path().join("pkg"),
+        &["guard", ".claude/settings.json"],
+        "",
+    );
+    assert_eq!(settings.code, 2, "{}", settings.stdout);
+    settings.has("protected  pkg/.claude/settings.json: it configures Claude Code");
+    let nested = project.flot(&["guard", "docs/.claude/settings.local.json"]);
+    assert_eq!(nested.code, 2, "{}", nested.stdout);
+
+    // The user's own Claude Code settings and plugins, and the flot that
+    // runs the guard.
+    let plugin = home.path().join(".claude/plugins/flot/hooks/hooks.json");
+    std::fs::create_dir_all(plugin.parent().unwrap()).unwrap();
+    std::fs::write(&plugin, "{}").unwrap();
+    for (path, said) in [
+        (
+            home.path().join(".claude/settings.local.json"),
+            "protected  ~/.claude/settings.local.json: it configures Claude Code for this user",
+        ),
+        (
+            plugin.clone(),
+            "protected  ~/.claude/plugins/flot/hooks/hooks.json: it is a Claude Code plugin",
+        ),
+        (flot_bin(), "it is the flot binary that enforces this guard"),
+    ] {
+        let guarded = flot_in(project.path(), &["guard", path.to_str().unwrap()], "");
+        assert_eq!(guarded.code, 2, "{}", guarded.stdout);
+        guarded.has(said);
+    }
+    let tree = flot_in(
+        project.path(),
+        &["guard", "--command", "rm -rf ~/.claude"],
+        "",
+    );
+    assert_eq!(tree.code, 2, "{}", tree.stdout);
+    tree.has("protected  ~/.claude: it holds ~/.claude/plugins");
+}
+
+#[test]
+fn the_hook_judges_every_tool_that_names_a_path() {
+    let project = two_proofs_project();
+    let hook = |tool: &str, input: serde_json::Value| {
+        project.flot_stdin(
+            &["guard", "--hook"],
+            &hook_payload(project.path(), tool, input),
+        )
+    };
+    let check = project.path().join("check.sh");
+    for (tool, input, said) in [
+        (
+            "mcp__filesystem__write_file",
+            serde_json::json!({ "path": check, "content": "exit 0" }),
+            "check.sh is protected",
+        ),
+        (
+            "mcp__filesystem__edit_file",
+            serde_json::json!({ "path": "check.sh", "edits": [] }),
+            "check.sh is protected",
+        ),
+        (
+            "mcp__filesystem__move_file",
+            serde_json::json!({ "source": "x.sh", "destination": "tests/accept.sh" }),
+            "tests/accept.sh is protected",
+        ),
+        (
+            "mcp__fs__delete",
+            serde_json::json!({ "paths": ["notes.md", "tests"] }),
+            "tests is protected: it holds tests/accept.sh",
+        ),
+        (
+            "mcp__notes__save",
+            serde_json::json!({ "options": { "file": "check.sh" } }),
+            "check.sh is protected",
+        ),
+        (
+            "mcp__x__updateWidget",
+            serde_json::json!({ "target": ".claude/settings.json" }),
+            ".claude/settings.json is protected",
+        ),
+    ] {
+        hook(tool, input)
+            .ok()
+            .has("\"permissionDecision\": \"deny\"")
+            .has(said);
+    }
+    for (tool, input) in [
+        (
+            "mcp__filesystem__read_file",
+            serde_json::json!({ "path": check }),
+        ),
+        (
+            "mcp__filesystem__list_directory",
+            serde_json::json!({ "path": "." }),
+        ),
+        (
+            "mcp__filesystem__directory_tree",
+            serde_json::json!({ "path": "." }),
+        ),
+        (
+            "mcp__filesystem__get_file_info",
+            serde_json::json!({ "path": "check.sh" }),
+        ),
+        (
+            "mcp__filesystem__search_files",
+            serde_json::json!({ "path": ".", "pattern": "x" }),
+        ),
+        (
+            "mcp__filesystem__write_file",
+            serde_json::json!({ "path": "notes.md", "content": "x" }),
+        ),
+        ("Read", serde_json::json!({ "file_path": check })),
+        ("LS", serde_json::json!({ "path": project.path() })),
+        (
+            "Glob",
+            serde_json::json!({ "pattern": "*.sh", "path": project.path() }),
+        ),
+        (
+            "Grep",
+            serde_json::json!({ "pattern": "x", "path": project.path() }),
+        ),
+        (
+            "WebFetch",
+            serde_json::json!({ "url": "https://x.example", "prompt": "x" }),
+        ),
+        ("TodoWrite", serde_json::json!({ "todos": [] })),
+    ] {
+        let answer = hook(tool, input);
+        assert_eq!(answer.ok().stdout.trim(), "", "{tool}");
+    }
+
+    // The plugin's hook is asked about every tool.
+    let hooks: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("plugins/claude-code/hooks/hooks.json"),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(hooks["hooks"]["PreToolUse"][0]["matcher"], ".*");
+
+    // And a transcript is judged as the hook would.
+    let cwd = project.path().to_str().unwrap();
+    let call = |id: &str, name: &str, input: serde_json::Value| {
+        serde_json::json!({
+            "type": "assistant",
+            "cwd": cwd,
+            "timestamp": "2026-11-20T10:00:00.000Z",
+            "message": { "content": [
+                { "type": "tool_use", "id": id, "name": name, "input": input },
+            ] },
+        })
+        .to_string()
+    };
+    let transcript = [
+        call(
+            "m1",
+            "mcp__filesystem__write_file",
+            serde_json::json!({ "path": "check.sh", "content": "exit 0" }),
+        ),
+        call(
+            "m2",
+            "mcp__filesystem__read_file",
+            serde_json::json!({ "path": "check.sh" }),
+        ),
+        call("m3", "TodoWrite", serde_json::json!({ "todos": [] })),
+    ]
+    .join("\n");
+    let transcripts = tempfile::tempdir().unwrap();
+    std::fs::write(transcripts.path().join("s.jsonl"), transcript).unwrap();
+    let replay = project
+        .flot(&[
+            "guard",
+            "--replay",
+            "--json",
+            transcripts.path().to_str().unwrap(),
+        ])
+        .ok()
+        .json();
+    assert_eq!(replay["calls"], 1, "{replay}");
+    assert_eq!(replay["refused"][0]["tool"], "mcp__filesystem__write_file");
+}
+
+#[test]
+fn guard_refuses_the_flot_commands_that_change_whose_evidence_counts() {
+    let project = two_proofs_project();
+    for (command, shape) in [
+        ("flot init --force", "flot init --force"),
+        ("flot trust add me ed25519:AAAA", "flot trust add"),
+        ("flot trust remove me", "flot trust remove"),
+        ("flot trust rotate handover.json", "flot trust rotate"),
+        ("flot key init", "flot key init"),
+        ("flot key rotate", "flot key rotate"),
+        ("flot sign", "flot sign"),
+        ("flot import run.flotbundle.json", "flot import"),
+        ("flot pull --remote origin", "flot pull"),
+        ("flot gc", "flot gc"),
+        ("flot run --proofs-from HEAD", "flot run --proofs-from"),
+        (
+            "flot verify --proofs-from=HEAD latest",
+            "flot verify --proofs-from",
+        ),
+        ("flot -f other.toml run", "flot run -f"),
+        ("flot diff --file other.toml", "flot diff -f"),
+        ("cargo build && ./target/debug/flot gc", "flot gc"),
+        ("sudo -u root flot sign", "flot sign"),
+        ("FLOT_SIGNING_KEY=k timeout 5 flot pull", "flot pull"),
+        ("bash -c 'flot key rotate'", "flot key rotate"),
+    ] {
+        let refused = project.flot(&["guard", "--command", command]);
+        assert_eq!(refused.code, 2, "{command}: {}", refused.stdout);
+        refused.has(&format!(
+            "refused    {shape}: it changes whose evidence counts; ask the user to run it"
+        ));
+    }
+    for command in [
+        "flot run",
+        "flot run --only work -j 2",
+        "flot plan --proofs-from HEAD",
+        "flot --json show",
+        "flot verify",
+        "flot log work",
+        "flot runs",
+        "flot search x",
+        "flot flaky",
+        "flot doctor",
+        "flot guard check.sh",
+        "flot trust list",
+        "flot key show",
+        "flot gc --dry-run",
+        "echo flot gc",
+        "git commit -m 'flot gc'",
+    ] {
+        let allowed = project.flot(&["guard", "--command", command]);
+        assert_eq!(allowed.code, 0, "{command}: {}", allowed.stdout);
+    }
+    for command in [
+        "flot.exe gc",
+        "& flot trust add me k",
+        "C:\\tools\\flot.exe sign",
+    ] {
+        let refused = project.flot(&["guard", "--powershell", "--command", command]);
+        assert_eq!(refused.code, 2, "{command}: {}", refused.stdout);
+    }
+    project
+        .flot_stdin(
+            &["guard", "--hook"],
+            &hook_payload(
+                project.path(),
+                "Bash",
+                serde_json::json!({ "command": "flot init --force" }),
+            ),
+        )
+        .ok()
+        .has("\"permissionDecision\": \"deny\"")
+        .has("`flot init --force` changes whose evidence counts; ask the user to run it");
+}
+
 const SCOPED: &str = r#"
 [flow]
 name = "scoped"
@@ -4337,13 +5188,13 @@ fn a_step_that_changes_files_outside_may_change_fails() {
     project.flot(&["run"]).ok().has("claims 1v/0u/0r");
     project
         .flot(&["run", "--only", "edit"])
-        .ok()
+        .partial()
         .has("cached   edit");
     // A narrower scope did not judge the work, so it does not reuse it.
     project.write("flot.toml", &SCOPED.replace("src/**", "src/lib.txt"));
     project
         .flot(&["run", "--only", "edit"])
-        .ok()
+        .partial()
         .has("ran      edit");
 
     // Outside its scope: a new file, an edit and a deletion are all named; a
@@ -5010,4 +5861,183 @@ fn an_always_step_still_checks_that_its_proof_fails_before_the_change() {
             .has("claims 1v/0u/0r");
         project.flot(&["show"]).ok().has("before the change (");
     }
+}
+
+const SELECTED: &str = r#"
+[flow]
+name = "selected"
+
+[[step]]
+id = "lint"
+run = "true"
+claims = ["lint is clean"]
+verify = "true"
+
+[[step]]
+id = "test"
+run = "false"
+claims = ["the tests pass"]
+verify = "true"
+"#;
+
+/// The newest run's manifest file, made writable.
+fn latest_run_file(project: &Project) -> std::path::PathBuf {
+    let path = project
+        .path()
+        .join(".flot/runs")
+        .join(format!("{}.json", run_id(project)));
+    let mut permissions = std::fs::metadata(&path).unwrap().permissions();
+    #[allow(clippy::permissions_set_readonly_false)]
+    permissions.set_readonly(false);
+    std::fs::set_permissions(&path, permissions).unwrap();
+    path
+}
+
+#[test]
+fn a_partial_run_is_not_a_verdict_on_the_flow() {
+    let project = Project::new(SELECTED);
+    let run = project.flot(&["run", "--only", "lint"]);
+    assert_eq!(run.code, 2, "{}", run.stdout);
+    run.has("\nPARTIAL ")
+        .lacks("PASSED")
+        .has("partial run: 1 of 2 steps selected");
+    let json = project.flot(&["--json", "run", "--only", "lint"]);
+    assert_eq!(json.code, 2, "{}", json.stdout);
+    let json = json.json();
+    assert_eq!(
+        json["manifest"]["partial"],
+        serde_json::json!({ "selected": 1, "of": 2 })
+    );
+    assert_eq!(json["manifest"]["verdict"], "passed");
+    assert_eq!(json["result"], "partial");
+
+    let verified = project.flot(&["verify"]);
+    assert_eq!(verified.code, 2, "{}", verified.stdout);
+    verified
+        .has("integrity: intact")
+        .has("verdict partial (1 of 2 steps selected, and they passed)\n");
+    let audit = project.flot(&["--json", "verify"]);
+    assert_eq!(audit.code, 2);
+    let audit = audit.json();
+    assert_eq!(audit["result"], "partial");
+    assert_eq!(audit["partial"]["of"], 2);
+    let markdown = project.flot(&["verify", "--markdown"]);
+    assert_eq!(markdown.code, 2);
+    markdown.has("### flot: partial, 1 of 2 steps selected");
+    let show = project.flot(&["show"]);
+    assert_eq!(show.code, 2, "{}", show.stdout);
+    show.has("verdict partial (1 of 2 steps selected, and they passed)  claims 1v/0u/0r");
+
+    // A selected step that fails is a failure, partial or not.
+    let failed = project.flot(&["run", "--only", "test"]);
+    assert_eq!(failed.code, 1, "{}", failed.stdout);
+    failed.has("\nFAILED ").lacks("PARTIAL");
+    let verified = project.flot(&["verify"]);
+    assert_eq!(verified.code, 1, "{}", verified.stdout);
+    verified.has("verdict failed (1 of 2 steps selected)\n");
+
+    // The selection is part of what a signature covers.
+    project.flot(&["key", "init"]).ok();
+    let signed = project.flot(&["run", "--only", "lint", "--sign"]);
+    assert_eq!(signed.code, 2, "{}", signed.stdout);
+    let path = latest_run_file(&project);
+    let mut manifest: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    manifest.as_object_mut().unwrap().remove("partial");
+    std::fs::write(&path, serde_json::to_string_pretty(&manifest).unwrap()).unwrap();
+    let dropped = project.flot(&["verify"]);
+    assert_eq!(dropped.code, 1, "{}", dropped.stdout);
+    dropped.has("integrity: BROKEN").has("does not hold");
+
+    // A selection that does not match the steps listed is refused unsigned.
+    let unsigned = Project::new(SELECTED);
+    unsigned.flot(&["run", "--only", "lint"]);
+    let path = latest_run_file(&unsigned);
+    let mut manifest: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    manifest["partial"] = serde_json::json!({ "selected": 2, "of": 2 });
+    std::fs::write(&path, serde_json::to_string_pretty(&manifest).unwrap()).unwrap();
+    let forged = unsigned.flot(&["verify"]);
+    assert_eq!(forged.code, 1, "{}", forged.stdout);
+    forged.has("partial run of 2 of 2 steps");
+
+    // Selecting a step whose dependencies are the whole flow is a whole run,
+    // recorded as before.
+    let whole = Project::new(
+        &SELECTED
+            .replace("run = \"false\"", "run = \"true\"")
+            .replace("id = \"test\"", "id = \"test\"\nneeds = [\"lint\"]"),
+    );
+    whole
+        .flot(&["run", "--only", "test"])
+        .ok()
+        .has("\nPASSED ")
+        .lacks("partial");
+    let text = std::fs::read_to_string(latest_run_file(&whole)).unwrap();
+    assert!(!text.contains("partial"), "{text}");
+    whole.flot(&["verify"]).ok().has("verdict passed\n");
+}
+
+#[test]
+fn verify_states_one_result_and_its_exit_code_follows_it() {
+    for (flow, result, code) in [
+        (PROVEN, "passed", 0),
+        (&*PROVEN.replace("verify = ", "# "), "unverified", 2),
+        (
+            &*PROVEN.replace("grep -q flot", "grep -q nope"),
+            "failed",
+            1,
+        ),
+    ] {
+        let project = Project::new(flow);
+        project.write("seed.txt", "one");
+        project.flot(&["run"]);
+        let audit = project.flot(&["--json", "verify"]);
+        assert_eq!(audit.code, code, "{}", audit.stdout);
+        assert_eq!(audit.json()["result"], result, "{}", audit.stdout);
+    }
+
+    // Evidence that no longer hashes to its name is broken, whatever the
+    // altered record says its verdict was.
+    let project = Project::new(PROVEN);
+    project.write("seed.txt", "one");
+    project.flot(&["run"]).ok();
+    let mut objects = vec![project.path().join(".flot/objects")];
+    while let Some(dir) = objects.pop() {
+        for entry in std::fs::read_dir(dir).unwrap().flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                objects.push(path);
+                continue;
+            }
+            let mut permissions = std::fs::metadata(&path).unwrap().permissions();
+            #[allow(clippy::permissions_set_readonly_false)]
+            permissions.set_readonly(false);
+            std::fs::set_permissions(&path, permissions).unwrap();
+            let mut bytes = std::fs::read(&path).unwrap();
+            bytes.extend_from_slice(b"x\n");
+            std::fs::write(&path, bytes).unwrap();
+        }
+    }
+    let broken = project.flot(&["--json", "verify"]);
+    assert_eq!(broken.code, 1, "{}", broken.stdout);
+    let audit = broken.json();
+    assert_eq!(audit["intact"], false);
+    assert_eq!(audit["verdict"], "passed");
+    assert_eq!(audit["result"], "broken");
+    project
+        .flot(&["verify", "--markdown"])
+        .has("### flot: evidence broken");
+
+    // A run that passed, held to a revision whose proof says otherwise, is
+    // unverified.
+    let anchored = anchored_project();
+    anchored.flot(&["run"]).ok();
+    anchored.write("check.sh", "grep -q 1 out.txt # stricter\n");
+    commit(anchored.path(), "stricter proof");
+    let drifted = anchored.flot(&["--json", "verify"]);
+    assert_eq!(drifted.code, 2, "{}", drifted.stdout);
+    let audit = drifted.json();
+    assert_eq!(audit["verdict"], "passed");
+    assert_eq!(audit["result"], "unverified");
 }

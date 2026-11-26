@@ -87,6 +87,20 @@ impl Workspace {
                 ),
                 Err(error) => check("proofs", Status::Fail, format!("{error:#}")),
             });
+            // What a proof reads and the flow does not name is outside the
+            // step key, the guard and the revision check alike.
+            for step in &flow.steps {
+                if step.verify.is_some() && step.verify_inputs.is_empty() {
+                    checks.push(check(
+                        "proof inputs",
+                        Status::Warn,
+                        format!(
+                            "proof of {} reads no declared file, so an edit to it cannot be detected or guarded",
+                            step.id
+                        ),
+                    ));
+                }
+            }
         }
 
         if let Ok(git) = Git::open(&self.root) {
@@ -178,7 +192,14 @@ impl Workspace {
                 .collect();
             if !confined.is_empty() {
                 let steps = confined.join(", ");
-                checks.push(match sandbox::probe(&self.root) {
+                // Write confinement needs more of the kernel than a step
+                // that only goes without network.
+                let write = flow.steps.iter().any(|step| {
+                    step.sandbox
+                        .as_ref()
+                        .is_some_and(|policy| policy.write.is_some())
+                });
+                checks.push(match sandbox::probe(&self.root, write) {
                     Ok(mechanism) => check(
                         "sandbox",
                         Status::Ok,

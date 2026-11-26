@@ -35,8 +35,22 @@ pub struct Outcome {
     /// A process that left the step's process group still held its output
     /// open after the grace period, so the captured streams may be incomplete.
     pub output_detached: bool,
+    /// Processes that left their process group and were still running when
+    /// the command ended, stopped. Linux only, where flot adopts every
+    /// orphan below it and so can find them; elsewhere this is always empty.
+    pub escaped: Vec<Escaped>,
     pub started_at_ms: u64,
     pub duration_ms: u64,
+}
+
+/// A process that left its command's process group, and was stopped.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Escaped {
+    pub pid: u32,
+    /// Traced to this command by the token it inherited. Otherwise nothing
+    /// tells which command started it, and it is charged to every command
+    /// that was running when it was found.
+    pub traced: bool,
 }
 
 /// How long output is still read once the step's own process has gone and its
@@ -217,6 +231,8 @@ pub fn run_confined(
     for (key, value) in env {
         builder.env(key, value);
     }
+    #[cfg(target_os = "linux")]
+    let watch = escape::Watch::new(&mut builder);
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
@@ -228,9 +244,11 @@ pub fn run_confined(
         use std::os::windows::process::CommandExt;
         builder.creation_flags(job::SPAWN_FLAGS);
     }
-    let mut child = builder
-        .spawn()
-        .with_context(|| format!("cannot start `{command}`"))?;
+    #[cfg(target_os = "linux")]
+    let spawned = watch.spawn(&mut builder);
+    #[cfg(not(target_os = "linux"))]
+    let spawned = builder.spawn();
+    let mut child = spawned.with_context(|| format!("cannot start `{command}`"))?;
     // Windows has no process groups to signal; a job object holds the step
     // and everything it starts instead.
     #[cfg(windows)]
@@ -287,6 +305,12 @@ pub fn run_confined(
     let status = child.wait().ok();
     let ended_on_its_own = !(timed_out || was_interrupted || overflowed);
     let strays_stopped = ended_on_its_own && stopped_others;
+    // Before the output is collected: a process that left the group and
+    // still holds the pipes closes them as it is stopped.
+    #[cfg(target_os = "linux")]
+    let escaped = watch.sweep();
+    #[cfg(not(target_os = "linux"))]
+    let escaped = Vec::new();
     let deadline = Instant::now() + DETACHED_GRACE;
     let (stdout, stdout_complete) = stdout_reader.collect(deadline);
     let (stderr, stderr_complete) = stderr_reader.collect(deadline);
@@ -301,6 +325,7 @@ pub fn run_confined(
         output_overflow: overflowed,
         strays_stopped,
         output_detached: !(stdout_complete && stderr_complete),
+        escaped,
         started_at_ms,
         duration_ms: millis(started.elapsed()),
     })
@@ -425,6 +450,278 @@ fn stop_group(child: &std::process::Child) -> bool {
     {
         let _ = child;
         false
+    }
+}
+
+/// Processes that leave a command's process group, found and stopped on
+/// Linux.
+///
+/// A process that calls `setsid` (or `setpgid`) is out of reach of the group
+/// kill, and once its parent exits it would be adopted by init and keep
+/// running, free to rewrite what a proof judged. flot makes itself a child
+/// subreaper instead, so every such orphan below it becomes its child, and
+/// after each command looks for adopted processes that belong to no running
+/// command: those escaped, and are stopped. Each command carries a token in
+/// its environment, which a process inherits whatever group it moves to, so
+/// an escapee is charged to the command that started it; one that dropped
+/// its environment is charged to every command running when it was found.
+/// A process that moves into flot's own process group is not told apart
+/// from the git processes flot runs itself, and is not found.
+#[cfg(target_os = "linux")]
+mod escape {
+    use std::collections::{BTreeMap, BTreeSet};
+    use std::process::{Child, Command};
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::{Mutex, MutexGuard, Once};
+    use std::time::{Duration, Instant};
+
+    /// Names the command a process descends from.
+    pub const TOKEN_ENV: &str = "FLOT_COMMAND_ID";
+
+    /// How long a sweep waits for stopped processes to be gone.
+    const SETTLE: Duration = Duration::from_secs(2);
+
+    struct Running {
+        /// The process group the command leads.
+        group: libc::pid_t,
+        token: String,
+        /// Its leader has exited and its own sweep has begun.
+        ended: bool,
+        /// Pid of each process charged to it, and whether it was traced.
+        escaped: BTreeMap<u32, bool>,
+    }
+
+    struct State {
+        running: BTreeMap<u64, Running>,
+        /// Groups of escaped processes already stopped, until they are empty.
+        stopped: BTreeSet<libc::pid_t>,
+    }
+
+    static STATE: Mutex<State> = Mutex::new(State {
+        running: BTreeMap::new(),
+        stopped: BTreeSet::new(),
+    });
+    static SEQUENCE: AtomicU64 = AtomicU64::new(0);
+    static ADOPT: Once = Once::new();
+
+    fn state() -> MutexGuard<'static, State> {
+        STATE.lock().unwrap_or_else(|poison| poison.into_inner())
+    }
+
+    fn token(id: u64) -> String {
+        format!("{}-{id}", std::process::id())
+    }
+
+    /// One command, from before it is spawned until it is swept.
+    pub struct Watch {
+        id: u64,
+    }
+
+    impl Watch {
+        /// Mark `command` with a token of its own, and have flot adopt every
+        /// process orphaned below it from now on.
+        pub fn new(command: &mut Command) -> Watch {
+            ADOPT.call_once(|| {
+                // SAFETY: sets a flag of this process; no memory is passed.
+                // Should it fail, orphans go to init as before and none is
+                // found.
+                unsafe {
+                    libc::prctl(libc::PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0);
+                }
+            });
+            let id = SEQUENCE.fetch_add(1, Ordering::Relaxed);
+            command.env(TOKEN_ENV, token(id));
+            Watch { id }
+        }
+
+        /// Spawn `command`, recorded as running before any sweep can see it.
+        pub fn spawn(&self, command: &mut Command) -> std::io::Result<Child> {
+            let mut state = state();
+            let child = command.spawn()?;
+            state.running.insert(
+                self.id,
+                Running {
+                    group: child.id() as libc::pid_t,
+                    token: token(self.id),
+                    ended: false,
+                    escaped: BTreeMap::new(),
+                },
+            );
+            Ok(child)
+        }
+
+        /// Once the command's leader is reaped and its group stopped: reap
+        /// what is left of the group, stop every adopted process that left
+        /// a group no running command leads, and return the pids of those
+        /// charged to this command.
+        pub fn sweep(self) -> Vec<super::Escaped> {
+            let me = std::process::id() as libc::pid_t;
+            // SAFETY: getpgrp cannot fail.
+            let own_group = unsafe { libc::getpgrp() };
+            let deadline = Instant::now() + SETTLE;
+            loop {
+                let busy = {
+                    let mut state = state();
+                    let Some(running) = state.running.get_mut(&self.id) else {
+                        break;
+                    };
+                    running.ended = true;
+                    let group = running.group;
+                    pass(&mut state, me, own_group, group)
+                };
+                if !busy || Instant::now() >= deadline {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            state()
+                .running
+                .get(&self.id)
+                .map(|running| {
+                    running
+                        .escaped
+                        .iter()
+                        .map(|(&pid, &traced)| super::Escaped { pid, traced })
+                        .collect()
+                })
+                .unwrap_or_default()
+        }
+    }
+
+    impl Drop for Watch {
+        fn drop(&mut self) {
+            state().running.remove(&self.id);
+        }
+    }
+
+    struct Process {
+        pid: libc::pid_t,
+        ppid: libc::pid_t,
+        pgid: libc::pid_t,
+        zombie: bool,
+    }
+
+    /// Every process, read from /proc: after the parenthesized command name
+    /// of /proc/<pid>/stat come its state, parent and process group.
+    fn processes() -> Vec<Process> {
+        let Ok(entries) = std::fs::read_dir("/proc") else {
+            return Vec::new();
+        };
+        entries
+            .flatten()
+            .filter_map(|entry| {
+                let pid = entry.file_name().to_str()?.parse::<libc::pid_t>().ok()?;
+                let stat = std::fs::read_to_string(entry.path().join("stat")).ok()?;
+                let after = &stat[stat.rfind(')')? + 1..];
+                let mut fields = after.split_whitespace();
+                let zombie = fields.next()? == "Z";
+                let ppid = fields.next()?.parse().ok()?;
+                let pgid = fields.next()?.parse().ok()?;
+                Some(Process {
+                    pid,
+                    ppid,
+                    pgid,
+                    zombie,
+                })
+            })
+            .collect()
+    }
+
+    /// The token in the environment `pid` was started with, if it kept one.
+    fn token_of(pid: libc::pid_t) -> Option<String> {
+        let environ = std::fs::read(format!("/proc/{pid}/environ")).ok()?;
+        let prefix = format!("{TOKEN_ENV}=");
+        environ.split(|byte| *byte == 0).find_map(|entry| {
+            entry
+                .strip_prefix(prefix.as_bytes())
+                .map(|value| String::from_utf8_lossy(value).into_owned())
+        })
+    }
+
+    /// Reap `process` if it has exited, else stop it. Only for a child of
+    /// flot not yet reaped, whose pid therefore names it and nothing else.
+    fn finish(process: &Process) {
+        // SAFETY: plain system calls on a pid flot's own unreaped child holds.
+        unsafe {
+            if process.zombie {
+                libc::waitpid(process.pid, std::ptr::null_mut(), libc::WNOHANG);
+            } else {
+                libc::kill(process.pid, libc::SIGKILL);
+            }
+        }
+    }
+
+    /// One look at flot's children. Returns whether anything is still to be
+    /// waited for.
+    fn pass(
+        state: &mut State,
+        me: libc::pid_t,
+        own_group: libc::pid_t,
+        group: libc::pid_t,
+    ) -> bool {
+        let processes = processes();
+        state
+            .stopped
+            .retain(|stopped| processes.iter().any(|process| process.pgid == *stopped));
+        let mut busy = false;
+        for process in &processes {
+            let adopted = process.ppid == me;
+            if process.pgid == group || state.stopped.contains(&process.pgid) {
+                busy = true;
+                if adopted {
+                    finish(process);
+                }
+                continue;
+            }
+            // flot's own children (git) share its group; a running
+            // command's leader and its group are that command's to stop.
+            if !adopted
+                || process.pgid == own_group
+                || state
+                    .running
+                    .values()
+                    .any(|running| running.group == process.pgid)
+            {
+                continue;
+            }
+            if process.zombie {
+                // It ended on its own before anything could stop it.
+                finish(process);
+                continue;
+            }
+            let pid = process.pid as u32;
+            let token = token_of(process.pid);
+            let owner = token.as_deref().and_then(|token| {
+                state
+                    .running
+                    .values_mut()
+                    .find(|running| running.token == token)
+            });
+            match owner {
+                // Its command is still running, and will sweep it itself.
+                Some(owner) if !owner.ended => continue,
+                Some(owner) => {
+                    owner.escaped.insert(pid, true);
+                }
+                None => {
+                    for running in state.running.values_mut() {
+                        running.escaped.entry(pid).or_insert(false);
+                    }
+                }
+            }
+            busy = true;
+            finish(process);
+            if process.pgid == process.pid {
+                // A group it leads is its own: stop all of it. The pid is
+                // still held by the unreaped process, so it names that group.
+                // SAFETY: a plain system call.
+                unsafe {
+                    libc::killpg(process.pid, libc::SIGKILL);
+                }
+                state.stopped.insert(process.pid);
+            }
+        }
+        busy
     }
 }
 
@@ -760,10 +1057,17 @@ mod tests {
             "\"$d/left\" sleep 30 & ",
             "while [ ! -e \"$d/left\" ]; do sleep 0.01; done; rm -r \"$d\"; echo early",
         ));
-        // A new session leaves a POSIX process group, so nothing can stop
-        // the escapee and flot only stops waiting for it. A Windows job
-        // cannot be left: the escapee is stopped with the rest.
-        #[cfg(unix)]
+        // A new session leaves a POSIX process group, out of reach of the
+        // group kill. On Linux flot adopts the escapee once its parent exits
+        // and stops it; on macOS nothing can, and flot only stops waiting
+        // for it. A Windows job cannot be left: the escapee is stopped with
+        // the rest.
+        #[cfg(target_os = "linux")]
+        assert!(
+            !outcome.output_detached && outcome.escaped.len() == 1,
+            "{outcome:?}"
+        );
+        #[cfg(all(unix, not(target_os = "linux")))]
         assert!(outcome.output_detached);
         #[cfg(windows)]
         assert!(!outcome.output_detached && outcome.strays_stopped);
@@ -773,6 +1077,38 @@ mod tests {
             "{:?}",
             started.elapsed()
         );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_process_that_leaves_the_group_is_stopped_before_it_can_write() {
+        let dir = tempfile::tempdir().unwrap();
+        // Its output goes nowhere, so no pipe held open gives it away.
+        let outcome = run_command(
+            concat!(
+                "setsid sh -c 'touch left; sleep 1; echo late > late' >/dev/null 2>&1 &\n",
+                "while [ ! -e left ]; do sleep 0.01; done",
+            ),
+            dir.path(),
+            &env(),
+            Duration::from_secs(10),
+            CAP,
+            &StopSignal::default(),
+        )
+        .unwrap();
+        assert!(outcome.succeeded());
+        assert_eq!(outcome.escaped.len(), 1, "{outcome:?}");
+        assert!(outcome.escaped[0].traced, "it kept the command's token");
+        assert!(!outcome.strays_stopped, "it left the group: not a stray");
+        assert!(!outcome.output_detached);
+        std::thread::sleep(Duration::from_millis(1500));
+        assert!(
+            !dir.path().join("late").exists(),
+            "the escapee outlived the step"
+        );
+        // What stays in the group and ends with it escaped nothing.
+        assert!(run("sleep 0.01 & wait").escaped.is_empty());
+        assert!(run("sleep 30 &").escaped.is_empty());
     }
 
     #[test]

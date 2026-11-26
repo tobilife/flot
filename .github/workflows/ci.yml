@@ -26,8 +26,9 @@ jobs:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --check
-      - run: cargo clippy --all-targets -- -D warnings
-      - run: cargo test
+      # --locked: the committed Cargo.lock is what is built and released.
+      - run: cargo clippy --locked --all-targets -- -D warnings
+      - run: cargo test --locked
 
   # This repository's own gate, through its own action.
   action:
@@ -46,7 +47,7 @@ jobs:
           toolchain: ${{ steps.rust.outputs.toolchain }}
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
-      - run: cargo build && echo "$PWD/target/debug" >> "$GITHUB_PATH"
+      - run: cargo build --locked && echo "$PWD/target/debug" >> "$GITHUB_PATH"
       # Runs a trusted developer signed and pushed are reused, not executed
       # again. The signers come from the base branch: a pull request must not
       # choose whom CI trusts.
@@ -82,4 +83,4 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.88
       - uses: Swatinem/rust-cache@v2
-      - run: cargo check --all-targets
+      - run: cargo check --locked --all-targets

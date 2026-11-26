@@ -1945,6 +1945,7 @@ fn stopping_flot_stops_the_step_and_still_records_the_run() {
         .current_dir(project.path())
         .env("FLOT_SIGNING_KEY", project.key_path())
         .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
         .spawn()
         .unwrap();
     std::thread::sleep(std::time::Duration::from_millis(800));

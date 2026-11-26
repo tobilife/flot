@@ -4004,9 +4004,24 @@ fn doctor_warns_of_a_proof_that_reads_no_declared_file() {
     assert_eq!(stdout.matches("proof inputs").count(), 1, "{stdout}");
 }
 
+/// `flow` with `setsid sh` as this system runs it: macOS ships no `setsid`
+/// command, so perl's POSIX::setsid stands in, by absolute paths because
+/// `env -i` clears PATH.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn with_setsid(flow: &str) -> String {
+    if cfg!(target_os = "macos") {
+        flow.replace(
+            "setsid sh",
+            "/usr/bin/perl -MPOSIX -e 'setsid(); exec @ARGV' /bin/sh",
+        )
+    } else {
+        flow.to_owned()
+    }
+}
+
 /// A step that waits for its sibling to start, then leaves behind a process
 /// that left its process group.
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 const ESCAPING: &str = r#"
 [flow]
 name = "escaping"
@@ -4029,10 +4044,10 @@ claims = ["it ran"]
 verify = "true"
 "#;
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 #[test]
 fn a_process_that_leaves_its_process_group_is_stopped_and_proves_nothing() {
-    let project = Project::new(
+    let project = Project::new(&with_setsid(
         r#"
 [flow]
 name = "escape"
@@ -4048,7 +4063,7 @@ rm .left
 claims = ["out.txt holds 1"]
 verify = "grep -q 1 out.txt"
 "#,
-    );
+    ));
     let run = project.flot(&["run"]);
     assert_eq!(run.code, 2, "{}", run.stdout);
     run.has("claims 0v/1u/0r")
@@ -4066,7 +4081,7 @@ verify = "grep -q 1 out.txt"
         ("true", 2, "claims 0v/1u/0r"),
         ("false", 1, "claims 0v/0u/1r"),
     ] {
-        let proof = Project::new(&format!(
+        let proof = Project::new(&with_setsid(&format!(
             r#"
 [flow]
 name = "escape"
@@ -4082,7 +4097,7 @@ rm .left
 {last}
 """
 "#
-        ));
+        )));
         let run = proof.flot(&["run"]);
         assert_eq!(run.code, code, "{}", run.stdout);
         run.has(claims)
@@ -4090,16 +4105,44 @@ rm .left
     }
 
     // One that dropped its environment cannot be traced, so every step
-    // running when it was found answers for it.
-    let pair = Project::new(ESCAPING);
+    // running when it was found answers for it. On macOS flot recorded it
+    // below the step that started it, and that step alone answers for it;
+    // the step waits a moment before it ends, since flot looks for what is
+    // below a step only every 20 ms and must see the escapee's parent once.
+    let untraced_flow = if cfg!(target_os = "macos") {
+        ESCAPING.replace("rm .left\n", "rm .left\nsleep 0.1\n")
+    } else {
+        ESCAPING.to_owned()
+    };
+    let pair = Project::new(&with_setsid(&untraced_flow));
     let untraced = pair.flot(&["run", "--jobs", "2"]);
     assert_eq!(untraced.code, 2, "{}", untraced.stdout);
-    untraced.has(
-        "  - leaves, stays: a process that left its process group was stopped while this step ran (pid ",
-    );
+    if cfg!(target_os = "macos") {
+        untraced
+            .has("  - leaves: a process it started left its process group and was stopped (pid ")
+            .lacks("while this step ran");
+        assert!(
+            untraced
+                .stdout
+                .lines()
+                .any(|line| line.starts_with("ran      stays") && line.contains("claims 1v/0u/0r")),
+            "{}",
+            untraced.stdout
+        );
+    } else {
+        untraced.has(
+            "  - leaves, stays: a process that left its process group was stopped while this step ran (pid ",
+        );
+    }
     // One that kept it is charged to the step that started it alone.
-    pair.write("flot.toml", &ESCAPING.replace("env -i ", ""));
-    let traced = pair.flot(&["run", "--jobs", "2"]);
+    pair.write("flot.toml", &with_setsid(&ESCAPING.replace("env -i ", "")));
+    // On macOS `stays` passed above and would be reused, and `leaves` would
+    // wait for it forever.
+    let traced = pair.flot(if cfg!(target_os = "macos") {
+        &["run", "--jobs", "2", "--force"]
+    } else {
+        &["run", "--jobs", "2"]
+    });
     assert_eq!(traced.code, 2, "{}", traced.stdout);
     traced
         .has("  - leaves: a process it started left its process group and was stopped (pid ")

@@ -46,10 +46,10 @@ vulnerabilities:
   hook refuse a change an agent names, before it happens, to what proves the
   work or decides whether it is checked
   ([refusing the edit](docs/flows.md#refusing-the-edit)). They read
-  the scripts and interpreter code a call runs and refuse code built when it
-  runs, but they read text: a name assembled from parts, a path a program
-  prints, a script copied before it runs and compiled programs get past
-  them. The hook refuses any call that names the signing key, a retired copy
+  the scripts and interpreter code a call runs and refuse code built from
+  text-making programs when it runs, but they read text: a name assembled
+  from parts, a path or code a program prints, a script copied before it
+  runs and compiled programs get past them. The hook refuses any call that names the signing key, a retired copy
   or this host's secret, reads included; `flot key show` stays allowed. Only
   Claude Code runs the hook; another agent, a person and a step's own
   command are not stopped. An agent runs as your user, so outside the hook

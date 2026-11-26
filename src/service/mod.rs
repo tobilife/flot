@@ -748,10 +748,16 @@ impl Guard {
     /// one that follows what the code puts in, as `$ROOT/check.sh` or
     /// `{root}/check.sh`, may start anywhere, so its tail is matched too. A
     /// word with neither a dot nor a slash counts only as a string, in
-    /// quotes: unquoted, as `tests` in a comment, it is code. Code is not
+    /// quotes: unquoted, as `tests` in a comment, it is code. A guarded
+    /// directory, named alone, by a path or as where a path starts, counts
+    /// only in code that calls something that removes, moves or writes
+    /// files: code that lists `("scripts", "tests")` or joins `root` and
+    /// `"cache"` to read them cannot change what the directory holds. A
+    /// guarded file or a secret counts wherever it is named. Code is not
     /// read for what it does: what it names is all that can be told, and a
     /// name it builds from parts is not seen.
     pub fn named_in(&self, text: &str, dir: &Path) -> Vec<PathBuf> {
+        let changes = changes_files(text);
         let mut exact: BTreeMap<String, PathBuf> = BTreeMap::new();
         let mut inside: BTreeMap<String, PathBuf> = BTreeMap::new();
         let bases = self.bases();
@@ -834,6 +840,9 @@ impl Guard {
                     let name = parts[start..end].join("/");
                     let table = if end == parts.len() { &exact } else { &inside };
                     if let Some(path) = table.get(&name) {
+                        if !changes && path.is_dir() && self.secret_reason(path).is_none() {
+                            continue;
+                        }
                         if !found.contains(path) {
                             found.push(path.clone());
                         }
@@ -1600,6 +1609,58 @@ fn numstat_paths(out: &[u8]) -> Vec<String> {
     paths
 }
 
+/// Parts of the names of the calls with which code removes, moves or
+/// writes files, as Python's `shutil.rmtree`, Node's `fs.writeFileSync`
+/// and `createWriteStream` or Ruby's `FileUtils.rm_rf`.
+const CHANGES_FILES: &[&str] = &[
+    "rmtree",
+    "rmdir",
+    "remove",
+    "unlink",
+    "rename",
+    "replace",
+    "move",
+    "copy",
+    "write",
+    "truncate",
+    "rm_",
+    "cp_",
+    "rimraf",
+    "rmsync",
+    "chmod",
+    "chown",
+    "delete",
+    "append",
+    "touch",
+    "emptydir",
+    "outputfile",
+    "symlink",
+];
+
+/// Whether `code` calls something that removes, moves or writes files: a
+/// name in it, whatever its case, that holds one of [`CHANGES_FILES`] or
+/// is `rm`, `mv` or `cp`, or a string that opens a file to write, as
+/// Python's `'w'` or Perl's `'>'`.
+fn changes_files(code: &str) -> bool {
+    let named = code
+        .split(|c: char| !(c.is_alphanumeric() || c == '_'))
+        .map(str::to_lowercase)
+        .any(|name| {
+            matches!(name.as_str(), "rm" | "mv" | "cp")
+                || CHANGES_FILES.iter().any(|call| name.contains(call))
+        });
+    named
+        || ['\'', '"'].into_iter().any(|quote| {
+            code.split(quote).skip(1).step_by(2).any(|string| {
+                let mode = !string.is_empty()
+                    && string.len() <= 3
+                    && string.chars().all(|c| "rwabxt+".contains(c))
+                    && string.contains(['w', 'a', 'x', '+']);
+                mode || string.starts_with('>') || string.starts_with("+<")
+            })
+        })
+}
+
 /// `path` without `.` and with `..` applied, without touching the disk: the
 /// file may not exist yet.
 fn normalize(path: &Path) -> PathBuf {
@@ -2316,6 +2377,35 @@ fn attest_recorded(
 mod tests {
     use super::*;
     use std::fs;
+
+    #[test]
+    fn code_that_changes_files_is_told_by_its_calls() {
+        for code in [
+            "import shutil; shutil.rmtree(d)",
+            "os.remove(p)",
+            "Path(p).write_text('')",
+            "require('fs').rmSync(d, {recursive: true})",
+            "fs.createWriteStream(p)",
+            "FileUtils.rm_rf(d)",
+            "subprocess.run(['rm', '-rf', d])",
+            "open(p, 'w')",
+            "open(p, \"ab\")",
+            "open(F, '>x')",
+            "fs.appendFileSync(p, s)",
+        ] {
+            assert!(changes_files(code), "{code}");
+        }
+        for code in [
+            "for d in ('scripts', 'tests'): print(sorted(os.listdir(d)))",
+            "cache_dir = os.path.join(root, 'cache'); load_dataset(n, cache_dir=cache_dir)",
+            "print(open(p).read())",
+            "open(p, 'r')",
+            "require('fs').readdirSync('.github')",
+            "import term",
+        ] {
+            assert!(!changes_files(code), "{code}");
+        }
+    }
 
     #[test]
     fn a_path_is_named_below_a_base_in_any_case_where_names_fold() {

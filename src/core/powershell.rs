@@ -548,6 +548,8 @@ fn changed_at(arguments: &[Argument], input: &Piped, depth: usize) -> Reading {
         return Reading {
             scripts: file_path(&first.0)
                 .map(|path| Script {
+                    named: path.clone(),
+                    sourced: false,
                     path,
                     dir: String::new(),
                     runner: Runner::PowerShell,
@@ -774,6 +776,8 @@ pub(crate) fn invoked(args: &[String], depth: usize) -> Reading {
         Given::File(path) => Reading {
             scripts: file_path(&path)
                 .map(|path| Script {
+                    named: path.clone(),
+                    sourced: false,
                     path,
                     dir: String::new(),
                     runner: Runner::PowerShell,

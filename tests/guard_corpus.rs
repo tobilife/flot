@@ -74,6 +74,15 @@ const SCRIPTS: &[(&str, &str)] = &[
         "Write-Output 'building'\nNew-Item -ItemType Directory -Force out | Out-Null\n",
     ),
     ("bad.ps1", "Remove-Item check.sh\n"),
+    ("scripts/sources.sh", ". \"$(dirname \"$0\")/ok.sh\"\n"),
+    ("scripts/sourcesbad.sh", ". \"$(dirname \"$0\")/bad.sh\"\n"),
+    (
+        "scripts/clean.sh",
+        "DIR=\"$(cd \"$(dirname \"$0\")\" && pwd)\"\nrm -rf \"$DIR/build\"\n",
+    ),
+    ("wipe.sh", "cd \"$(dirname \"$0\")\" && rm -rf tests\n"),
+    ("outer.sh", ". scripts/inner.sh\n"),
+    ("scripts/inner.sh", "rm -f \"$(dirname \"$0\")/check.sh\"\n"),
 ];
 
 const PATCH: &str = "--- a/check.sh\n+++ b/check.sh\n@@ -1 +1 @@\n-grep -q 1 out.txt\n+exit 0\n";

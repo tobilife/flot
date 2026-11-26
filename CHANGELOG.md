@@ -26,7 +26,33 @@ The guard's remaining known holes, measured with the probes that found them
   to `/private/var`) is named from the project, not as an absolute path.
 
 Replaying this host's transcripts (117 on WSL with 4,725 calls, 755 on
-Windows with 8,057) refused nothing new. The guard corpus has 231 rows.
+Windows with 8,057) refused nothing new.
+
+The guard refuses far fewer ordinary shell scripts: run as `bash run.sh`
+inside a flow, 41 of 656 real scripts found on this host are refused
+instead of 116, and none newly. What remains is code built from text-making
+programs, `curl | sh`, git commands git cannot judge, whole-tree changes and
+the scripts that do change a guarded file. A command substitution is now
+judged by the program that prints it:
+
+- Text-making programs (`printf`, `echo`, `base64`, `sed`, `cat`, `curl`,
+  shells, interpreters, ...) stay strict: names built from their output
+  match every protected path, code built from it is refused.
+- Any other program's output is treated like an unset variable: `rm
+  "$(cmd)"`, `eval "$(ssh-agent -s)"` and `. "$(git --exec-path)/git-sh-setup"`
+  are no longer refused; `rm "$(cmd)/check.sh"` still is.
+- `dirname`, `basename`, `pwd`, `realpath`, `readlink -f` and `cd X && pwd`
+  are evaluated, with `$0` and `$BASH_SOURCE` known in scripts read from
+  disk, so `cd "$(dirname "$0")" && rm -rf tests` is still refused.
+- Interpreter code that names a protected directory without removing,
+  moving or writing files is no longer refused; protected files still count
+  wherever they are named.
+- Misreads fixed: bash `[[ .. ]]`, `${..}` holding `>` or `#`, `{fd}>`
+  redirections, arrays, extglob, `trap` code, `case` patterns read as
+  commands (`patch)`), and an apostrophe in a `#` comment that hid the git
+  commands after it (`git reset --hard # Might nuke`).
+
+The guard corpus has 260 rows.
 
 - macOS: a process a step or its proof starts that leaves its process group
   is stopped and leaves the step's claims unverified, as on Linux. flot

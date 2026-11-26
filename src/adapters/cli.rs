@@ -700,16 +700,24 @@ fn simple_commands(command: &str, language: Shell) -> Vec<Simple> {
     let mut word = String::new();
     let mut quoted = false;
     let mut start = 0;
-    let mut chars = command.char_indices();
+    let mut chars = command.char_indices().peekable();
     let end_word = |word: &mut String, quoted: &mut bool, words: &mut Vec<String>| {
         if !word.is_empty() || *quoted {
             words.push(std::mem::take(word));
         }
         *quoted = false;
     };
+    // The character before, outside quotes: a `#` after a blank or an
+    // operator starts a comment.
+    let mut before: Option<char> = None;
     while let Some((at, c)) = chars.next() {
         let separates = matches!(c, ';' | '&' | '|' | '\n' | '(' | ')' | '{' | '}')
             || (c == '`' && matches!(language, Shell::Posix));
+        let comment = c == '#'
+            && word.is_empty()
+            && !quoted
+            && before.is_none_or(|before| before.is_whitespace() || ";&|()".contains(before));
+        before = Some(c);
         if c == '\'' {
             quoted = true;
             for (_, c) in chars.by_ref() {
@@ -737,6 +745,23 @@ fn simple_commands(command: &str, language: Shell) -> Vec<Simple> {
                     .map(|(_, next)| next)
                     .filter(|next| *next != '\n'),
             );
+        } else if comment {
+            // A comment runs to the end of the line: `git reset --hard #
+            // why` gives git no `#`.
+            while chars.next_if(|(_, next)| *next != '\n').is_some() {}
+        } else if c == '$' && chars.peek().is_some_and(|(_, next)| *next == '{') {
+            // `${..}` is one word, not a brace group: `${#x}` is no comment.
+            word.push(c);
+            let mut depth = 0;
+            for (_, c) in chars.by_ref() {
+                word.push(c);
+                match c {
+                    '{' => depth += 1,
+                    '}' if depth == 1 => break,
+                    '}' => depth -= 1,
+                    _ => {}
+                }
+            }
         } else if separates {
             end_word(&mut word, &mut quoted, &mut words);
             if !words.is_empty() {
@@ -1102,13 +1127,16 @@ const SCRIPT_LIMIT: usize = 64;
 /// The largest script the guard reads, in bytes.
 const SCRIPT_BYTES: u64 = 1 << 20;
 
-/// Code the guard reads: where it runs, in what language, and how many
-/// times the code that runs it was handed over as a string.
+/// Code the guard reads: where it runs, in what language, how many times
+/// the code that runs it was handed over as a string, and, for a script
+/// read from the disk, its `$0` and `$BASH_SOURCE`.
 struct Pending {
     dir: PathBuf,
     text: String,
     language: Shell,
     depth: usize,
+    zero: Option<String>,
+    source: Option<String>,
 }
 
 /// Judge a call against `workspace`'s flow and, when `nearest`, every flow
@@ -1140,6 +1168,8 @@ fn judge(workspace: &Workspace, nearest: bool, call: Call) -> Result<Judged> {
             text,
             language,
             depth: 0,
+            zero: None,
+            source: None,
         })
         .collect();
     let mut scripts_read = std::collections::HashSet::new();
@@ -1150,13 +1180,20 @@ fn judge(workspace: &Workspace, nearest: bool, call: Call) -> Result<Judged> {
         text,
         language,
         depth,
+        zero,
+        source,
     }) = pending.pop_front()
     {
         if nearest {
             guard.consult(&dir);
         }
+        let origin = shell::Origin {
+            dir: Some(dir.to_string_lossy().into_owned()),
+            zero: zero.clone(),
+            source,
+        };
         let read = |text: &str, depth: usize| match language {
-            Shell::Posix => shell::read_at(text, depth),
+            Shell::Posix => shell::read_at(text, depth, &origin),
             Shell::PowerShell => powershell::read_at(text, depth),
         };
         let reading = read(&text, depth);
@@ -1225,7 +1262,7 @@ fn judge(workspace: &Workspace, nearest: bool, call: Call) -> Result<Judged> {
             }
         }
         for word in &words {
-            if word.contains(shell::BUILT) {
+            if word.contains([shell::BUILT, shell::SPELLED]) {
                 // Part of the name is what a command prints when it runs:
                 // any guarded place it may spell.
                 let via = format!(
@@ -1312,10 +1349,20 @@ fn judge(workspace: &Workspace, nearest: bool, call: Call) -> Result<Judged> {
                 guard.consult(&runs_in);
             }
             let depth = script.depth + 1;
+            // In a script a shell runs, `$0` is its name as the command
+            // gave it; one `.` or `source` reads keeps the caller's, from
+            // where the caller started.
+            let named = Some(script.named.clone());
+            let zero = if script.sourced {
+                zero.as_ref()
+                    .map(|zero| dir.join(zero).to_string_lossy().into_owned())
+            } else {
+                named.clone()
+            };
             for text in texts {
-                let (text, language) = match &script.runner {
-                    shell::Runner::Shell => (text, Shell::Posix),
-                    shell::Runner::PowerShell => (text, Shell::PowerShell),
+                let (text, language, zero, source) = match &script.runner {
+                    shell::Runner::Shell => (text, Shell::Posix, zero.clone(), named.clone()),
+                    shell::Runner::PowerShell => (text, Shell::PowerShell, None, None),
                     shell::Runner::Interpreter(program) => {
                         // A script the flow guards is the user's check, as
                         // the proof runs it: the agent cannot have changed
@@ -1340,15 +1387,20 @@ fn judge(workspace: &Workspace, nearest: bool, call: Call) -> Result<Judged> {
                     shell::Runner::Program => match shebang(&text) {
                         Some(line) => {
                             let named = path.strip_prefix(&runs_in).unwrap_or(&path);
-                            (format!("{line} {}", quoted(named)), Shell::Posix)
+                            (
+                                format!("{line} {}", quoted(named)),
+                                Shell::Posix,
+                                None,
+                                None,
+                            )
                         }
                         None if path
                             .extension()
                             .is_some_and(|extension| extension.eq_ignore_ascii_case("ps1")) =>
                         {
-                            (text, Shell::PowerShell)
+                            (text, Shell::PowerShell, None, None)
                         }
-                        None => (text, Shell::Posix),
+                        None => (text, Shell::Posix, named.clone(), named.clone()),
                     },
                 };
                 pending.push_back(Pending {
@@ -1356,6 +1408,8 @@ fn judge(workspace: &Workspace, nearest: bool, call: Call) -> Result<Judged> {
                     text,
                     language,
                     depth,
+                    zero,
+                    source,
                 });
             }
         }
@@ -1468,20 +1522,37 @@ fn quoted(path: &Path) -> String {
 
 /// The wildcard patterns a written `word` that holds what a command prints
 /// when it runs may match, that part as `*`, from `dir`: a word that
-/// starts with it may be any path.
+/// starts with it may be any path. What another program prints is a value
+/// flot cannot know, as a variable it does not know is: a word that is
+/// nothing else, or that with only separators and wildcards, names
+/// nothing; one with a part around it is matched by that part, as
+/// `$(..)/check.sh`. What a program that makes text prints is such a part:
+/// it may spell any name.
 fn built_patterns(dir: &Path, word: &str, language: Shell) -> Vec<String> {
     alternatives(word, language)
         .into_iter()
+        .filter(|word| spells_a_part(word))
         .map(|word| {
             let (literal, pattern) = variables(&word, dir, language);
-            let pattern = pattern.replace(shell::BUILT, "*");
-            if literal.starts_with(shell::BUILT) || Path::new(&literal).is_absolute() {
+            let pattern = pattern.replace([shell::BUILT, shell::SPELLED], "*");
+            if literal.starts_with([shell::BUILT, shell::SPELLED])
+                || Path::new(&literal).is_absolute()
+            {
                 pattern
             } else {
                 anchored(dir, &pattern)
             }
         })
         .collect()
+}
+
+/// Whether `word`, past what programs that do not make text print in it,
+/// spells a part of a name: anything but separators, `.`, `..` and
+/// wildcards.
+fn spells_a_part(word: &str) -> bool {
+    word.split(['/', '\\', shell::BUILT]).any(|part| {
+        !matches!(part, "" | "." | "..") && !part.chars().all(|c| matches!(c, '*' | '?'))
+    })
 }
 
 /// The secret a `word` a command is given in `dir` may name: the path it

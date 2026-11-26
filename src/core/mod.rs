@@ -8,6 +8,7 @@ pub mod fault;
 pub mod flow;
 pub mod metrics;
 pub mod powershell;
+mod reading;
 pub mod receipt;
 pub mod secrets;
 pub mod shell;

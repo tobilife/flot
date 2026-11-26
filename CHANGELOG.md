@@ -1,5 +1,34 @@
 # Changelog
 
+## Unreleased
+
+The guard finds git and `flot` commands with the same reading that finds the
+files a command line changes; its second, cruder lexer is gone. Measured
+against 0.2.8 on the corpus, 656 real scripts and this machine's
+transcripts: no real script or recorded call changes its verdict.
+
+- Commands run through `chronic`, `strace`, `ltrace` (with their value
+  options, so `strace -o log rm check.sh` is `rm`) and `unbuffer`, and by the
+  shells `ash`, `mksh` and `busybox ash`, are judged. Before, `chronic rm
+  check.sh` and `ash -c 'flot gc'` got through.
+- `sudo -s`/`sudo -i` with no command, and `su` with no `-c`, read their
+  input as a shell, so `sudo -s <<EOF … EOF` is judged. Input fed to a
+  program flot does not know, and an unknown program a wrapper runs, are
+  read for `flot` and git commands.
+- `ssh`'s command and input are read for `flot` commands (the host may be
+  this one, or share the store). A git command there changes the other
+  host's repository and is not put to local git.
+- A git command with a variable in it is also put to git as written, so
+  `read`, `eval`, `printf -v`, a sourced script or PowerShell's
+  `Set-Variable` cannot slip a revision past the guard.
+- In a script read from disk, `X0` inside double quotes is no longer taken
+  for `$0` (`"v1.0"` was read as `v1<script>`).
+- `cd` and `cd $HOME` lead home for the git commands after them, as `cd ~`
+  does.
+- Text is no longer a `flot` command: `timeout 5 echo flot gc`, `cat <<EOF
+  … flot gc … EOF`, `git commit -F- <<EOF …` and `iex 'flot gc'` in a POSIX
+  shell are allowed.
+
 ## 0.2.8
 
 The guard's remaining known holes, measured with the probes that found them

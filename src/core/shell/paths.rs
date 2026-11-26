@@ -69,26 +69,41 @@ pub(crate) fn located(dir: Option<&str>, path: &str) -> String {
 }
 
 /// Moves `dirs` past `words` when it is a `cd`: to the directory it names,
-/// or to one this reader cannot name (`cd`, `cd -`, `cd $X`). Only after
+/// or to one this reader cannot name (`cd -`, `cd $X`). Only after
 /// `cd x &&` do the commands surely run there; otherwise they may run in
-/// either place.
+/// either place. `cd` and `cd $HOME` lead to `~`, or wherever `HOME` is
+/// set to when the line runs, which this reader cannot tell: they may run
+/// in the place a `cd` it cannot follow leads to as well.
 pub(super) fn moved(dirs: &mut Vec<Option<String>>, words: &[String], certain: bool) {
     let Some((name, args)) = command(words).words.split_first() else {
         return;
     };
-    let target = match program(name) {
-        "cd" | "pushd" => args
-            .iter()
-            .map(String::as_str)
-            .find(|arg| *arg == "-" || !arg.starts_with('-'))
-            .filter(|dir| *dir != "-" && !dir.contains(['$', '`', BUILT, SPELLED])),
-        "popd" => None,
+    let operand = args
+        .iter()
+        .map(String::as_str)
+        .find(|arg| *arg == "-" || !arg.starts_with('-'));
+    let home = |operand: &str| {
+        ["$HOME", "${HOME}"].iter().find_map(|home| {
+            operand
+                .strip_prefix(home)
+                .filter(|rest| rest.is_empty() || rest.starts_with('/'))
+                .map(|rest| format!("~{rest}"))
+        })
+    };
+    let (target, certain) = match (program(name), operand) {
+        ("cd", None) => (Some("~".to_string()), false),
+        ("cd" | "pushd", Some(operand)) => match home(operand) {
+            Some(home) => (Some(home), false),
+            None => (Some(operand.to_string()), certain),
+        },
+        ("pushd" | "popd", _) => (None, certain),
         _ => return,
     };
+    let target = target.filter(|dir| dir != "-" && !dir.contains(['$', '`', BUILT, SPELLED]));
     let next: Vec<Option<String>> = dirs
         .iter()
         .map(|dir| {
-            let target = target?;
+            let target = target.as_deref()?;
             if target.starts_with(['/', '~']) {
                 Some(target.to_string())
             } else {

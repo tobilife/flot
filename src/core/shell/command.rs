@@ -12,12 +12,19 @@ pub(super) struct Command<'a> {
     pub(super) words: &'a [String],
     /// Run by `xargs`: with the string it replaces by each item, if any.
     pub(super) xargs: Option<Option<String>>,
+    /// Whether a wrapper or a reserved word comes before it.
+    pub(super) wrapped: bool,
+    /// Whether a wrapper runs a shell when it is given no command, as
+    /// `sudo -s` and `sudo -i` do.
+    pub(super) shell: bool,
 }
 
 /// A simple command past reserved words, variable assignments and
 /// wrappers such as `sudo -E env A=1`, with their options.
 pub(super) fn command(words: &[String]) -> Command<'_> {
     let mut at = 0;
+    let mut wrapped = false;
+    let mut shell = false;
     while let Some(word) = words.get(at) {
         if word == "function" {
             // `function f { rm x; }` runs from its body.
@@ -27,6 +34,7 @@ pub(super) fn command(words: &[String]) -> Command<'_> {
             }
         } else if KEYWORDS.contains(&word.as_str()) {
             at += 1;
+            wrapped = true;
         } else {
             break;
         }
@@ -37,15 +45,16 @@ pub(super) fn command(words: &[String]) -> Command<'_> {
             at += 1;
             continue;
         }
-        let name = program(word);
-        let Some((_, short, long, mut operands)) = WRAPPERS
+        // A system that does not tell case apart runs `SUDO` as `sudo`.
+        let Some((name, short, long, mut operands)) = WRAPPERS
             .iter()
             .copied()
-            .find(|(wrapper, ..)| *wrapper == name)
+            .find(|(wrapper, ..)| wrapper.eq_ignore_ascii_case(program(word)))
         else {
             break;
         };
         at += 1;
+        wrapped = true;
         let mut replace = None;
         while let Some(arg) = words.get(at) {
             if arg == "--" {
@@ -61,8 +70,11 @@ pub(super) fn command(words: &[String]) -> Command<'_> {
                     return Command {
                         words: &[],
                         xargs: None,
+                        wrapped,
+                        shell: false,
                     };
                 }
+                shell |= matches!(name, "sudo" | "doas") && runs_shell(arg, short);
                 at += 1 + usize::from(takes_value(arg, short, long));
             } else if operands > 0 {
                 operands -= 1;
@@ -78,6 +90,21 @@ pub(super) fn command(words: &[String]) -> Command<'_> {
     Command {
         words: words.get(at..).unwrap_or_default(),
         xargs,
+        wrapped,
+        shell,
+    }
+}
+
+/// Whether `arg`, an option of `sudo` or `doas` whose letters in `short`
+/// take a value, asks for a shell: `-s`, `-i`, `--shell` or `--login`.
+fn runs_shell(arg: &str, short: &str) -> bool {
+    match arg.strip_prefix("--") {
+        Some(long) => matches!(long, "shell" | "login"),
+        None => arg
+            .chars()
+            .skip(1)
+            .take_while(|letter| !short.contains(*letter))
+            .any(|letter| matches!(letter, 's' | 'i')),
     }
 }
 

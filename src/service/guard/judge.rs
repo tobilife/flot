@@ -10,10 +10,10 @@ use anyhow::{Context, Result};
 use crate::core::{powershell, shell};
 use crate::service::Workspace;
 
-use super::expand::{alternatives, anchored, expand, home_dir, variables, wildcard_match};
+use super::expand::{alternatives, anchored, expand, variables, wildcard_match};
 use super::git::git_would_change;
 use super::rules::Guard;
-use super::verbs::{flot_verbs, program_name, programs, simple_commands};
+use super::verbs::{flot_verb, program_name, runs};
 use super::Guarded;
 
 /// Why downloaded code piped into an interpreter is refused.
@@ -208,6 +208,10 @@ pub fn judge(workspace: &Workspace, nearest: bool, call: Call) -> Result<Judged>
         })
         .collect();
     let mut scripts_read = std::collections::HashSet::new();
+    // The git commands asked about, each where it was asked, and whether
+    // git answered: one answer each.
+    let mut asked: std::collections::HashMap<(PathBuf, Vec<String>), bool> =
+        std::collections::HashMap::new();
     // The scripts the call writes text into that it spells, and that text.
     let mut written: Vec<(PathBuf, String)> = Vec::new();
     while let Some(Pending {
@@ -227,74 +231,83 @@ pub fn judge(workspace: &Workspace, nearest: bool, call: Call) -> Result<Judged>
             zero: zero.clone(),
             source,
         };
-        let read = |text: &str, depth: usize| match language {
-            Shell::Posix => shell::read_at(text, depth, &origin),
-            Shell::PowerShell => powershell::read_at(text, depth),
+        let reading = match language {
+            Shell::Posix => shell::read_at(&text, depth, &origin),
+            Shell::PowerShell => powershell::read_at(&text, depth),
         };
-        let reading = read(&text, depth);
         let mut words = reading.writes;
         // A whole-tree git command changes what git says it would. It is
-        // asked where the call runs and where a `cd` before it leads, both:
-        // the `cd` may be in a subshell.
-        let mut rest = text.clone();
-        let mut asked = false;
-        let mut here = dir.clone();
-        for simple in simple_commands(&text, language) {
-            let Some(at) = programs(&simple.words)
-                .find(|at| matches!(program_name(&simple.words[*at]).as_str(), "git" | "git.exe"))
-            else {
-                here = moved(&here, &simple.words, language);
+        // asked where the call runs and where the `cd`s before it lead,
+        // both: the `cd` may be in a subshell.
+        let mut answered = vec![false; reading.commands.len()];
+        for (command, answered) in reading.commands.iter().zip(&mut answered) {
+            // Another host's git changes that host's repository.
+            if command.remote {
                 continue;
-            };
-            let mut places = vec![dir.clone()];
-            if here != dir && here.is_dir() {
-                places.push(here.clone());
-                if nearest {
-                    guard.consult(&here);
-                }
             }
-            let args = unredirected(&simple.words[at + 1..]);
-            let shape = format!("{} {}", simple.words[at], args.join(" "));
-            let shape = shape.trim_end().to_string();
-            let mut answered = false;
-            for place in &places {
-                let Some(answer) = git_would_change(place, &args) else {
+            for (program, args) in runs(command).filter_map(<[String]>::split_first) {
+                if !matches!(program_name(program).as_str(), "git" | "git.exe") {
                     continue;
-                };
-                answered = true;
-                match answer {
-                    Ok(paths) => targets.extend(
-                        paths
-                            .into_iter()
-                            .map(|path| (path, Some(format!("`{shape}` would change it")))),
-                    ),
-                    Err(error) => {
-                        refused.push(Refused::unknowable(shape.clone(), &error));
-                        break;
+                }
+                let here = located_dir(&dir, &command.dir, language);
+                let mut places = vec![dir.clone()];
+                if here != dir && here.is_dir() {
+                    places.push(here);
+                    if nearest {
+                        guard.consult(&places[1]);
+                    }
+                }
+                // What is built when the line runs is no revision or path
+                // git knows: it is given as shown.
+                let args: Vec<String> = args.iter().map(|arg| shell::shown(arg)).collect();
+                let shape = shell::shown(format!("{program} {}", args.join(" ")).trim_end());
+                for place in places {
+                    let question = (place, args.clone());
+                    if let Some(known) = asked.get(&question) {
+                        *answered |= *known;
+                        continue;
+                    }
+                    let answer = git_would_change(&question.0, &args);
+                    asked.insert(question, answer.is_some());
+                    let Some(answer) = answer else {
+                        continue;
+                    };
+                    *answered = true;
+                    match answer {
+                        Ok(paths) => targets.extend(
+                            paths
+                                .into_iter()
+                                .map(|path| (path, Some(format!("`{shape}` would change it")))),
+                        ),
+                        Err(error) => {
+                            refuse(&mut refused, Refused::unknowable(shape.clone(), &error));
+                            break;
+                        }
                     }
                 }
             }
-            if answered {
-                asked = true;
-                rest.replace_range(simple.span.clone(), &" ".repeat(simple.span.len()));
-            }
         }
-        if asked {
-            // A directory only those commands wrote, `.` or the one `-C`
-            // names, is the tree git answered for. A file they wrote, as
-            // by a redirection, is judged still.
-            let others = read(&rest, depth).writes;
+        if answered.contains(&true) {
+            // A directory only those commands write, `.` or the one `-C`
+            // names, is the tree git answered for. A file they write, as by
+            // a redirection, is judged still, and so is a directory another
+            // command writes, the shell that runs them among them.
+            let mut tree = std::collections::HashSet::new();
+            let mut others = std::collections::HashSet::new();
+            for (command, answered) in reading.commands.iter().zip(&answered) {
+                if *answered {
+                    tree.extend(&command.writes);
+                } else {
+                    others.extend(&command.writes);
+                }
+            }
             words.retain(|word| {
-                others.contains(word)
+                !tree.contains(word)
+                    || others.contains(word)
                     || !expand(&dir, word, language)
                         .iter()
                         .all(|path| path.is_dir())
             });
-            for word in others {
-                if !words.contains(&word) {
-                    words.push(word);
-                }
-            }
         }
         for word in &words {
             if word.contains([shell::BUILT, shell::SPELLED]) {
@@ -455,9 +468,9 @@ pub fn judge(workspace: &Workspace, nearest: bool, call: Call) -> Result<Judged>
                 .map(|unread| Refused::unread(unread.shape, unread.why)),
         );
         refused.extend(reading.remote_code.map(Refused::remote));
-        let mut verbs = Vec::new();
-        flot_verbs(&text, language, 0, &mut verbs);
-        refused.extend(verbs.into_iter().map(Refused::verb));
+        for verb in reading.commands.iter().flat_map(runs).filter_map(flot_verb) {
+            refuse(&mut refused, Refused::verb(verb));
+        }
     }
     if nearest {
         for (target, _) in &targets {
@@ -491,6 +504,14 @@ pub fn judge(workspace: &Workspace, nearest: bool, call: Call) -> Result<Judged>
         secrets,
         flows: guard.workspaces().cloned().collect(),
     })
+}
+
+/// Adds `found` to `refused`, once: a command read in each directory it
+/// may run in is refused once.
+fn refuse(refused: &mut Vec<Refused>, found: Refused) {
+    if !refused.iter().any(|known| known.said == found.said) {
+        refused.push(found);
+    }
 }
 
 /// Adds `found` to `secrets`, once for each secret.
@@ -617,51 +638,6 @@ fn secret_named(guard: &Guard, dir: &Path, word: &str, language: Shell) -> Optio
         }
     }
     None
-}
-
-/// `words` without their redirections, such as `< p.diff` or `2>/dev/null`:
-/// what the program itself is given.
-fn unredirected(words: &[String]) -> Vec<String> {
-    let mut kept = Vec::new();
-    let mut words = words.iter();
-    while let Some(word) = words.next() {
-        let operator = word.trim_start_matches(|c: char| c.is_ascii_digit() || c == '&');
-        if !operator.starts_with(['<', '>']) {
-            kept.push(word.clone());
-            continue;
-        }
-        // An operator alone takes the next word as its target.
-        if operator.trim_start_matches(['<', '>', '&', '|']).is_empty() {
-            words.next();
-        }
-    }
-    kept
-}
-
-/// The directory a simple command of `words` leaves the shell in, from
-/// `here`: where `cd`, `pushd` or `Set-Location` leads, as far as it can
-/// be told; `here` for any other command.
-fn moved(here: &Path, words: &[String], language: Shell) -> PathBuf {
-    let Some(first) = programs(words).next() else {
-        return here.to_path_buf();
-    };
-    if !matches!(
-        program_name(&words[first]).as_str(),
-        "cd" | "pushd" | "chdir" | "set-location" | "sl" | "push-location"
-    ) {
-        return here.to_path_buf();
-    }
-    let operand = words[first + 1..]
-        .iter()
-        .find(|word| !word.starts_with('-') || word.as_str() == "-");
-    match operand.map(String::as_str) {
-        None => home_dir().unwrap_or_else(|| here.to_path_buf()),
-        Some("-") => here.to_path_buf(),
-        Some(operand) => expand(here, operand, language)
-            .into_iter()
-            .next()
-            .unwrap_or_else(|| here.to_path_buf()),
-    }
 }
 
 /// A call the guard could not judge, as a reason to refuse it.

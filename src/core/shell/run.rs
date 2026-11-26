@@ -1,12 +1,13 @@
 //! What one simple command changes and runs.
 
 use crate::core::reading::{
-    merge, Code, Reading, Runner, Script, Unread, BUILT, DEPTH, RUNS, SPELLED,
+    merge, overflowed, ran, told, Code, Command, Reading, Runner, Script, Unread, BUILT, DEPTH,
+    RUNS, SPELLED,
 };
 
 use super::command::{command, parse, program};
 use super::read::read_in;
-use super::tables::{language, Language, SHELLS};
+use super::tables::{language, Language, SHELLS, TEXT_ONLY};
 use super::vars::Variables;
 use super::writers::written;
 use super::Origin;
@@ -65,7 +66,8 @@ fn script_of(program: &str, path: &str, runner: Runner, depth: usize) -> Reading
 }
 
 /// What one simple command of `words` changes and runs, `depth` strings
-/// deep, given what it reads on its input and the variables the line set.
+/// deep, given what it reads on its input and the variables the line set;
+/// the command it resolves to comes first among the commands it runs.
 pub(super) fn changed(
     words: &[String],
     input: Input,
@@ -73,11 +75,25 @@ pub(super) fn changed(
     vars: &Variables,
     origin: &Origin,
 ) -> Reading {
+    resolved(words, input, depth, vars, origin, false)
+}
+
+/// [`changed`], for a command a wrapper runs when `wrapped`.
+fn resolved(
+    words: &[String],
+    input: Input,
+    depth: usize,
+    vars: &Variables,
+    origin: &Origin,
+    wrapped: bool,
+) -> Reading {
     if depth > DEPTH {
-        return Reading {
+        let mut reading = Reading {
             writes: words.to_vec(),
             ..Reading::default()
         };
+        overflowed(&mut reading, &[words.to_vec()]);
+        return reading;
     }
     let found = command(words);
     if let Some(replace) = found.xargs {
@@ -90,7 +106,50 @@ pub(super) fn changed(
             origin,
         );
     }
-    let Some((name, args)) = found.words.split_first() else {
+    // `sudo -s` with no command runs a shell, which reads its input.
+    if found.words.is_empty() && found.shell {
+        return run(&["sh".to_string()], input, depth, vars, origin);
+    }
+    let mut reading = run(found.words, input, depth, vars, origin);
+    let Some(name) = found.words.first() else {
+        return reading;
+    };
+    let unknown = unknown(name);
+    if let (true, Input::Text(text)) = (unknown, input) {
+        reading
+            .commands
+            .extend(told(code_of(name, text, depth, vars, origin)));
+    }
+    let resolved = Command {
+        unresolved: unknown && (wrapped || found.wrapped),
+        ..ran(found.words, &reading.writes)
+    };
+    reading.commands.insert(0, resolved);
+    reading
+}
+
+/// Whether this reader does not know what the program `name` runs: it is
+/// no shell, interpreter or other program whose commands it reads, and
+/// none that runs only text.
+fn unknown(name: &str) -> bool {
+    let name = program(name);
+    let lowercase = name.to_ascii_lowercase();
+    !(TEXT_ONLY.contains(&name)
+        || SHELLS.contains(&lowercase.as_str())
+        || language(name).is_some()
+        || matches!(
+            name,
+            "eval" | "trap" | "su" | "find" | "." | "source" | "ssh"
+        )
+        || matches!(
+            lowercase.as_str(),
+            "pwsh" | "powershell" | "pwsh.exe" | "powershell.exe" | "cmd" | "cmd.exe"
+        ))
+}
+
+/// What the command `words`, its program first, changes and runs.
+fn run(words: &[String], input: Input, depth: usize, vars: &Variables, origin: &Origin) -> Reading {
+    let Some((name, args)) = words.split_first() else {
         return Reading::default();
     };
     // A program whose name a program that makes text spells may be any:
@@ -105,6 +164,8 @@ pub(super) fn changed(
     if program(name).contains(BUILT) {
         return Reading::default();
     }
+    // A system that does not tell case apart runs `BASH` as `bash`.
+    let lowercase = program(name).to_ascii_lowercase();
     match program(name) {
         "eval" => code_of("eval", &args.join(" "), depth, vars, origin),
         // What `trap` is given runs when the shell gets a signal or exits.
@@ -125,8 +186,14 @@ pub(super) fn changed(
                     "whitelist-environment",
                 ],
             );
+            let mut codes: Vec<&str> = parsed.values(&["c", "command", "session-command"]);
+            // With none, the shell it starts reads its commands from its
+            // input.
+            if let (true, Input::Text(text)) = (codes.is_empty(), input) {
+                codes.push(text);
+            }
             let mut reading = Reading::default();
-            for code in parsed.values(&["c", "command", "session-command"]) {
+            for code in codes {
                 merge(
                     &mut reading,
                     code_of("su", code, depth, &Variables::default(), &Origin::default()),
@@ -134,14 +201,24 @@ pub(super) fn changed(
             }
             reading
         }
+        "ssh" => ssh(args, input, depth),
         "find" => find(args, depth, vars, origin),
         "." | "source" => match args.first() {
             Some(path) => script_of(program(name), path, Runner::Shell, depth),
             None => Reading::default(),
         },
-        "pwsh" | "powershell" => super::powershell::invoked(args, depth),
+        _ if matches!(
+            lowercase.as_str(),
+            "pwsh" | "powershell" | "pwsh.exe" | "powershell.exe"
+        ) =>
+        {
+            super::powershell::invoked(args, depth)
+        }
+        _ if matches!(lowercase.as_str(), "cmd" | "cmd.exe") => {
+            super::powershell::cmd_invoked(args, depth)
+        }
         // `$0` in the code a shell is given is no script's.
-        shell if SHELLS.contains(&shell) => match shell_code(args, input) {
+        shell if SHELLS.contains(&lowercase.as_str()) => match shell_code(args, input) {
             Given::Code(code) => {
                 let origin = Origin {
                     dir: origin.dir.clone(),
@@ -190,6 +267,68 @@ pub(super) fn changed(
     }
 }
 
+/// What `ssh` runs on the host it reaches: the command its words after the
+/// destination spell, or with none the commands it is given on its input,
+/// which the shell there reads. They are told for what they run: what they
+/// write, and the repository a git among them changes, are that host's.
+fn ssh(args: &[String], input: Input, depth: usize) -> Reading {
+    // Letters whose value is the rest of their word or the next one.
+    const VALUED: &str = "BbcDEeFIiJLlmOoPpQRSWw";
+    let mut destination = false;
+    let mut runs = true;
+    let mut reads = true;
+    let mut at = 0;
+    while let Some(arg) = args.get(at) {
+        if arg == "--" {
+            at += 1;
+            if destination {
+                break;
+            }
+        } else if arg.len() > 1 && arg.starts_with('-') {
+            at += 1;
+            for (index, letter) in arg.char_indices().skip(1) {
+                match letter {
+                    'n' | 'f' => reads = false,
+                    'N' | 's' => runs = false,
+                    _ => {}
+                }
+                if VALUED.contains(letter) {
+                    at += usize::from(index + letter.len_utf8() == arg.len());
+                    break;
+                }
+            }
+        } else if destination {
+            break;
+        } else {
+            destination = true;
+            at += 1;
+        }
+    }
+    let command = args.get(at..).unwrap_or_default();
+    let code = match input {
+        _ if !runs => return Reading::default(),
+        _ if !command.is_empty() => command.join(" "),
+        Input::Text(text) if reads => text.to_string(),
+        _ => return Reading::default(),
+    };
+    let found = code_of(
+        "ssh",
+        &code,
+        depth,
+        &Variables::default(),
+        &Origin::default(),
+    );
+    Reading {
+        commands: told(found)
+            .map(|command| Command {
+                remote: true,
+                ..command
+            })
+            .collect(),
+        ..Reading::default()
+    }
+}
+
 /// What `xargs` runs `words` as: with the items of its input appended, or
 /// each in place of `replace`. Items come only from input the line spells.
 fn xargs(
@@ -204,14 +343,15 @@ fn xargs(
     if words.is_empty() {
         return reading;
     }
+    // The items past those read, written as they are.
+    let mut left: Vec<String> = Vec::new();
     let items: Vec<&str> = input
         .map(|text| text.split_whitespace().collect())
         .unwrap_or_default();
     let runs: Vec<Vec<String>> = match replace.filter(|replace| !replace.is_empty()) {
         Some(replace) if !items.is_empty() => {
-            reading
-                .writes
-                .extend(items.iter().skip(RUNS).map(|item| item.to_string()));
+            left.extend(items.iter().skip(RUNS).map(|item| item.to_string()));
+            reading.writes.extend(left.iter().cloned());
             items
                 .iter()
                 .take(RUNS)
@@ -232,8 +372,12 @@ fn xargs(
     for run in runs {
         merge(
             &mut reading,
-            changed(&run, Input::Unknown, depth + 1, vars, origin),
+            resolved(&run, Input::Unknown, depth + 1, vars, origin, true),
         );
+    }
+    // The first command run writes them, for a caller that asks which.
+    if let Some(first) = reading.commands.first_mut() {
+        first.writes.extend(left);
     }
     reading
 }

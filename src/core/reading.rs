@@ -25,6 +25,36 @@ pub struct Reading {
     /// into them, located as `writes` are: where a caller looks for a file
     /// that must not even be read.
     pub named: Vec<String>,
+    /// The simple commands it runs, as this reader resolved them: those of
+    /// the line, and those it runs through a wrapper, a shell, `eval`,
+    /// `xargs`, `find -exec`, `ssh` or PowerShell, in the order read. A
+    /// script a command runs is the caller's to read, and so are its
+    /// commands. Where the reader may be wrong, more are told: a command
+    /// with a variable put in is told as written too, and the text a
+    /// program it does not know reads on its input is told as commands.
+    pub commands: Vec<Command>,
+}
+
+/// A simple command a line runs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Command {
+    /// Its program as written, past reserved words, assignments and
+    /// wrappers such as `sudo`, `timeout` or `xargs`, then the words it is
+    /// given, without redirections.
+    pub words: Vec<String>,
+    /// Whether its program may be any of its words, run with the words
+    /// after it: past [`DEPTH`], where nothing is resolved, and for a
+    /// program this reader does not know that a wrapper runs, as it may be
+    /// a wrapper too.
+    pub unresolved: bool,
+    /// Whether it runs on another host, through `ssh`: what it writes and
+    /// the repository it changes are that host's.
+    pub remote: bool,
+    /// The directory it runs in, from where the line starts; empty for there.
+    pub dir: String,
+    /// What it writes through its words and the commands it runs, located
+    /// as `writes` are.
+    pub writes: Vec<String>,
 }
 
 /// Code an interpreter is given, which this reader does not read: only the
@@ -119,6 +149,40 @@ pub(super) fn merge(into: &mut Reading, found: Reading) {
     into.scripts.extend(found.scripts);
     into.unread.extend(found.unread);
     into.named.extend(found.named);
+    into.commands.extend(found.commands);
+}
+
+/// The command `words` resolve to, as a reading reports it, with what it
+/// writes, from where it runs.
+pub(super) fn ran(words: &[String], writes: &[String]) -> Command {
+    Command {
+        words: words.to_vec(),
+        unresolved: false,
+        remote: false,
+        dir: String::new(),
+        writes: writes.to_vec(),
+    }
+}
+
+/// The commands of `simple`, the words of simple commands read past
+/// [`DEPTH`], where no wrapper, shell or `eval` is resolved: any word may
+/// be the program. Each writes its words.
+pub(super) fn overflowed(into: &mut Reading, simple: &[Vec<String>]) {
+    for words in simple.iter().filter(|words| !words.is_empty()) {
+        into.commands.push(Command {
+            unresolved: true,
+            ..ran(words, words)
+        });
+    }
+}
+
+/// The commands of `found`, told for what they run and not for what they
+/// write: those the reader is not sure run.
+pub(super) fn told(found: Reading) -> impl Iterator<Item = Command> {
+    found.commands.into_iter().map(|command| Command {
+        writes: Vec::new(),
+        ..command
+    })
 }
 
 /// `word` as it is shown, with what a command substituted in it prints as

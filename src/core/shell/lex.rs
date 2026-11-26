@@ -291,6 +291,9 @@ fn names_stream(word: &Word, quoted: bool) -> bool {
 /// `origin` says, and where it ends; `None` for any other `$`, or one
 /// `origin` does not know.
 fn script_name<'a>(chars: &[char], at: usize, origin: &'a Origin) -> Option<(&'a str, usize)> {
+    if chars.get(at) != Some(&'$') {
+        return None;
+    }
     let rest = &chars[at + 1..chars.len().min(at + 18)];
     let forms: [(&str, &Option<String>); 5] = [
         ("{0}", &origin.zero),

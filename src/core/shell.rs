@@ -31,7 +31,7 @@ mod vars;
 mod writers;
 
 pub use crate::core::reading::{
-    shown, Code, Reading, Runner, Script, Unread, BUILT, MKTEMP, SPELLED,
+    shown, Code, Command, Reading, Runner, Script, Unread, BUILT, MKTEMP, SPELLED,
 };
 pub(crate) use paths::{joined, located};
 pub use read::read_at;
@@ -76,7 +76,7 @@ mod tests {
     use super::paths::printed;
     use super::substitution::{basename, dirname};
     use super::*;
-    use crate::core::reading::RUNS;
+    use crate::core::reading::{DEPTH, RUNS};
 
     fn writes(command: &str) -> Vec<String> {
         read(command).writes
@@ -469,6 +469,8 @@ mod tests {
             writes("rm -rf \"$(dirname \"$BASH_SOURCE\")/x\""),
             ["sub/x"]
         );
+        // Only a `$` makes a `0` the script.
+        assert_eq!(writes("rm \"v1.0\" \"$x^0\""), ["v1.0", "$x^0"]);
         assert_eq!(writes("rm -rf \"$(pwd)/tests\""), ["/p/tests"]);
         assert_eq!(writes("cd sub && rm \"$(pwd)/x\""), ["/p/sub/x"]);
         assert_eq!(writes("rm \"$(basename /a/b.sh .sh)\""), ["b"]);
@@ -775,6 +777,260 @@ mod tests {
             "wget -q --spider https://x.example/check.sh",
         ] {
             assert_eq!(writes(command), Vec::<String>::new(), "{command}");
+        }
+    }
+
+    #[test]
+    fn tracers_and_other_wrappers_run_the_command_after_their_options() {
+        for command in [
+            "chronic rm x",
+            "chronic -ev rm x",
+            "unbuffer -p rm x",
+            "strace -f rm x",
+            "strace -o /tmp/log rm x",
+            "strace -fo /tmp/log -e trace=file -s 256 rm x",
+            "strace --output /tmp/log --string-limit=64 rm x",
+            "strace -E LD_PRELOAD=y -u me rm x",
+            "ltrace rm x",
+            "ltrace -l libc.so.6 -o /tmp/log -n 2 rm x",
+            "ltrace --library libc.so.6 -f rm x",
+            "SUDO -u root rm x",
+        ] {
+            assert_eq!(writes(command), ["x"], "{command}");
+        }
+        // Attached to a process, a tracer runs nothing.
+        assert_eq!(writes("strace -p 42"), Vec::<String>::new());
+    }
+
+    #[test]
+    fn the_commands_a_line_runs_are_reported_as_resolved() {
+        let commands = |command: &str| -> Vec<(Vec<String>, String)> {
+            read(command)
+                .commands
+                .into_iter()
+                .map(|command| (command.words, command.dir))
+                .collect()
+        };
+        let words =
+            |words: &[&str]| -> Vec<String> { words.iter().map(|word| word.to_string()).collect() };
+        assert_eq!(
+            commands("cd sub && FOO=1 sudo -u me git stash > out.log"),
+            [
+                (words(&["cd", "sub"]), String::new()),
+                (words(&["git", "stash"]), "sub".to_string())
+            ]
+        );
+        assert_eq!(
+            commands("busybox ash -c 'cd t; flot gc'"),
+            [
+                (words(&["ash", "-c", "cd t; flot gc"]), String::new()),
+                (words(&["cd", "t"]), String::new()),
+                (words(&["flot", "gc"]), String::new()),
+                (words(&["flot", "gc"]), "t".to_string())
+            ]
+        );
+        // `cd` and `cd $HOME` lead home, unless `HOME` is set to another
+        // place when the line runs.
+        for command in ["cd && git stash", "cd \"$HOME\" && git stash"] {
+            assert_eq!(
+                commands(command)[1..],
+                [
+                    (words(&["git", "stash"]), String::new()),
+                    (words(&["git", "stash"]), "~".to_string())
+                ],
+                "{command}"
+            );
+        }
+        assert_eq!(
+            commands("cd ${HOME}/x && git stash")[1..],
+            [
+                (words(&["git", "stash"]), String::new()),
+                (words(&["git", "stash"]), "~/x".to_string())
+            ]
+        );
+        for (command, ran) in [
+            ("eval 'git reset --hard'", &["git", "reset", "--hard"][..]),
+            ("echo a | xargs flot gc", &["flot", "gc", "a"]),
+            ("find . -exec flot gc \\;", &["flot", "gc"]),
+            ("x=$(flot sign)", &["flot", "sign"]),
+            ("bash -lc 'flot gc'", &["flot", "gc"]),
+            ("sh <<'EOF'\nflot gc\nEOF", &["flot", "gc"]),
+            ("strace -f -o log mksh -c 'flot gc'", &["flot", "gc"]),
+            ("pwsh -c 'flot gc'", &["flot", "gc"]),
+            ("cmd /c flot gc", &["flot", "gc"]),
+        ] {
+            assert!(
+                commands(command).contains(&(words(ran), String::new())),
+                "{command}: {:?}",
+                commands(command)
+            );
+        }
+        // What is only text runs nothing.
+        for command in [
+            "echo flot gc",
+            "cat <<'EOF'\nflot gc\nEOF",
+            "command -v git",
+        ] {
+            assert!(
+                !commands(command).iter().any(|(words, _)| words
+                    .first()
+                    .is_some_and(|program| program != "echo" && program != "cat")),
+                "{command}: {:?}",
+                commands(command)
+            );
+        }
+    }
+
+    #[test]
+    fn a_command_writes_what_it_and_the_commands_it_runs_write() {
+        let reading = read("cd sub && sh -c 'git stash; tar -xf x.tar' && rm a");
+        let written: Vec<(&str, Vec<String>)> = reading
+            .commands
+            .iter()
+            .map(|command| (command.words[0].as_str(), command.writes.clone()))
+            .collect();
+        assert_eq!(
+            written,
+            [
+                ("cd", vec![]),
+                ("sh", vec!["sub".to_string()]),
+                ("git", vec!["sub".to_string()]),
+                ("tar", vec!["sub".to_string()]),
+                ("rm", vec!["sub/a".to_string()]),
+            ]
+        );
+    }
+
+    #[test]
+    fn past_the_depth_any_word_may_be_the_command() {
+        let reading = read(&format!("{}flot gc", "eval ".repeat(DEPTH + 2)));
+        assert!(
+            reading
+                .commands
+                .iter()
+                .any(|command| command.unresolved
+                    && command.words.ends_with(&words(&["flot", "gc"]))),
+            "{:?}",
+            reading.commands
+        );
+        // However many words, each is still a path it may write.
+        let many = format!("{}rm {}", "eval ".repeat(DEPTH + 2), "x ".repeat(400));
+        let reading = read(&many);
+        assert!(reading.unread.is_empty(), "{:?}", reading.unread);
+        assert!(reading.writes.contains(&"x".to_string()));
+    }
+
+    fn words(words: &[&str]) -> Vec<String> {
+        words.iter().map(|word| word.to_string()).collect()
+    }
+
+    /// The commands `command` is read to run, as `(words, unresolved,
+    /// remote)`.
+    fn told(command: &str) -> Vec<(Vec<String>, bool, bool)> {
+        read(command)
+            .commands
+            .into_iter()
+            .map(|command| (command.words, command.unresolved, command.remote))
+            .collect()
+    }
+
+    #[test]
+    fn a_command_with_a_variable_put_in_is_told_as_written_too() {
+        for (command, resolved, written) in [
+            (
+                "B=other; read B; git checkout $B",
+                &["git", "checkout", "other"][..],
+                &["git", "checkout", "$B"][..],
+            ),
+            ("F=flot; $F gc", &["flot", "gc"], &["$F", "gc"]),
+            (
+                "B=main; sh -c \"git checkout $B\"",
+                &["git", "checkout", "main"],
+                &["git", "checkout", "$B"],
+            ),
+        ] {
+            let commands = told(command);
+            for ran in [resolved, written] {
+                assert!(
+                    commands.contains(&(words(ran), false, false)),
+                    "{command}: {commands:?}"
+                );
+            }
+        }
+        assert!(!told("git checkout main")
+            .iter()
+            .any(|(ran, ..)| ran.iter().any(|word| word.contains('$'))));
+    }
+
+    #[test]
+    fn what_a_program_it_does_not_know_reads_or_runs_may_be_commands() {
+        let has = |command: &str, ran: &[&str], unresolved: bool, remote: bool| {
+            let commands = told(command);
+            assert!(
+                commands.contains(&(words(ran), unresolved, remote)),
+                "{command}: {commands:?}"
+            );
+        };
+        for command in [
+            "psql <<'EOF'\nflot gc\nEOF",
+            "sudo -s <<'EOF'\nflot gc\nEOF",
+            "sudo -iu root <<'EOF'\nflot gc\nEOF",
+            "su - root <<'EOF'\nflot gc\nEOF",
+            "echo 'flot gc' | foo",
+        ] {
+            has(command, &["flot", "gc"], false, false);
+        }
+        for command in [
+            "ssh -p 22 host flot gc",
+            "ssh host -l me -- flot gc",
+            "ssh host <<'EOF'\nflot gc\nEOF",
+            "ssh host 'cd /srv && flot gc'",
+        ] {
+            has(command, &["flot", "gc"], false, true);
+        }
+        has("sudo foo flot gc", &["foo", "flot", "gc"], true, false);
+        has(
+            "echo a | xargs foo flot gc",
+            &["foo", "flot", "gc", "a"],
+            true,
+            false,
+        );
+        has("foo flot gc", &["foo", "flot", "gc"], false, false);
+        has(
+            "timeout 5 echo flot gc",
+            &["echo", "flot", "gc"],
+            false,
+            false,
+        );
+        // They are told for what they run, not for what they write.
+        let reading = read("foo <<'EOF'\nrm -rf x\nEOF");
+        assert!(reading.writes.is_empty(), "{:?}", reading.writes);
+        assert!(
+            reading
+                .commands
+                .iter()
+                .any(|command| command.words == words(&["rm", "-rf", "x"])
+                    && command.writes.is_empty()),
+            "{:?}",
+            reading.commands
+        );
+        // What a program that runs only text reads runs nothing, and
+        // neither does `ssh` told not to read or run anything.
+        for command in [
+            "cat <<'EOF'\nflot gc\nEOF",
+            "git commit -F- <<'EOF'\nflot gc\nEOF",
+            "sudo tee x <<'EOF'\nflot gc\nEOF",
+            "ssh -n host <<'EOF'\nflot gc\nEOF",
+            "ssh -N host <<'EOF'\nflot gc\nEOF",
+            "su -c true <<'EOF'\nflot gc\nEOF",
+        ] {
+            let commands = told(command);
+            assert!(
+                !commands
+                    .iter()
+                    .any(|(ran, ..)| ran.first().is_some_and(|word| word == "flot")),
+                "{command}: {commands:?}"
+            );
         }
     }
 }

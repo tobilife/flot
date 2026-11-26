@@ -1,118 +1,10 @@
 //! The `flot` commands a command line runs that an agent should leave to
-//! the user, found by a reader of its own that splits the line into simple
-//! commands.
+//! the user, found among the commands the readers resolved.
 
-use super::Shell;
+use crate::core::shell::Command;
 
-/// One simple command of a command line: its words, quotes removed, and
-/// where it is in the line.
-pub(super) struct Simple {
-    pub(super) words: Vec<String>,
-    pub(super) span: std::ops::Range<usize>,
-}
-
-/// The simple commands of `command`, split on unquoted `;`, `&`, `|`,
-/// newlines, parentheses, braces and, in a POSIX shell, backquotes. Close
-/// enough to find a program and what follows it, and no more: what is
-/// found here is only ever a reason to refuse.
-pub(super) fn simple_commands(command: &str, language: Shell) -> Vec<Simple> {
-    let escape = match language {
-        Shell::Posix => '\\',
-        Shell::PowerShell => '`',
-    };
-    let mut simples = Vec::new();
-    let mut words = Vec::new();
-    let mut word = String::new();
-    let mut quoted = false;
-    let mut start = 0;
-    let mut chars = command.char_indices().peekable();
-    let end_word = |word: &mut String, quoted: &mut bool, words: &mut Vec<String>| {
-        if !word.is_empty() || *quoted {
-            words.push(std::mem::take(word));
-        }
-        *quoted = false;
-    };
-    // The character before, outside quotes: a `#` after a blank or an
-    // operator starts a comment.
-    let mut before: Option<char> = None;
-    while let Some((at, c)) = chars.next() {
-        let separates = matches!(c, ';' | '&' | '|' | '\n' | '(' | ')' | '{' | '}')
-            || (c == '`' && matches!(language, Shell::Posix));
-        let comment = c == '#'
-            && word.is_empty()
-            && !quoted
-            && before.is_none_or(|before| before.is_whitespace() || ";&|()".contains(before));
-        before = Some(c);
-        if c == '\'' {
-            quoted = true;
-            for (_, c) in chars.by_ref() {
-                if c == '\'' {
-                    break;
-                }
-                word.push(c);
-            }
-        } else if c == '"' {
-            quoted = true;
-            while let Some((_, c)) = chars.next() {
-                if c == '"' {
-                    break;
-                }
-                if c == escape {
-                    word.extend(chars.next().map(|(_, next)| next));
-                } else {
-                    word.push(c);
-                }
-            }
-        } else if c == escape {
-            word.extend(
-                chars
-                    .next()
-                    .map(|(_, next)| next)
-                    .filter(|next| *next != '\n'),
-            );
-        } else if comment {
-            // A comment runs to the end of the line: `git reset --hard #
-            // why` gives git no `#`.
-            while chars.next_if(|(_, next)| *next != '\n').is_some() {}
-        } else if c == '$' && chars.peek().is_some_and(|(_, next)| *next == '{') {
-            // `${..}` is one word, not a brace group: `${#x}` is no comment.
-            word.push(c);
-            let mut depth = 0;
-            for (_, c) in chars.by_ref() {
-                word.push(c);
-                match c {
-                    '{' => depth += 1,
-                    '}' if depth == 1 => break,
-                    '}' => depth -= 1,
-                    _ => {}
-                }
-            }
-        } else if separates {
-            end_word(&mut word, &mut quoted, &mut words);
-            if !words.is_empty() {
-                simples.push(Simple {
-                    words: std::mem::take(&mut words),
-                    span: start..at,
-                });
-            }
-            start = at + c.len_utf8();
-        } else if c.is_whitespace() {
-            end_word(&mut word, &mut quoted, &mut words);
-        } else {
-            word.push(c);
-        }
-    }
-    end_word(&mut word, &mut quoted, &mut words);
-    if !words.is_empty() {
-        simples.push(Simple {
-            words,
-            span: start..command.len(),
-        });
-    }
-    simples
-}
-
-/// The program a word runs, by its file name, in lowercase.
+/// The program a word runs, by its file name, in lowercase: a system that
+/// does not tell case apart runs `FLOT` as `flot`.
 pub(super) fn program_name(word: &str) -> String {
     word.rsplit(['/', '\\'])
         .next()
@@ -120,84 +12,27 @@ pub(super) fn program_name(word: &str) -> String {
         .to_lowercase()
 }
 
-/// Programs whose string arguments are command lines themselves.
-const SHELLS: [&str; 15] = [
-    "sh",
-    "bash",
-    "zsh",
-    "dash",
-    "ksh",
-    "fish",
-    "eval",
-    "cmd",
-    "cmd.exe",
-    "powershell",
-    "powershell.exe",
-    "pwsh",
-    "pwsh.exe",
-    "iex",
-    "invoke-expression",
-];
-
-/// Programs that run the command their arguments spell, and shell words
-/// that a command follows.
-const WRAPPERS: [&str; 30] = [
-    "sudo", "doas", "env", "timeout", "nice", "nohup", "time", "command", "exec", "xargs",
-    "stdbuf", "ionice", "setsid", "chronic", "strace", "ltrace", "unbuffer", "watch", "eval",
-    "cmd", "cmd.exe", "then", "do", "else", "if", "elif", "while", "until", "!", "busybox",
-];
-
-/// Where in a simple command's `words` the program it runs may be: the
-/// first word past `NAME=value` assignments, and, after a wrapper such as
-/// `sudo` or `timeout`, every word after it.
-pub(super) fn programs(words: &[String]) -> std::ops::Range<usize> {
-    let first = words
-        .iter()
-        .position(|word| {
-            !word
-                .split_once('=')
-                .is_some_and(|(name, _)| !name.is_empty() && !name.contains(['/', '\\']))
-        })
-        .unwrap_or(words.len());
-    let wrapped = words
-        .get(first)
-        .is_some_and(|word| WRAPPERS.contains(&program_name(word).as_str()));
-    first..if wrapped {
-        words.len()
+/// Each way `command` may run, its program first: as resolved, or from
+/// each word on when its program may be any of them.
+pub(super) fn runs(command: &Command) -> impl Iterator<Item = &[String]> {
+    let starts = if command.unresolved {
+        command.words.len()
     } else {
-        (first + 1).min(words.len())
-    }
+        command.words.len().min(1)
+    };
+    (0..starts).map(|at| &command.words[at..])
 }
 
-/// The `flot` commands in `command` that an agent should leave to the user,
-/// as spelled by their verb: `flot init --force`, `flot trust add`, ...
-/// A command run by flot counts, and so does a `flot` word anywhere after
-/// a wrapper such as `timeout 5` or `sudo -u root`, and in a string a
-/// shell is given to run; `echo flot gc` does not.
-pub(super) fn flot_verbs(command: &str, language: Shell, depth: u8, found: &mut Vec<String>) {
-    for simple in simple_commands(command, language) {
-        for at in programs(&simple.words) {
-            let name = program_name(&simple.words[at]);
-            if name == "flot" || name == "flot.exe" {
-                found.extend(refused_verb(&simple.words[at + 1..]));
-            }
-            if depth < 4 && SHELLS.contains(&name.as_str()) {
-                let inner = if ["cmd", "cmd.exe", "sh", "bash", "zsh", "dash", "ksh", "fish"]
-                    .contains(&name.as_str())
-                    || (name == "eval" && matches!(language, Shell::Posix))
-                {
-                    Shell::Posix
-                } else {
-                    Shell::PowerShell
-                };
-                for argument in &simple.words[at + 1..] {
-                    if argument.contains(char::is_whitespace) {
-                        flot_verbs(argument, inner, depth + 1, found);
-                    }
-                }
-            }
-        }
+/// The `flot` command a resolved command of `words`, its program first,
+/// runs when an agent should leave it to the user, as spelled by its verb:
+/// `flot init --force`, `flot trust add`, ... A flot named by its path
+/// counts; `echo flot gc` does not.
+pub(super) fn flot_verb(words: &[String]) -> Option<String> {
+    let (program, args) = words.split_first()?;
+    if !matches!(program_name(program).as_str(), "flot" | "flot.exe") {
+        return None;
     }
+    refused_verb(args)
 }
 
 /// The verb of `flot` run with `args`, when it changes whose evidence
@@ -250,14 +85,21 @@ fn refused_verb(args: &[String]) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::{powershell, shell};
+
+    fn verbs(commands: &[shell::Command]) -> Vec<String> {
+        let mut found: Vec<String> = Vec::new();
+        for verb in commands.iter().flat_map(runs).filter_map(flot_verb) {
+            if !found.contains(&verb) {
+                found.push(verb);
+            }
+        }
+        found
+    }
 
     #[test]
     fn a_flot_command_is_found_where_it_runs_and_not_where_it_is_text() {
-        let verbs = |command: &str| {
-            let mut found = Vec::new();
-            flot_verbs(command, Shell::Posix, 0, &mut found);
-            found
-        };
+        let posix = |command: &str| verbs(&shell::read(command).commands);
         for (command, verb) in [
             ("flot gc", "flot gc"),
             ("timeout 5 flot gc", "flot gc"),
@@ -266,8 +108,39 @@ mod tests {
             ("true && flot -f other.toml run", "flot run -f"),
             ("flot run --proofs-from=main", "flot run --proofs-from"),
             ("flot init --force", "flot init --force"),
+            ("FLOT gc", "flot gc"),
+            ("SUDO -u root flot gc", "flot gc"),
+            ("ash -c 'flot gc'", "flot gc"),
+            ("mksh -c 'flot trust add ci AAAA'", "flot trust add"),
+            ("busybox ash -c 'flot gc'", "flot gc"),
+            ("sh -c \"bash -lc 'flot gc'\"", "flot gc"),
+            ("chronic flot gc", "flot gc"),
+            ("strace -f -o /tmp/log -e trace=file flot gc", "flot gc"),
+            ("ltrace -l libc.so.6 flot gc", "flot gc"),
+            ("unbuffer -p flot gc", "flot gc"),
+            ("eval flot gc", "flot gc"),
+            ("echo x | xargs flot gc", "flot gc"),
+            ("find . -name x -exec flot gc \\;", "flot gc"),
+            ("echo \"$(flot gc)\"", "flot gc"),
+            ("sh <<'EOF'\nflot gc\nEOF", "flot gc"),
+            ("cmd //c flot gc", "flot gc"),
+            ("pwsh -c 'flot gc'", "flot gc"),
+            ("powershell.exe -Command \"flot gc\"", "flot gc"),
+            (
+                "eval eval eval eval eval eval eval eval eval eval flot gc",
+                "flot gc",
+            ),
+            // A program a wrapper runs that the reader does not know may
+            // be a wrapper, and one it feeds text may be a shell.
+            ("sudo foo flot gc", "flot gc"),
+            ("foo <<'EOF'\nflot gc\nEOF", "flot gc"),
+            ("sudo -s <<'EOF'\nflot gc\nEOF", "flot gc"),
+            ("su <<'EOF'\nflot gc\nEOF", "flot gc"),
+            ("ssh host <<'EOF'\nflot gc\nEOF", "flot gc"),
+            ("ssh -p 22 host flot gc", "flot gc"),
+            ("F=flot; $F gc", "flot gc"),
         ] {
-            assert_eq!(verbs(command), [verb], "{command}");
+            assert_eq!(posix(command), [verb], "{command}");
         }
         for command in [
             "echo flot gc",
@@ -276,8 +149,37 @@ mod tests {
             "flot verify",
             "flot trust list",
             "flot init",
+            "cat <<'EOF'\nflot gc\nEOF",
+            "command -v flot gc",
+            "# flot gc",
+            "sudo apt install flot",
+            "timeout 5 echo flot gc",
+            "sudo echo flot gc",
+            "git commit -F- <<'EOF'\nflot gc\nEOF",
+            "iex 'flot gc'",
+            "foo flot gc",
         ] {
-            assert!(verbs(command).is_empty(), "{command}");
+            assert!(posix(command).is_empty(), "{command}");
+        }
+        let powershell = |command: &str| verbs(&powershell::read(command).commands);
+        for (command, verb) in [
+            ("flot.exe gc", "flot gc"),
+            ("& flot trust add me k", "flot trust add"),
+            ("C:\\tools\\flot.exe sign", "flot sign"),
+            ("iex 'flot gc'", "flot gc"),
+            ("Invoke-Expression \"flot key rotate\"", "flot key rotate"),
+            ("cmd /c \"flot gc\"", "flot gc"),
+            ("Start-Process flot -ArgumentList 'gc'", "flot gc"),
+            ("$x = flot sign", "flot sign"),
+        ] {
+            assert_eq!(powershell(command), [verb], "{command}");
+        }
+        for command in [
+            "Write-Output 'flot gc'",
+            "echo flot gc",
+            "flot gc -WhatIf --dry-run",
+        ] {
+            assert!(powershell(command).is_empty(), "{command}");
         }
     }
 }

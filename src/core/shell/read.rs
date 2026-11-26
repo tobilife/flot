@@ -2,7 +2,7 @@
 
 use std::collections::HashSet;
 
-use crate::core::reading::{merge, Code, Reading, Script, DEPTH};
+use crate::core::reading::{merge, overflowed, told, Code, Command, Reading, Script, DEPTH};
 
 use super::lex::{is_word, tokens, Token};
 use super::paths::{joined, lexical, located, moved, output_of, program_of};
@@ -58,17 +58,23 @@ const FED: &str = "/dev/fd/63";
 pub(super) fn read_in(command: &str, depth: usize, vars: &Variables, origin: &Origin) -> Reading {
     let tokens = tokens(command, origin);
     if depth > DEPTH {
-        let writes = tokens
-            .into_iter()
-            .filter_map(|token| match token {
-                Token::Word(word) => Some(resolved(word, DEPTH, vars, origin)),
-                _ => None,
-            })
-            .collect();
-        return Reading {
-            writes,
+        // The words of each simple command, split at every operator.
+        let mut simple: Vec<Vec<String>> = vec![Vec::new()];
+        for token in tokens {
+            match token {
+                Token::Word(word) => simple
+                    .last_mut()
+                    .expect("one at least")
+                    .push(resolved(word, DEPTH, vars, origin)),
+                _ => simple.push(Vec::new()),
+            }
+        }
+        let mut reading = Reading {
+            writes: simple.concat(),
             ..Reading::default()
         };
+        overflowed(&mut reading, &simple);
+        return reading;
     }
     let mut reading = Reading::default();
     let mut vars = vars.clone();
@@ -207,6 +213,13 @@ pub(super) fn read_in(command: &str, depth: usize, vars: &Variables, origin: &Or
             merge(&mut found, changed(run, stdin, depth, &vars, &place));
             found.named.extend(run.iter().cloned());
         }
+        // A variable may hold what this reader did not see it set to, by
+        // `read`, `eval` or a script it sources: the commands as written,
+        // with no variable put in, are told too.
+        if runs.iter().any(|run| *run != words) {
+            let written = changed(&words, stdin, depth, &Variables::default(), &place);
+            found.commands.extend(told(written));
+        }
         // What it writes into the files it is redirected to, when the line
         // spells it, is the text of a script run from one of them after.
         if let Some(text) = runs.first().and_then(|run| output_of(run, stdin)) {
@@ -250,6 +263,19 @@ pub(super) fn read_in(command: &str, depth: usize, vars: &Variables, origin: &Or
                 reading.code.push(Code {
                     dir: located(dir.as_deref(), &code.dir),
                     ..code.clone()
+                });
+            }
+        }
+        for command in found.commands.drain(..) {
+            for dir in &dirs {
+                reading.commands.push(Command {
+                    dir: located(dir.as_deref(), &command.dir),
+                    writes: command
+                        .writes
+                        .iter()
+                        .map(|path| located(dir.as_deref(), path))
+                        .collect(),
+                    ..command.clone()
                 });
             }
         }

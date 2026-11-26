@@ -1,7 +1,7 @@
 //! What one statement changes and runs: cmdlets, native programs and
 //! nested PowerShell or `cmd`.
 
-use crate::core::reading::{Reading, Runner, Script, Unread, DEPTH};
+use crate::core::reading::{merge, overflowed, ran, Reading, Runner, Script, Unread, DEPTH};
 use crate::core::shell;
 
 use super::cmdlets::{
@@ -22,8 +22,17 @@ const WRITES_INPUT: &[&str] = &[
 /// Cmdlets a piped string is the content of, not the path to.
 const CONTENT_INPUT: &[&str] = &["set-content", "sc", "add-content", "ac", "new-item", "ni"];
 
+/// `reading` of what the command `words` runs, with that command first
+/// among those it runs.
+fn command_first(mut reading: Reading, words: &[String]) -> Reading {
+    let command = ran(words, &reading.writes);
+    reading.commands.insert(0, command);
+    reading
+}
+
 /// What a cmdlet or a native program changes through its arguments; a
-/// cmdlet given no path changes what is piped into it, `input`.
+/// cmdlet given no path changes what is piped into it, `input`. The
+/// command it runs comes first among the commands it runs.
 pub(super) fn changed_at(arguments: &[Argument], input: &Piped, depth: usize) -> Reading {
     // `$x = Remove-Item y`: the command is past the assignment.
     let arguments = match arguments {
@@ -40,6 +49,15 @@ pub(super) fn changed_at(arguments: &[Argument], input: &Piped, depth: usize) ->
         return Reading::default();
     };
     let name = command_name(&first.0);
+    let words: Vec<String> = std::iter::once(name.clone())
+        .chain(
+            arguments
+                .iter()
+                .flatten()
+                .skip(1)
+                .map(|(word, _)| word.clone()),
+        )
+        .collect();
     if EVALUATORS.contains(&name.as_str()) {
         // `iex "Remove-Item x"` runs its string, or the one piped into it.
         let code: Vec<&str> = arguments[1..]
@@ -53,14 +71,14 @@ pub(super) fn changed_at(arguments: &[Argument], input: &Piped, depth: usize) ->
         } else {
             code.join(" ")
         };
-        return read_at(&code, depth + 1);
+        return command_first(read_at(&code, depth + 1), &words);
     }
     if matches!(name.as_str(), "start-process" | "start" | "saps") {
-        return started(&arguments[1..], depth);
+        return command_first(started(&arguments[1..], depth), &words);
     }
     // A script runs in this shell, `&` or `.` before it or not.
     if name.ends_with(".ps1") {
-        return Reading {
+        let reading = Reading {
             scripts: file_path(&first.0)
                 .map(|path| Script {
                     named: path.clone(),
@@ -75,21 +93,13 @@ pub(super) fn changed_at(arguments: &[Argument], input: &Piped, depth: usize) ->
                 .collect(),
             ..Reading::default()
         };
+        return command_first(reading, &words);
     }
     let Some(kind) = CMDLETS
         .iter()
         .find(|(names, _)| names.contains(&name.as_str()))
         .map(|(_, kind)| *kind)
     else {
-        let words: Vec<String> = std::iter::once(name)
-            .chain(
-                arguments
-                    .iter()
-                    .flatten()
-                    .skip(1)
-                    .map(|(word, _)| word.clone()),
-            )
-            .collect();
         return native(&words, depth);
     };
     let bound = Bound::new(&arguments[1..]);
@@ -154,39 +164,46 @@ pub(super) fn changed_at(arguments: &[Argument], input: &Piped, depth: usize) ->
     if bound.unknown {
         changed.extend(bound.positional.iter().flatten().cloned());
     }
-    Reading {
+    let reading = Reading {
         writes: changed,
         ..Reading::default()
-    }
+    };
+    command_first(reading, &words)
 }
 
 /// What a native program changes: the string `cmd /c` or `powershell
-/// -Command` runs, read again; any other as the shell reader reads it.
+/// -Command` runs, read again; any other as the shell reader reads it,
+/// which resolves the command it runs.
 fn native(words: &[String], depth: usize) -> Reading {
     let Some((name, args)) = words.split_first() else {
         return Reading::default();
     };
     let name = command_name(name);
     match name.as_str() {
-        "cmd" => {
-            let code = args.iter().position(|arg| {
-                ["/c", "/k", "/r"]
-                    .iter()
-                    .any(|flag| arg.eq_ignore_ascii_case(flag))
-            });
-            Reading {
-                writes: code
-                    .map(|at| cmd(&args[at + 1..].join(" "), depth + 1))
-                    .unwrap_or_default(),
-                ..Reading::default()
-            }
-        }
-        "powershell" | "pwsh" => invoked(args, depth),
+        "cmd" => command_first(cmd_invoked(args, depth), words),
+        "powershell" | "pwsh" => command_first(invoked(args, depth), words),
         _ => {
             let words: Vec<String> = std::iter::once(name).chain(args.iter().cloned()).collect();
             shell::changed_by(&words, depth)
         }
     }
+}
+
+/// What `cmd` given `args` runs, `depth` strings deep: the string after
+/// `/c`, `/k` or `/r` (`//c` as Git Bash passes it on), read with cmd's
+/// rules.
+pub(crate) fn cmd_invoked(args: &[String], depth: usize) -> Reading {
+    let code = args.iter().position(|arg| {
+        let arg = arg
+            .strip_prefix('/')
+            .filter(|rest| rest.starts_with('/'))
+            .unwrap_or(arg);
+        ["/c", "/k", "/r"]
+            .iter()
+            .any(|flag| arg.eq_ignore_ascii_case(flag))
+    });
+    code.map(|at| cmd(&args[at + 1..].join(" "), depth + 1))
+        .unwrap_or_default()
 }
 
 /// What `powershell` or `pwsh` is given to run.
@@ -405,6 +422,7 @@ fn started(arguments: &[Argument], depth: usize) -> Reading {
         .collect();
     let found = changed_at(&run, &Piped::default(), depth + 1);
     reading.writes.extend(found.writes);
+    reading.commands = found.commands;
     reading.remote_code = found.remote_code;
     reading.code = found.code;
     reading.scripts = found.scripts;
@@ -446,12 +464,18 @@ fn command_line(line: &str) -> Vec<String> {
 /// What `cmd /c` runs, read with cmd's rules: `&`, `&&`, `||`, `|` and
 /// parentheses separate commands, `"` quotes, `^` escapes, and `>` writes
 /// the word after it.
-fn cmd(command: &str, depth: usize) -> Vec<String> {
+fn cmd(command: &str, depth: usize) -> Reading {
     if depth > DEPTH {
-        return command.split_whitespace().map(str::to_string).collect();
+        let words: Vec<String> = command.split_whitespace().map(str::to_string).collect();
+        let mut reading = Reading {
+            writes: words.clone(),
+            ..Reading::default()
+        };
+        overflowed(&mut reading, &[words]);
+        return reading;
     }
     let chars: Vec<char> = command.chars().collect();
-    let mut writes = Vec::new();
+    let mut reading = Reading::default();
     let mut words: Vec<String> = Vec::new();
     let mut word = String::new();
     let mut quoted = false;
@@ -472,7 +496,7 @@ fn cmd(command: &str, depth: usize) -> Vec<String> {
         if ends && (!word.is_empty() || quoted) {
             let done = std::mem::take(&mut word);
             match redirect.take() {
-                Some(true) if !done.eq_ignore_ascii_case("nul") => writes.push(done),
+                Some(true) if !done.eq_ignore_ascii_case("nul") => reading.writes.push(done),
                 Some(_) => {}
                 None => words.push(done),
             }
@@ -480,7 +504,7 @@ fn cmd(command: &str, depth: usize) -> Vec<String> {
         }
         match c {
             None => {
-                writes.extend(builtin(&words, depth));
+                merge(&mut reading, builtin(&words, depth));
                 break;
             }
             Some('"') => {
@@ -496,7 +520,7 @@ fn cmd(command: &str, depth: usize) -> Vec<String> {
                 word.extend(chars.get(at));
             }
             Some('&' | '|' | '(' | ')' | '\n' | '\r') => {
-                writes.extend(builtin(&words, depth));
+                merge(&mut reading, builtin(&words, depth));
                 words.clear();
                 if matches!(c, Some('&' | '|')) && chars.get(at + 1).copied() == c {
                     at += 1;
@@ -519,15 +543,15 @@ fn cmd(command: &str, depth: usize) -> Vec<String> {
         }
         at += 1;
     }
-    writes
+    reading
 }
 
 /// What one command `cmd` runs changes: its built-ins `del`, `rd`, `copy`,
 /// `move` and `ren` by cmd's rules, any other program as [`native`] reads
-/// it.
-fn builtin(words: &[String], depth: usize) -> Vec<String> {
+/// it; the command first among those it runs.
+fn builtin(words: &[String], depth: usize) -> Reading {
     let Some((name, args)) = words.split_first() else {
-        return Vec::new();
+        return Reading::default();
     };
     let operands: Vec<String> = args
         .iter()
@@ -535,26 +559,25 @@ fn builtin(words: &[String], depth: usize) -> Vec<String> {
         .cloned()
         .collect();
     let name = command_name(name.trim_start_matches('@'));
-    match name.as_str() {
+    let writes = match name.as_str() {
         "del" | "erase" | "rd" | "rmdir" => operands,
-        "copy" | "move" => {
-            let Some((destination, sources)) = operands.split_last() else {
-                return Vec::new();
-            };
-            if sources.is_empty() {
-                // `copy x` copies it here, or what it holds when it is a
-                // directory.
-                return vec![base(destination).to_string(), ".".to_string()];
+        "copy" | "move" => match operands.split_last() {
+            None => Vec::new(),
+            // `copy x` copies it here, or what it holds when it is a
+            // directory.
+            Some((destination, [])) => vec![base(destination).to_string(), ".".to_string()],
+            Some((destination, sources)) => {
+                let mut written = if name == "move" {
+                    sources.to_vec()
+                } else {
+                    // A directory copied puts what it holds in the
+                    // destination.
+                    vec![destination.clone()]
+                };
+                written.extend(into(destination, sources));
+                written
             }
-            let mut written = if name == "move" {
-                sources.to_vec()
-            } else {
-                // A directory copied puts what it holds in the destination.
-                vec![destination.clone()]
-            };
-            written.extend(into(destination, sources));
-            written
-        }
+        },
         // What the source holds lands in the destination, by default here.
         "xcopy" | "robocopy" => match operands.as_slice() {
             [_] => vec![".".to_string()],
@@ -570,8 +593,18 @@ fn builtin(words: &[String], depth: usize) -> Vec<String> {
         },
         "mklink" => operands.first().cloned().into_iter().collect(),
         "echo" | "rem" | "type" | "dir" | "cd" | "chdir" | "pushd" | "popd" | "set" => Vec::new(),
-        _ => native(words, depth).writes,
-    }
+        _ => {
+            let words: Vec<String> = std::iter::once(name).chain(args.iter().cloned()).collect();
+            return native(&words, depth);
+        }
+    };
+    command_first(
+        Reading {
+            writes,
+            ..Reading::default()
+        },
+        words,
+    )
 }
 
 /// What copying or moving `sources` to `destination` writes: the

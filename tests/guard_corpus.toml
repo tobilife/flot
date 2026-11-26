@@ -163,29 +163,50 @@ note = "xargs given the file in a here-string"
 shell = "sh"
 command = "chronic rm check.sh"
 protects = ["check.sh"]
-status = "open"
-note = "a wrapper the reader does not know (moreutils' chronic) runs its arguments as a command"
+status = "closed"
+note = "moreutils' chronic runs its arguments as a command"
 
 [[row]]
 shell = "sh"
 command = "strace -f rm check.sh"
 protects = ["check.sh"]
-status = "open"
+status = "closed"
 note = "a tracer, with an option, runs its arguments as a command"
+
+[[row]]
+shell = "sh"
+command = "strace -o /tmp/log rm check.sh"
+protects = ["check.sh"]
+status = "closed"
+note = "a tracer's option that takes a value is not the command"
 
 [[row]]
 shell = "sh"
 command = "ltrace rm check.sh"
 protects = ["check.sh"]
-status = "open"
+status = "closed"
 note = "a library tracer runs its arguments as a command"
 
 [[row]]
 shell = "sh"
 command = "unbuffer rm check.sh"
 protects = ["check.sh"]
-status = "open"
+status = "closed"
 note = "expect's unbuffer runs its arguments as a command"
+
+[[row]]
+shell = "sh"
+command = "strace -f cargo test"
+protects = []
+status = "allowed"
+note = "a tracer running a command that changes no proof"
+
+[[row]]
+shell = "sh"
+command = "chronic cargo build"
+protects = []
+status = "allowed"
+note = "chronic running a command that changes no proof"
 
 # --- Wildcards, braces, variables and other names
 
@@ -1281,6 +1302,34 @@ note = "a merge that brings another proof"
 
 [[row]]
 shell = "sh"
+command = "B=other; read B <<< weak; git checkout $B"
+protects = ["git checkout $B"]
+status = "closed"
+note = "read sets a variable the reader does not follow: the command as written is asked too"
+
+[[row]]
+shell = "sh"
+command = "B=other; eval B=weak; git checkout $B"
+protects = ["git checkout $B"]
+status = "closed"
+note = "eval sets a variable the reader does not follow"
+
+[[row]]
+shell = "sh"
+command = "B=other; printf -v B weak; git checkout $B"
+protects = ["git checkout $B"]
+status = "closed"
+note = "printf -v sets a variable the reader does not follow"
+
+[[row]]
+shell = "sh"
+command = "B=other; . scripts/ok.sh; git checkout $B"
+protects = ["git checkout $B"]
+status = "closed"
+note = "a sourced script may set any variable"
+
+[[row]]
+shell = "sh"
 command = "git merge other"
 protects = []
 status = "allowed"
@@ -1516,22 +1565,120 @@ note = "a flot command in busybox sh's command line"
 shell = "sh"
 command = "ash -c 'flot gc'"
 protects = ["flot gc"]
-status = "open"
-note = "a flot command in the command line of a shell the flot-verb reader does not know, though the path reader reads `ash -c 'rm check.sh'`"
+status = "closed"
+note = "a flot command in ash's command line, found as the path reader reads `ash -c 'rm check.sh'`"
 
 [[row]]
 shell = "sh"
 command = "mksh -c 'flot trust add ci AAAA'"
 protects = ["flot trust add"]
-status = "open"
-note = "a flot command in the command line of a shell the flot-verb reader does not know, though the path reader reads `mksh -c 'rm check.sh'`"
+status = "closed"
+note = "a flot command in mksh's command line"
 
 [[row]]
 shell = "sh"
 command = "busybox ash -c 'flot gc'"
 protects = ["flot gc"]
-status = "open"
-note = "busybox running a shell the flot-verb reader does not know"
+status = "closed"
+note = "busybox running ash"
+
+[[row]]
+shell = "sh"
+command = "ash -c 'git reset --hard'"
+protects = ["check.sh"]
+status = "closed"
+note = "a whole-tree git command in a shell's command line: git is asked what it changes"
+
+[[row]]
+shell = "sh"
+command = "ash -c 'git pull'"
+protects = ["git pull"]
+status = "closed"
+note = "a whole-tree git command in a shell's command line, where git cannot say what it changes"
+
+[[row]]
+shell = "sh"
+command = "sudo faketime 2020-01-01 flot gc"
+protects = ["flot gc"]
+status = "closed"
+note = "a program a wrapper runs that the reader does not know may be a wrapper itself"
+
+[[row]]
+shell = "sh"
+command = "docker exec -i box sh <<'EOF'\nflot gc\nEOF"
+protects = ["flot gc"]
+status = "closed"
+note = "a program the reader does not know may hand what it reads to a shell"
+
+[[row]]
+shell = "sh"
+command = "sudo -s <<'EOF'\nflot gc\nEOF"
+protects = ["flot gc"]
+status = "closed"
+note = "sudo -s with no command starts a shell, which reads its input"
+
+[[row]]
+shell = "sh"
+command = "su <<'EOF'\nflot gc\nEOF"
+protects = ["flot gc"]
+status = "closed"
+note = "su with no -c starts a shell, which reads its input"
+
+[[row]]
+shell = "sh"
+command = "ssh host <<'EOF'\nflot gc\nEOF"
+protects = ["flot gc"]
+status = "closed"
+note = "the shell ssh starts reads its input; the host may be this one, or share the store"
+
+[[row]]
+shell = "sh"
+command = "ssh -p 22 host 'cd /srv && flot gc'"
+protects = ["flot gc"]
+status = "closed"
+note = "the command ssh runs on the host it reaches"
+
+[[row]]
+shell = "sh"
+command = "ssh host 'cd /srv && git pull'"
+protects = []
+status = "allowed"
+note = "a git command on another host changes that host's repository"
+
+[[row]]
+shell = "sh"
+command = "timeout 5 echo flot gc"
+protects = []
+status = "allowed"
+note = "a wrapper running echo: the flot command is text"
+
+[[row]]
+shell = "sh"
+command = "sudo echo flot gc"
+protects = []
+status = "allowed"
+note = "sudo running echo"
+
+[[row]]
+shell = "sh"
+command = "cat <<'EOF'\nflot gc\nEOF"
+protects = []
+status = "allowed"
+note = "a here-document cat only prints"
+
+[[row]]
+shell = "sh"
+command = "git commit -F- <<'EOF'\nflot gc\nEOF"
+protects = []
+status = "allowed"
+note = "a commit message read from a here-document"
+
+[[row]]
+shell = "sh"
+command = "iex 'flot gc'"
+protects = []
+status = "allowed"
+note = "iex is PowerShell's; to a POSIX shell it is Elixir's, which runs no shell command"
 
 # --- Downloaded code
 
@@ -1692,6 +1839,13 @@ command = "$f = 'notes.md'; Remove-Item $f"
 protects = []
 status = "allowed"
 note = "a variable that names nothing guarded"
+
+[[row]]
+shell = "powershell"
+command = "$b = 'other'; Set-Variable b weak; git checkout $b"
+protects = ["git checkout $b"]
+status = "closed"
+note = "Set-Variable sets a variable the reader does not follow: the command as written is asked too"
 
 [[row]]
 shell = "powershell"

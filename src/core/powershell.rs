@@ -28,7 +28,7 @@ mod run;
 mod vars;
 
 pub use read::read_at;
-pub(crate) use run::invoked;
+pub(crate) use run::{cmd_invoked, invoked};
 
 // `run.rs` decodes `-EncodedCommand` with `super::digest`.
 use crate::core::digest;
@@ -459,5 +459,57 @@ mod tests {
         })
         .collect();
         assert!(named.is_empty(), "{}", named.join("\n"));
+    }
+
+    #[test]
+    fn the_commands_a_line_runs_are_reported_with_what_they_write() {
+        let commands = |command: &str| -> Vec<(Vec<String>, Vec<String>)> {
+            read(command)
+                .commands
+                .into_iter()
+                .map(|command| (command.words, command.writes))
+                .collect()
+        };
+        let strings =
+            |words: &[&str]| -> Vec<String> { words.iter().map(|word| word.to_string()).collect() };
+        assert_eq!(
+            commands("git stash > out.txt; Remove-Item -Recurse tests"),
+            [
+                (strings(&["git", "stash"]), strings(&[".", "out.txt"])),
+                (
+                    strings(&["remove-item", "-Recurse", "tests"]),
+                    strings(&["tests"])
+                ),
+            ]
+        );
+        // A statement that runs no command writes what it writes itself.
+        assert_eq!(
+            commands("[IO.Directory]::Delete('.', $true)"),
+            [(Vec::new(), strings(&["."]))]
+        );
+        for (command, ran) in [
+            ("iex 'flot gc'", &["flot", "gc"][..]),
+            ("& 'C:\\tools\\flot.exe' sign", &["flot", "sign"]),
+            ("cmd /c \"cd x & @flot gc\"", &["flot", "gc"]),
+            ("Start-Process flot -ArgumentList 'gc'", &["flot", "gc"]),
+            (
+                "powershell -Command \"git reset --hard\"",
+                &["git", "reset", "--hard"],
+            ),
+            ("$out = git pull", &["git", "pull"]),
+            // A variable may hold what the reader did not see it set to:
+            // the command is told as written too.
+            (
+                "$b = 'other'; git checkout $b",
+                &["git", "checkout", "other"],
+            ),
+            ("$b = 'other'; git checkout $b", &["git", "checkout", "$b"]),
+        ] {
+            assert!(
+                commands(command).iter().any(|(words, _)| *words == ran),
+                "{command}: {:?}",
+                commands(command)
+            );
+        }
     }
 }

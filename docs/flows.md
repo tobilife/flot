@@ -701,11 +701,14 @@ running it, for the files it would change:
   `find -delete`/`-exec`, and `git checkout`, `restore`, `rm`, `mv` and
   `config`;
 - through `if`, `for`, `while`, `{ }`, `!`, comments, arithmetic and
-  wrappers (`sudo -u x`, `timeout 5`, `env`, `nice -n 5`, `busybox`);
+  wrappers (`sudo -u x`, `timeout 5`, `env`, `nice -n 5`, `busybox`,
+  `chronic`, `strace -o log`, `ltrace`, `unbuffer`);
 - code run from a string, read again: `eval`, `bash -c`, `su -c`, `$(…)`, a
-  here-document or `echo … |` fed to a shell, and `xargs` fed a here-string
-  or `echo`;
-- after `cd DIR`, `pushd DIR` or `git -C DIR`, in that directory.
+  here-document or `echo … |` fed to a shell (`ash`, `mksh` and
+  `busybox ash` among them, and `sudo -s` or `su`), and `xargs` fed a
+  here-string or `echo`;
+- after `cd DIR`, `pushd DIR` or `git -C DIR`, in that directory; `cd` and
+  `cd $HOME` lead home, as `cd ~` does.
 
 Words are expanded first, as the shell would: `{a,b}`, `~`, `$HOME`,
 `${HOME}`, `$PWD`, `${PWD}`, and `*`, `?` and `[…]` against the disk. A
@@ -719,7 +722,15 @@ interactive rebase; a revision git does not know). The `flot` commands that
 change whose evidence counts are left to the user: `init --force`,
 `trust add`/`remove`/`rotate`, `key init`/`rotate`, `sign`, `import`,
 `pull`, `gc` (not `gc --dry-run`), and `run`, `verify` or `diff` with
-`--proofs-from` or `-f`. It also refuses code fetched by `curl` or `wget`
+`--proofs-from` or `-f`. These git and `flot` commands are found as the
+files are: past wrappers, in shells, `eval`, `xargs`, `find -exec`, `$(…)`,
+PowerShell and `cmd`. A git command with a variable in it is also put to git
+as written (`read B; git checkout $B`). Input fed to a program flot does not
+know is read as commands (`docker exec -i c sh <<EOF`), and so are the words
+after an unknown program a wrapper runs (`sudo faketime … flot gc`). `ssh`'s
+command and input are read for `flot` commands only, since files and git
+there are the other host's. Text is not a command: `echo flot gc`,
+`timeout 5 echo flot gc`, `cat <<EOF`, `git commit -F- <<EOF`. It also refuses code fetched by `curl` or `wget`
 and piped into an interpreter (`curl … | sh`, `bash <(curl …)`), which runs
 outside any step's receipt. A quoted here-document's body is data, and a
 quoted `>` is text. Real output, with `check.sh` edited and not committed:

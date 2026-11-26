@@ -2,7 +2,7 @@
 
 use std::collections::HashSet;
 
-use crate::core::reading::{Reading, Script, DEPTH};
+use crate::core::reading::{overflowed, ran, told, Command, Reading, Script, DEPTH};
 use crate::core::shell;
 
 use super::cmdlets::{command_name, Argument, Piped, EVALUATORS, FETCHERS};
@@ -31,15 +31,31 @@ pub fn read_at(command: &str, depth: usize) -> Reading {
                 _ => None,
             })
             .collect();
-        return Reading {
+        let mut reading = Reading {
             writes,
             ..Reading::default()
         };
+        // The words of each statement, split at every operator.
+        let mut statements: Vec<Vec<String>> = vec![Vec::new()];
+        for token in &tokens {
+            match token {
+                Token::Word(word, _) => statements
+                    .last_mut()
+                    .expect("one at least")
+                    .push(word.clone()),
+                Token::Comma => {}
+                _ => statements.push(Vec::new()),
+            }
+        }
+        overflowed(&mut reading, &statements);
+        return reading;
     }
     let mut reading = Reading::default();
     let mut remote = None;
     let mut names: Vec<String> = Vec::new();
     let mut arguments: Vec<Argument> = Vec::new();
+    // The statement's arguments as written, with no variable put in.
+    let mut written: Vec<Argument> = Vec::new();
     // What the statement being read writes by redirection or a method.
     let mut redirected: Vec<String> = Vec::new();
     // What the statement before pipes into this one.
@@ -117,11 +133,14 @@ pub fn read_at(command: &str, depth: usize) -> Reading {
                         .map(|value| (value, *quoted))
                         .collect()
                 };
+                let as_written = (word.clone(), *quoted);
                 if joining && !arguments.is_empty() {
                     arguments.last_mut().expect("not empty").extend(values);
+                    written.last_mut().expect("as many").push(as_written);
                 } else if !(arguments.is_empty() && !*quoted && word == ".") {
                     // `.` dot-sources the command after it.
                     arguments.push(values);
+                    written.push(vec![as_written]);
                 }
                 joining = false;
             }
@@ -147,6 +166,22 @@ pub fn read_at(command: &str, depth: usize) -> Reading {
                     names.push(name.clone());
                 }
                 let mut found = changed_at(&arguments, &input, depth);
+                // A variable may hold what this reader did not see it set
+                // to, by `Set-Variable` or a script it dot-sources: the
+                // commands as written, with no variable put in, are told
+                // too.
+                if written != arguments {
+                    found
+                        .commands
+                        .extend(told(changed_at(&written, &input, depth)));
+                }
+                // What the statement writes by redirection or a method, its
+                // command writes; with none, the statement does.
+                match found.commands.first_mut() {
+                    Some(first) => first.writes.extend(redirected.iter().cloned()),
+                    None if !redirected.is_empty() => found.commands.push(ran(&[], &redirected)),
+                    None => {}
+                }
                 found.writes.append(&mut redirected);
                 found
                     .named
@@ -178,6 +213,20 @@ pub fn read_at(command: &str, depth: usize) -> Reading {
                         reading.code.push(shell::Code {
                             dir: located(dir.as_deref(), &code.dir),
                             ..code.clone()
+                        });
+                    }
+                }
+                for command in found.commands.drain(..) {
+                    for dir in &dirs {
+                        reading.commands.push(Command {
+                            dir: located(dir.as_deref(), &command.dir),
+                            writes: command
+                                .writes
+                                .iter()
+                                .filter_map(|path| file_path(path))
+                                .map(|path| located(dir.as_deref(), &path))
+                                .collect(),
+                            ..command.clone()
                         });
                     }
                 }
@@ -222,6 +271,7 @@ pub fn read_at(command: &str, depth: usize) -> Reading {
                 }
                 input = on;
                 arguments.clear();
+                written.clear();
                 joining = false;
             }
         }

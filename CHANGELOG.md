@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.9
 
 The guard finds git and `flot` commands with the same reading that finds the
 files a command line changes; its second, cruder lexer is gone. Measured

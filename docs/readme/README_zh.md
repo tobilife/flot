@@ -20,7 +20,7 @@
 
 <code>cargo install flot-cli</code>
 
-最新版本 **0.2.8**：守卫会追踪一次调用所运行的变量、脚本和解释器代码，拒绝任何提到签名密钥的调用，并按输出它的程序来判断命令替换，因此普通 bash 脚本可以通过；macOS 上也会停止逃离步骤的进程 · [更新日志](../../CHANGELOG.md)
+最新版本 **0.2.9**：`flot run` 在 stderr 上实时显示正在运行的步骤（终端上是实时视图，CI 中每个事件一行）；守卫用找出被改文件的同一种解析来找 git 和 `flot` 命令，堵住了经由 `chronic`、`strace`、`ash`、`sudo -s`、`ssh` 和变量的绕过 · [更新日志](../../CHANGELOG.md)
 
 </div>
 

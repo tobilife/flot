@@ -8,7 +8,7 @@ branding:
 inputs:
   version:
     description: flot release to install, 0.2.4 or later, which carry a build provenance attestation; `path` uses the flot already on PATH.
-    default: "0.2.8"
+    default: "0.2.9"
   working-directory:
     description: Directory of the flow; flot finds the nearest flot.toml at or above it.
     default: "."

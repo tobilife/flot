@@ -20,7 +20,7 @@
 
 <code>cargo install flot-cli</code>
 
-Latest release **0.2.8**: the guard follows the variables, scripts and interpreter code a call runs, refuses any call naming the signing key, and judges a command substitution by the program that prints it, so ordinary bash scripts pass; macOS stops processes that escape a step · [changelog](CHANGELOG.md)
+Latest release **0.2.9**: `flot run` shows its steps live on stderr as they run (a view on a terminal, one line per event in CI); the guard finds git and `flot` commands with the same reading that finds changed files, closing bypasses through `chronic`, `strace`, `ash`, `sudo -s`, `ssh` and variables · [changelog](CHANGELOG.md)
 
 </div>
 

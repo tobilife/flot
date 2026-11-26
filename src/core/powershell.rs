@@ -8,12 +8,21 @@
 //! (`Set-Content`, `Remove-Item`, `Move-Item`, ...) under its name or an
 //! alias, a `[IO.File]` method given a literal path, a native program the
 //! shell reader knows (`git checkout`, `sed -i`), and downloaded code handed
-//! to `Invoke-Expression`. A write through a variable, a script or a
-//! computed path is not seen; that is left to `proofs_from`.
+//! to `Invoke-Expression`. A path may start with `$HOME`, `$PWD` or an
+//! environment variable (`$env:USERPROFILE`, `${env:TEMP}`), which the
+//! caller puts in. `Set-Location` and `Push-Location` move the relative
+//! paths after them, a variable set to a string (`$f = 'x'`) is put in
+//! where it is used, and `$_` in a `ForEach-Object` block is what is piped
+//! in. Code `powershell` is given is read again, decoded first when it is
+//! `-EncodedCommand`, and so is what `Start-Process` starts; the scripts it
+//! runs (`-File x.ps1`, `& ./x.ps1`, `. ./x.ps1`) are handed back for the
+//! caller to read. A write through a variable set to what a cmdlet returns,
+//! or a path computed some other way, is not seen; that is left to
+//! `proofs_from`.
 
 use std::collections::HashSet;
 
-use super::shell::{self, Reading};
+use super::shell::{self, Reading, Runner, Script, Unread};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Token {
@@ -23,8 +32,10 @@ enum Token {
     Comma,
     /// `|`: the next command reads this one's output.
     Pipe,
-    /// `;`, `&&`, `||` or a newline.
+    /// `;`, `||` or a newline.
     Break,
+    /// `&&`: the next statement runs only if this one succeeded.
+    And,
     /// `(`, `{`, `$(`, `@(` or `@{`: a nested expression or script block.
     Open,
     /// `)` or `}`.
@@ -161,13 +172,22 @@ fn tokens(command: &str) -> Vec<Token> {
                 end_word(&mut word, &mut quoted, &mut out);
                 if next == Some('&') {
                     at += 1;
-                    out.push(Token::Break);
+                    out.push(Token::And);
                 }
                 // Alone, the call operator: the next word is the command.
             }
             ',' => {
                 end_word(&mut word, &mut quoted, &mut out);
                 out.push(Token::Comma);
+            }
+            // `${name}` is a variable, whatever its name holds.
+            '$' if next == Some('{') => {
+                let close = chars[at..]
+                    .iter()
+                    .position(|c| *c == '}')
+                    .map_or(chars.len() - 1, |offset| at + offset);
+                word.extend(&chars[at..=close]);
+                at = close;
             }
             '$' | '@' if next == Some('(') || (c == '@' && next == Some('{')) => {
                 end_word(&mut word, &mut quoted, &mut out);
@@ -520,6 +540,25 @@ fn changed_at(arguments: &[Argument], input: &Piped, depth: usize) -> Reading {
         };
         return read_at(&code, depth + 1);
     }
+    if matches!(name.as_str(), "start-process" | "start" | "saps") {
+        return started(&arguments[1..], depth);
+    }
+    // A script runs in this shell, `&` or `.` before it or not.
+    if name.ends_with(".ps1") {
+        return Reading {
+            scripts: file_path(&first.0)
+                .map(|path| Script {
+                    path,
+                    dir: String::new(),
+                    runner: Runner::PowerShell,
+                    depth,
+                    text: None,
+                })
+                .into_iter()
+                .collect(),
+            ..Reading::default()
+        };
+    }
     let Some(kind) = CMDLETS
         .iter()
         .find(|(names, _)| names.contains(&name.as_str()))
@@ -600,7 +639,7 @@ fn changed_at(arguments: &[Argument], input: &Piped, depth: usize) -> Reading {
     }
     Reading {
         writes: changed,
-        remote_code: None,
+        ..Reading::default()
     }
 }
 
@@ -622,25 +661,30 @@ fn native(words: &[String], depth: usize) -> Reading {
                 writes: code
                     .map(|at| cmd(&args[at + 1..].join(" "), depth + 1))
                     .unwrap_or_default(),
-                remote_code: None,
+                ..Reading::default()
             }
         }
-        "powershell" | "pwsh" => code(args)
-            .map(|code| read_at(&code, depth + 1))
-            .unwrap_or_default(),
+        "powershell" | "pwsh" => invoked(args, depth),
         _ => {
             let words: Vec<String> = std::iter::once(name).chain(args.iter().cloned()).collect();
-            Reading {
-                writes: shell::changed_by(&words),
-                remote_code: None,
-            }
+            shell::changed_by(&words, depth)
         }
     }
 }
 
-/// The code `powershell` or `pwsh` runs: after `-Command`, or the
-/// arguments after its options; `None` for a script or encoded code.
-fn code(args: &[String]) -> Option<String> {
+/// What `powershell` or `pwsh` is given to run.
+enum Given {
+    /// Code: after `-Command`, or the arguments after its options.
+    Command(String),
+    /// Code as `-EncodedCommand` carries it, base64 of UTF-16 text.
+    Encoded(String),
+    /// A script: after `-File`, or a first argument that names one.
+    File(String),
+    Nothing,
+}
+
+/// What `powershell` or `pwsh` given `args` runs.
+fn given(args: &[String]) -> Given {
     const VALUES: &[&str] = &[
         "executionpolicy",
         "ep",
@@ -662,7 +706,10 @@ fn code(args: &[String]) -> Option<String> {
         "settingsfile",
         "settings",
         "custompipename",
+        "encodedarguments",
+        "ea",
     ];
+    let prefix = |flag: &str, name: &str| flag.len() > 1 && name.starts_with(flag);
     let mut at = 0;
     while let Some(flag) = args.get(at).and_then(|arg| arg.strip_prefix('-')) {
         let flag = flag.to_ascii_lowercase();
@@ -670,21 +717,211 @@ fn code(args: &[String]) -> Option<String> {
         if flag == "c" || (flag.len() > 2 && "command".starts_with(&flag)) {
             break;
         }
+        // `-enc`, though `-EncodedArguments` starts so too, is taken as
+        // PowerShell takes it: for the code.
+        if flag == "e" || flag == "ec" || prefix(&flag, "encodedcommand") {
+            return args
+                .get(at)
+                .map_or(Given::Nothing, |code| Given::Encoded(code.clone()));
+        }
         if VALUES.contains(&flag.as_str())
             || (flag.len() > 2 && VALUES.iter().any(|name| name.starts_with(&flag)))
         {
             at += 1;
-        } else if flag == "f"
-            || flag == "e"
-            || ["fi", "ec", "en"]
-                .iter()
-                .any(|prefix| flag.starts_with(prefix))
-        {
-            return None;
+        } else if flag == "f" || prefix(&flag, "file") {
+            return args
+                .get(at)
+                .map_or(Given::Nothing, |path| Given::File(path.clone()));
         }
     }
-    let code = args.get(at..)?.join(" ");
-    (!code.is_empty()).then_some(code)
+    match args.get(at) {
+        Some(first) if first.to_ascii_lowercase().ends_with(".ps1") => Given::File(first.clone()),
+        Some(_) => Given::Command(args[at..].join(" ")),
+        None => Given::Nothing,
+    }
+}
+
+/// The text base64 `encoded` carries as UTF-16, little-endian, as
+/// `-EncodedCommand` takes it; `None` when it carries none.
+fn decoded(encoded: &str) -> Option<String> {
+    let bytes = super::digest::base64_decode(encoded).ok()?;
+    if bytes.len() % 2 != 0 {
+        return None;
+    }
+    let units: Vec<u16> = bytes
+        .chunks(2)
+        .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+        .collect();
+    String::from_utf16(&units).ok()
+}
+
+/// What `powershell` or `pwsh` given `args` runs, `depth` strings deep:
+/// its code read again, encoded code decoded first, or the script it is
+/// given, for the caller to read.
+pub(crate) fn invoked(args: &[String], depth: usize) -> Reading {
+    match given(args) {
+        Given::Command(code) => read_at(&code, depth + 1),
+        Given::Encoded(encoded) => match decoded(&encoded) {
+            Some(code) => read_at(&code, depth + 1),
+            None => Reading {
+                unread: vec![Unread {
+                    shape: "powershell -EncodedCommand".to_string(),
+                    why: "what it is given is not base64 of UTF-16 text, so flot cannot read the code it runs".to_string(),
+                }],
+                ..Reading::default()
+            },
+        },
+        Given::File(path) => Reading {
+            scripts: file_path(&path)
+                .map(|path| Script {
+                    path,
+                    dir: String::new(),
+                    runner: Runner::PowerShell,
+                    depth,
+                    text: None,
+                })
+                .into_iter()
+                .collect(),
+            ..Reading::default()
+        },
+        Given::Nothing => Reading::default(),
+    }
+}
+
+/// What `Start-Process` given `arguments` changes and runs: the program
+/// after `-FilePath` with the arguments after `-ArgumentList`, read as if
+/// run here, and the files it sends its output to. One string of
+/// arguments is a command line, split as the program would split it.
+fn started(arguments: &[Argument], depth: usize) -> Reading {
+    /// Its parameters by name and alias: whether each is the program, its
+    /// arguments, a file it writes, or another that takes a value; any
+    /// other is a switch.
+    const PARAMETERS: &[(&str, &str)] = &[
+        ("filepath", "program"),
+        ("path", "program"),
+        ("pspath", "program"),
+        ("argumentlist", "arguments"),
+        ("args", "arguments"),
+        ("redirectstandardoutput", "writes"),
+        ("rso", "writes"),
+        ("redirectstandarderror", "writes"),
+        ("rse", "writes"),
+        ("redirectstandardinput", "value"),
+        ("rsi", "value"),
+        ("workingdirectory", "value"),
+        ("verb", "value"),
+        ("windowstyle", "value"),
+        ("credential", "value"),
+        ("environment", "value"),
+    ];
+    let mut program: Option<String> = None;
+    let mut list: Vec<String> = Vec::new();
+    let mut writes: Vec<String> = Vec::new();
+    let mut positional = 0;
+    let mut rest = arguments.iter();
+    while let Some(argument) = rest.next() {
+        let words: Vec<String> = argument.iter().map(|(word, _)| word.clone()).collect();
+        let flag = match argument.as_slice() {
+            [(word, false)] if word.len() > 1 && word.starts_with('-') => Some(&word[1..]),
+            _ => None,
+        };
+        let role = match flag {
+            Some(flag) => {
+                let (written, inline) = match flag.split_once(':') {
+                    Some((written, value)) => (written.to_ascii_lowercase(), Some(value)),
+                    None => (flag.to_ascii_lowercase(), None),
+                };
+                let exact = PARAMETERS.iter().find(|(name, _)| *name == written);
+                let mut prefixed = PARAMETERS
+                    .iter()
+                    .filter(|(name, _)| name.starts_with(&written));
+                let role = exact
+                    .or_else(|| match (prefixed.next(), prefixed.next()) {
+                        (Some(only), None) => Some(only),
+                        _ => None,
+                    })
+                    .map(|(_, role)| *role);
+                let Some(role) = role else {
+                    continue;
+                };
+                let value = match inline {
+                    Some(value) => vec![value.to_string()],
+                    None => rest
+                        .next()
+                        .map(|value| value.iter().map(|(word, _)| word.clone()).collect())
+                        .unwrap_or_default(),
+                };
+                (role, value)
+            }
+            None => {
+                positional += 1;
+                match positional {
+                    1 => ("program", words),
+                    2 => ("arguments", words),
+                    _ => continue,
+                }
+            }
+        };
+        match role {
+            ("program", value) => program = value.into_iter().next(),
+            ("arguments", value) => list = value,
+            ("writes", value) => writes.extend(value),
+            _ => {}
+        }
+    }
+    let mut reading = Reading {
+        writes,
+        ..Reading::default()
+    };
+    let Some(program) = program else {
+        return reading;
+    };
+    let args = match list.as_slice() {
+        [line] => command_line(line),
+        _ => list,
+    };
+    let run: Vec<Argument> = std::iter::once(program)
+        .chain(args)
+        .map(|word| vec![(word, false)])
+        .collect();
+    let found = changed_at(&run, &Piped::default(), depth + 1);
+    reading.writes.extend(found.writes);
+    reading.remote_code = found.remote_code;
+    reading.code = found.code;
+    reading.scripts = found.scripts;
+    reading.unread = found.unread;
+    reading
+}
+
+/// `line` split into arguments as a Windows program splits its command
+/// line: at whitespace, with double quotes keeping it together.
+fn command_line(line: &str) -> Vec<String> {
+    let mut words = Vec::new();
+    let mut word = String::new();
+    let mut quoted = false;
+    let mut started = false;
+    for c in line.chars() {
+        match c {
+            '"' => {
+                quoted = !quoted;
+                started = true;
+            }
+            c if c.is_whitespace() && !quoted => {
+                if started {
+                    words.push(std::mem::take(&mut word));
+                    started = false;
+                }
+            }
+            c => {
+                word.push(c);
+                started = true;
+            }
+        }
+    }
+    if started {
+        words.push(word);
+    }
+    words
 }
 
 /// What `cmd /c` runs, read with cmd's rules: `&`, `&&`, `||`, `|` and
@@ -921,10 +1158,42 @@ fn reads_only(words: &[String]) -> bool {
         })
 }
 
+/// The variable `path` starts with that the caller puts in, `$PWD`,
+/// `$HOME`, `$env:NAME` or `${env:NAME}`, and the rest; an empty variable
+/// for none.
+fn leading_variable(path: &str) -> (&str, &str) {
+    let name_end = if let Some(inner) = path.strip_prefix("${") {
+        inner.find('}').map(|end| (&inner[..end], end + 3))
+    } else if let Some(after) = path.strip_prefix('$') {
+        let end = after
+            .find(|c: char| !(c.is_ascii_alphanumeric() || c == '_' || c == ':'))
+            .unwrap_or(after.len());
+        Some((&after[..end], end + 1))
+    } else {
+        None
+    };
+    match name_end {
+        Some((name, end)) => {
+            let lower = name.to_ascii_lowercase();
+            let known = matches!(lower.as_str(), "pwd" | "home")
+                || lower
+                    .strip_prefix("env:")
+                    .is_some_and(|name| !name.is_empty());
+            let rest = &path[end..];
+            if known && (rest.is_empty() || rest.starts_with(['/', '\\'])) {
+                (&path[..end], rest)
+            } else {
+                ("", path)
+            }
+        }
+        None => ("", path),
+    }
+}
+
 /// A path as PowerShell names it, `/`-separated and past a `FileSystem::`
-/// provider; `$PWD` and `$HOME` are left for the caller to expand. `None`
-/// for what is not a file: `$null`, another variable, or another
-/// provider's path such as `Env:X`.
+/// provider; a leading `$PWD`, `$HOME` or environment variable is left for
+/// the caller to expand. `None` for what is not a file: `$null`, another
+/// variable, or another provider's path such as `Env:X`.
 fn file_path(path: &str) -> Option<String> {
     let path = match path.split_once("::") {
         Some((provider, rest)) => {
@@ -936,16 +1205,7 @@ fn file_path(path: &str) -> Option<String> {
         }
         None => path,
     };
-    let (variable, rest) = ["$PWD", "$HOME"]
-        .iter()
-        .find_map(|variable| {
-            let head = path.get(..variable.len())?;
-            let rest = &path[variable.len()..];
-            (head.eq_ignore_ascii_case(variable)
-                && (rest.is_empty() || rest.starts_with(['/', '\\'])))
-            .then_some((*variable, rest))
-        })
-        .unwrap_or(("", path));
+    let (variable, rest) = leading_variable(path);
     let provider = rest.split_once(':').is_some_and(|(drive, _)| {
         drive.len() > 1 && drive.chars().all(|c| c.is_ascii_alphabetic())
     });
@@ -955,10 +1215,24 @@ fn file_path(path: &str) -> Option<String> {
     Some(format!("{variable}{rest}").replace('\\', "/"))
 }
 
+/// `path` as a statement run in `dir` names it, as the shell reader
+/// locates one; a path from a drive, as `C:/x`, stays as written.
+fn located(dir: Option<&str>, path: &str) -> String {
+    let drive = path.split_once(':').is_some_and(|(drive, _)| {
+        drive.len() == 1 && drive.chars().all(|c| c.is_ascii_alphabetic())
+    });
+    if drive {
+        path.to_string()
+    } else {
+        shell::located(dir, path)
+    }
+}
+
 /// What a statement pipes on that names paths: literal strings
-/// (`'a', 'b' |`), what `Write-Output` is given, or the items `Get-Item`
-/// and `Get-ChildItem` are given (`.` for none).
-fn piped(arguments: &[Argument]) -> Piped {
+/// (`'a', 'b' |`), what `Write-Output` is given, the items `Get-Item`
+/// and `Get-ChildItem` are given (`.` for none), or, past a cmdlet that
+/// only filters or orders what it is piped, that.
+fn piped(arguments: &[Argument], input: &Piped) -> Piped {
     let Some((first, _)) = arguments.first().and_then(|argument| argument.first()) else {
         return Piped::default();
     };
@@ -984,36 +1258,235 @@ fn piped(arguments: &[Argument]) -> Piped {
                 (paths, true)
             }
         }
+        name if FILTERS.contains(&name) => (input.paths.clone(), input.items),
         _ => (Vec::new(), false),
     };
     Piped { paths, items }
 }
 
-/// Ends a statement: names its command, adds what it changes, and returns
-/// what it pipes on when `piping`.
-fn end(
-    arguments: &mut Vec<Argument>,
-    input: &Piped,
-    piping: bool,
-    depth: usize,
-    found: &mut Reading,
-    names: &mut Vec<String>,
-) -> Piped {
-    if let Some((word, _)) = arguments.first().and_then(|argument| argument.first()) {
-        names.push(command_name(word));
+/// Cmdlets that pass on some of what they are piped, in some order.
+const FILTERS: &[&str] = &[
+    "where-object",
+    "where",
+    "?",
+    "sort-object",
+    "sort",
+    "select-object",
+    "select",
+];
+/// Cmdlets whose script block runs for each item piped in, as `$_`.
+const FOR_EACH: &[&str] = &[
+    "foreach-object",
+    "%",
+    "foreach",
+    "where-object",
+    "where",
+    "?",
+];
+/// Cmdlets that change the location the statements after them run in.
+const LOCATIONS: &[&str] = &[
+    "set-location",
+    "sl",
+    "cd",
+    "chdir",
+    "push-location",
+    "pushd",
+    "pop-location",
+    "popd",
+];
+
+/// The variables a command line has set: each name, lowercase, with the
+/// values it may hold.
+#[derive(Default)]
+struct Variables(Vec<(String, Vec<String>)>);
+
+impl Variables {
+    /// Records what a statement of `arguments` sets: `$name = 'value'`,
+    /// `$name='value'` or an array of strings. A variable set to anything
+    /// else is forgotten.
+    fn assign(&mut self, arguments: &[Argument]) {
+        let Some(((first, quoted), joined)) =
+            arguments.first().and_then(|first| first.split_first())
+        else {
+            return;
+        };
+        let Some(first) = first.strip_prefix('$') else {
+            return;
+        };
+        // The variable, the operator, and the words it is set to.
+        let (name, operator, values): (&str, &str, Vec<(String, bool)>) =
+            match first.split_once('=') {
+                // `$name='value'` is one word, which the quotes made.
+                Some((name, value)) => (
+                    name,
+                    "=",
+                    std::iter::once((value.to_string(), *quoted))
+                        .chain(joined.iter().cloned())
+                        .chain(arguments[1..].iter().flatten().cloned())
+                        .collect(),
+                ),
+                None => match arguments.get(1).map(Vec::as_slice) {
+                    Some([(operator, false)])
+                        if !*quoted && joined.is_empty() && operator.ends_with('=') =>
+                    {
+                        (
+                            first,
+                            operator.as_str(),
+                            arguments[2..].iter().flatten().cloned().collect(),
+                        )
+                    }
+                    _ => return,
+                },
+            };
+        let name = name.to_ascii_lowercase();
+        let name = ["script:", "global:", "local:", "private:"]
+            .iter()
+            .find_map(|scope| name.strip_prefix(scope))
+            .unwrap_or(&name)
+            .to_string();
+        // `$x+=` and the like change it in ways this reader does not
+        // follow.
+        if name.ends_with(['+', '-', '*', '/', '%', '?']) {
+            return;
+        }
+        self.0.retain(|(known, _)| *known != name);
+        let literal =
+            operator == "=" && !values.is_empty() && values.iter().all(|(_, quoted)| *quoted);
+        if literal {
+            self.0
+                .push((name, values.into_iter().map(|(word, _)| word).collect()));
+        }
     }
-    let changed = changed_at(arguments, input, depth);
-    found.writes.extend(changed.writes);
-    if found.remote_code.is_none() {
-        found.remote_code = changed.remote_code;
+
+    /// `word` with each `$name` or `${name}` the line set put in, and `$_`,
+    /// `$PSItem` and their properties as `item`: one text for each value
+    /// they may hold, as many as [`RUNS`].
+    fn substituted(&self, word: &str, item: Option<&[String]>) -> Vec<String> {
+        if !word.contains('$') {
+            return vec![word.to_string()];
+        }
+        let mut done = vec![String::new()];
+        let mut rest = word;
+        while let Some(at) = rest.find('$') {
+            for text in &mut done {
+                text.push_str(&rest[..at]);
+            }
+            let after = &rest[at + 1..];
+            let (name, mut used) = match after.strip_prefix('{') {
+                Some(inner) => match inner.find('}') {
+                    Some(end) => (&inner[..end], end + 2),
+                    None => ("", 0),
+                },
+                None => {
+                    let end = after
+                        .find(|c: char| !(c.is_ascii_alphanumeric() || c == '_' || c == ':'))
+                        .unwrap_or(after.len());
+                    (&after[..end], end)
+                }
+            };
+            let lower = name.to_ascii_lowercase();
+            let values = if lower == "_" || lower == "psitem" {
+                // An item's `.FullName` or `.Name` is the item, as near as
+                // this reader can name it.
+                let property = after[used..]
+                    .strip_prefix('.')
+                    .map(|rest| {
+                        rest.find(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+                            .unwrap_or(rest.len())
+                    })
+                    .filter(|length| *length > 0);
+                if let Some(length) = property {
+                    used += 1 + length;
+                }
+                item
+            } else {
+                self.0
+                    .iter()
+                    .find(|(known, _)| *known == lower)
+                    .map(|(_, values)| values.as_slice())
+            };
+            match values {
+                Some(values) if !values.is_empty() => {
+                    done = done
+                        .iter()
+                        .flat_map(|text| values.iter().map(move |value| format!("{text}{value}")))
+                        .take(RUNS)
+                        .collect();
+                    rest = &after[used..];
+                }
+                _ => {
+                    for text in &mut done {
+                        text.push('$');
+                    }
+                    rest = after;
+                }
+            }
+        }
+        for text in &mut done {
+            text.push_str(rest);
+        }
+        done
     }
-    let on = if piping {
-        piped(arguments)
-    } else {
-        Piped::default()
+}
+
+/// How many values one word may stand for.
+const RUNS: usize = 64;
+
+/// Moves `dirs` past a statement of `arguments` that changes the location:
+/// to the directory it names, or to one this reader cannot name. Only after
+/// `Set-Location x &&` do the statements surely run there.
+fn moved(dirs: &mut Vec<Option<String>>, arguments: &[Argument], certain: bool) {
+    let Some((first, _)) = arguments.first().and_then(|argument| argument.first()) else {
+        return;
     };
-    arguments.clear();
-    on
+    let name = command_name(first);
+    if !LOCATIONS.contains(&name.as_str()) {
+        return;
+    }
+    let target = if matches!(name.as_str(), "pop-location" | "popd") {
+        None
+    } else {
+        Bound::new(&arguments[1..])
+            .values(PATH_PARAMETERS, 0)
+            .first()
+            .filter(|target| target.as_str() != "-")
+            .and_then(|target| file_path(target))
+    };
+    let next: Vec<Option<String>> = dirs
+        .iter()
+        .map(|dir| {
+            let target = target.as_deref()?;
+            let drive = target
+                .split_once(':')
+                .is_some_and(|(drive, _)| drive.len() == 1);
+            if drive || target.starts_with(['/', '~', '$']) {
+                Some(target.to_string())
+            } else {
+                dir.as_deref().map(|dir| shell::joined(dir, target))
+            }
+        })
+        .collect();
+    if certain {
+        *dirs = next;
+    } else {
+        dirs.extend(next);
+    }
+    let mut seen = HashSet::new();
+    dirs.retain(|dir| seen.insert(dir.clone()));
+    if dirs.len() > 8 {
+        dirs.truncate(7);
+        if !dirs.contains(&None) {
+            dirs.push(None);
+        }
+    }
+}
+
+/// A script block or a nested expression being read.
+struct Block {
+    /// What `$_` stood for outside it.
+    item: Option<Vec<String>>,
+    /// What a `Where-Object` block passes on when it closes.
+    passes: Option<Piped>,
 }
 
 /// Read a PowerShell `command` for the writes and downloads it names.
@@ -1021,8 +1494,9 @@ pub fn read(command: &str) -> Reading {
     read_at(command, 0)
 }
 
-/// Read `command`, code handed over as a string `depth` times.
-fn read_at(command: &str, depth: usize) -> Reading {
+/// Read `command`, code handed over as a string `depth` times. A script's
+/// text is read one deeper than the code that runs it.
+pub fn read_at(command: &str, depth: usize) -> Reading {
     let tokens = tokens(command);
     if depth > DEPTH {
         let writes = tokens
@@ -1034,20 +1508,31 @@ fn read_at(command: &str, depth: usize) -> Reading {
             .collect();
         return Reading {
             writes,
-            remote_code: None,
+            ..Reading::default()
         };
     }
-    // What the statements change, and downloaded code nested code names.
-    let mut found = Reading::default();
+    let mut reading = Reading::default();
+    let mut remote = None;
     let mut names: Vec<String> = Vec::new();
     let mut arguments: Vec<Argument> = Vec::new();
+    // What the statement being read writes by redirection or a method.
+    let mut redirected: Vec<String> = Vec::new();
     // What the statement before pipes into this one.
     let mut input = Piped::default();
+    let mut vars = Variables::default();
+    // Where statements run, relative to where the line starts, as the
+    // shell reader tracks it: a location changes for what follows, inside
+    // a script block or not.
+    let mut dirs: Vec<Option<String>> = vec![Some(String::new())];
+    let mut item: Option<Vec<String>> = None;
+    let mut blocks: Vec<Block> = Vec::new();
+    let mut passed: Option<Piped> = None;
     let mut joining = false;
     let mut at = 0;
-    while at < tokens.len() {
-        match &tokens[at] {
-            Token::Word(word, quoted) => {
+    while at <= tokens.len() {
+        let token = tokens.get(at);
+        match token {
+            Some(Token::Word(word, quoted)) => {
                 if let (Some(method), Some(Token::Open)) = (dotnet(word), tokens.get(at + 1)) {
                     // The method's arguments, up to its closing parenthesis.
                     let mut nesting = 0;
@@ -1086,46 +1571,137 @@ fn read_at(command: &str, depth: usize) -> Reading {
                         Method::Opens if reads_only(&rest) => &[],
                         Method::Opens => &[0],
                     };
-                    found.writes.extend(
-                        changes
-                            .iter()
-                            .filter_map(|position| taken.get(*position).cloned().flatten()),
-                    );
+                    for taken in taken.iter().flatten() {
+                        reading.named.push(taken.clone());
+                    }
+                    for position in changes {
+                        if let Some(Some(path)) = taken.get(*position) {
+                            redirected.extend(vars.substituted(path, item.as_deref()));
+                        }
+                    }
                     at += 1;
                     continue;
                 }
-                let word = (word.clone(), *quoted);
+                // A variable a statement starts with is what it sets, or
+                // an expression, never a command this reader looks up.
+                let values: Vec<(String, bool)> = if arguments.is_empty() && word.starts_with('$') {
+                    vec![(word.clone(), *quoted)]
+                } else {
+                    vars.substituted(word, item.as_deref())
+                        .into_iter()
+                        .map(|value| (value, *quoted))
+                        .collect()
+                };
                 if joining && !arguments.is_empty() {
-                    arguments.last_mut().expect("not empty").push(word);
-                } else if !(arguments.is_empty() && !word.1 && word.0 == ".") {
+                    arguments.last_mut().expect("not empty").extend(values);
+                } else if !(arguments.is_empty() && !*quoted && word == ".") {
                     // `.` dot-sources the command after it.
-                    arguments.push(vec![word]);
+                    arguments.push(values);
                 }
                 joining = false;
             }
-            Token::Comma => joining = true,
-            Token::WriteTo => {
+            Some(Token::Comma) => joining = true,
+            Some(Token::WriteTo) => {
                 if let Some(Token::Word(target, _)) = tokens.get(at + 1) {
-                    found.writes.push(target.clone());
+                    redirected.extend(vars.substituted(target, item.as_deref()));
                     at += 1;
                 }
             }
+            // A `Where-Object` block passes on what it was piped.
+            Some(Token::Pipe) if arguments.is_empty() && passed.is_some() => {
+                input = passed.take().unwrap_or_default();
+            }
             token => {
-                let piping = *token == Token::Pipe;
-                input = end(
-                    &mut arguments,
-                    &input,
-                    piping,
-                    depth,
-                    &mut found,
-                    &mut names,
-                );
+                passed = None;
+                let piping = token == Some(&Token::Pipe);
+                let name = arguments
+                    .first()
+                    .and_then(|argument| argument.first())
+                    .map(|(word, _)| command_name(word));
+                if let Some(name) = &name {
+                    names.push(name.clone());
+                }
+                let mut found = changed_at(&arguments, &input, depth);
+                found.writes.append(&mut redirected);
+                found
+                    .named
+                    .extend(arguments.iter().flatten().map(|(word, _)| word.clone()));
+                for path in found.writes.drain(..).filter_map(|path| file_path(&path)) {
+                    for dir in &dirs {
+                        reading.writes.push(located(dir.as_deref(), &path));
+                    }
+                }
+                for path in found.named.drain(..).filter_map(|path| file_path(&path)) {
+                    for dir in &dirs {
+                        reading.named.push(located(dir.as_deref(), &path));
+                    }
+                }
+                for script in found.scripts.drain(..) {
+                    let Some(path) = file_path(&script.path) else {
+                        continue;
+                    };
+                    for dir in &dirs {
+                        reading.scripts.push(Script {
+                            path: located(dir.as_deref(), &path),
+                            dir: located(dir.as_deref(), &script.dir),
+                            ..script.clone()
+                        });
+                    }
+                }
+                for code in found.code.drain(..) {
+                    for dir in &dirs {
+                        reading.code.push(shell::Code {
+                            dir: located(dir.as_deref(), &code.dir),
+                            ..code.clone()
+                        });
+                    }
+                }
+                reading.unread.append(&mut found.unread);
+                remote = remote.or(found.remote_code);
+                let piped_in = !input.paths.is_empty() || input.items;
+                if !piping && !piped_in {
+                    moved(&mut dirs, &arguments, token == Some(&Token::And));
+                }
+                vars.assign(&arguments);
+                let on = if piping {
+                    piped(&arguments, &input)
+                } else {
+                    Piped::default()
+                };
+                match token {
+                    Some(Token::Open) => {
+                        let each = name.as_deref().is_some_and(|name| FOR_EACH.contains(&name))
+                            && piped_in;
+                        let passes = name
+                            .as_deref()
+                            .is_some_and(|name| FILTERS.contains(&name))
+                            .then(|| Piped {
+                                paths: input.paths.clone(),
+                                items: input.items,
+                            });
+                        blocks.push(Block {
+                            item: item.clone(),
+                            passes,
+                        });
+                        if each {
+                            item = Some(input.paths.clone());
+                        }
+                    }
+                    Some(Token::Close) => {
+                        if let Some(block) = blocks.pop() {
+                            item = block.item;
+                            passed = block.passes;
+                        }
+                    }
+                    _ => {}
+                }
+                input = on;
+                arguments.clear();
                 joining = false;
             }
         }
         at += 1;
     }
-    end(&mut arguments, &input, false, depth, &mut found, &mut names);
 
     // Downloaded code handed to `Invoke-Expression`, in either order:
     // `irm x | iex`, `iex (irm x)`, `iex ((New-Object Net.WebClient)
@@ -1146,17 +1722,14 @@ fn read_at(command: &str, depth: usize) -> Reading {
         )),
         _ => None,
     };
+    reading.remote_code = remote_code.or(remote);
     let mut seen = HashSet::new();
-    let writes = found
-        .writes
-        .iter()
-        .filter_map(|path| file_path(path))
-        .filter(|path| seen.insert(path.clone()))
-        .collect();
-    Reading {
-        writes,
-        remote_code: remote_code.or(found.remote_code),
-    }
+    reading.writes.retain(|path| seen.insert(path.clone()));
+    let mut seen = HashSet::new();
+    reading
+        .named
+        .retain(|path| !path.is_empty() && seen.insert(path.clone()));
+    reading
 }
 
 #[cfg(test)]
@@ -1165,6 +1738,119 @@ mod tests {
 
     fn writes(command: &str) -> Vec<String> {
         read(command).writes
+    }
+
+    #[test]
+    fn environment_variables_and_locations_are_kept_for_the_caller() {
+        assert_eq!(
+            writes("Set-Content $env:USERPROFILE\\.claude\\settings.json '{}'"),
+            ["$env:USERPROFILE/.claude/settings.json"]
+        );
+        assert_eq!(
+            writes("Remove-Item ${env:APPDATA}\\x"),
+            ["${env:APPDATA}/x"]
+        );
+        assert_eq!(writes("Remove-Item $HOME/x, $PWD/y"), ["$HOME/x", "$PWD/y"]);
+        // Another variable is not a path this reader can name.
+        assert_eq!(writes("Remove-Item $other/x"), Vec::<String>::new());
+        // After `;`, the location may not have changed; after `&&` it has.
+        assert_eq!(
+            writes("Set-Location tests; Remove-Item a.sh"),
+            ["a.sh", "tests/a.sh"]
+        );
+        assert_eq!(writes("cd tests && del a.sh"), ["tests/a.sh"]);
+        assert_eq!(
+            writes("Push-Location C:\\x; del a.sh"),
+            ["a.sh", "C:/x/a.sh"]
+        );
+        assert_eq!(
+            writes("Set-Location $env:TEMP; del a"),
+            ["a", "$env:TEMP/a"]
+        );
+    }
+
+    #[test]
+    fn variables_the_line_sets_are_put_in() {
+        assert_eq!(writes("$f = 'check.sh'; Remove-Item $f"), ["check.sh"]);
+        assert_eq!(writes("$F='a', 'b'\nrm $f"), ["a", "b"]);
+        assert_eq!(writes("$f = 'a'; $f = 'b'; del $f"), ["b"]);
+        assert_eq!(writes("$f = 'a'; $f += 'b'; del $f"), Vec::<String>::new());
+        assert_eq!(writes("$f = \"x\"; Set-Content -Path ${f}.sh y"), ["x.sh"]);
+        // Set to what a cmdlet returns, it is not known.
+        assert_eq!(
+            writes("$f = Get-Item x; Remove-Item $f"),
+            Vec::<String>::new()
+        );
+        assert_eq!(
+            writes("Get-ChildItem tests | ForEach-Object { Remove-Item $_.FullName }"),
+            ["tests"]
+        );
+        assert_eq!(writes("ls | % { del $_ }"), ["."]);
+        assert_eq!(writes("'a', 'b' | foreach { rm $PSItem }"), ["a", "b"]);
+        // Outside a block, `$_` is nothing piped.
+        assert_eq!(writes("Remove-Item $_"), Vec::<String>::new());
+    }
+
+    #[test]
+    fn code_powershell_is_given_is_read_again() {
+        let encoded = |code: &str| {
+            let bytes: Vec<u8> = code.encode_utf16().flat_map(u16::to_le_bytes).collect();
+            super::super::digest::base64_encode(&bytes)
+        };
+        assert_eq!(
+            writes(&format!(
+                "powershell -EncodedCommand {}",
+                encoded("del check.sh")
+            )),
+            ["check.sh"]
+        );
+        assert_eq!(
+            writes(&format!("pwsh -NoProfile -e {}", encoded("rm x"))),
+            ["x"]
+        );
+        let unread = read("pwsh -enc abc").unread;
+        assert_eq!(unread[0].shape, "powershell -EncodedCommand");
+        // Odd bytes are not UTF-16.
+        let unread = read("pwsh -ec AAAA").unread;
+        assert_eq!(unread.len(), 1);
+        assert_eq!(writes("pwsh -Command 'rm x'"), ["x"]);
+        assert_eq!(writes("pwsh -wd C:\\ -c 'rm x'"), ["x"]);
+        let scripts = |command: &str| {
+            read(command)
+                .scripts
+                .into_iter()
+                .map(|script| (script.path, script.runner))
+                .collect::<Vec<_>>()
+        };
+        let ps = |path: &str| vec![(path.to_string(), Runner::PowerShell)];
+        assert_eq!(scripts("pwsh -File .\\x.ps1 -Force"), ps("./x.ps1"));
+        assert_eq!(scripts("powershell -NoProfile x.ps1"), ps("x.ps1"));
+        assert_eq!(scripts("& ./x.ps1"), ps("./x.ps1"));
+        assert_eq!(scripts(". .\\x.ps1"), ps("./x.ps1"));
+        assert_eq!(scripts("cd d && ./x.ps1"), ps("d/x.ps1"));
+        assert!(scripts("Get-Content x.ps1").is_empty());
+    }
+
+    #[test]
+    fn start_process_is_read_as_the_program_it_starts() {
+        assert_eq!(
+            writes("Start-Process pwsh -ArgumentList '-Command', 'rm x'"),
+            ["x"]
+        );
+        assert_eq!(
+            writes("Start-Process -FilePath cmd -ArgumentList '/c del x' -Wait"),
+            ["x"]
+        );
+        assert_eq!(writes("saps -FilePath sh -Args '-c \"rm a\"'"), ["a"]);
+        assert_eq!(
+            writes("Start-Process git -RedirectStandardOutput out.txt -ArgumentList status"),
+            ["out.txt"]
+        );
+        assert_eq!(writes("Start-Process notepad"), Vec::<String>::new());
+        assert_eq!(
+            read("Start-Process python -ArgumentList '-c', 'print(1)'").code[0].text,
+            "print(1)"
+        );
     }
 
     #[test]
@@ -1242,11 +1928,13 @@ mod tests {
             writes("iwr https://x.example -OutFile check.sh"),
             ["check.sh"]
         );
+        // `$_` in the block is each item piped in, a listing of `*.sh` as
+        // `*.sh`.
         assert_eq!(
             writes(
                 "Get-ChildItem *.sh | ForEach-Object { Remove-Item $_ }; Clear-Content flot.toml"
             ),
-            ["flot.toml"]
+            ["*.sh", "flot.toml"]
         );
         assert_eq!(
             writes("[System.IO.File]::WriteAllText('check.sh', 'exit 0')"),

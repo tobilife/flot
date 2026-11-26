@@ -105,15 +105,17 @@ pub enum Command {
     /// fails. Changes nothing.
     Doctor,
     /// Say whether changing these files would touch the flow's proofs or
-    /// decide whether they are checked. Exits 2 when one would. With
+    /// decide whether they are checked, or whether reading them would hand
+    /// out the signing key. Exits 2 when one would. With
     /// --command, reads a shell command line (a PowerShell one with
     /// --powershell); with --hook, a Claude Code
     /// PreToolUse payload on stdin, answering with a denial on stdout and
     /// noting it in the store for the next run to record.
     Guard {
         paths: Vec<PathBuf>,
-        /// Also read a shell command line for the files it writes and for
-        /// downloaded code piped into an interpreter.
+        /// Also read a shell command line for the files it writes, the
+        /// scripts and interpreter code it runs, what it reads of the
+        /// signing key, and downloaded code piped into an interpreter.
         #[arg(long)]
         command: Option<String>,
         /// Read --command as PowerShell, as the hook reads Claude Code's
@@ -518,11 +520,13 @@ enum Shell {
 }
 
 /// What one tool call would change: files it names, and command lines with
-/// the directory they run in and their shell.
+/// the directory they run in and their shell; and the files it only reads,
+/// which are judged for the secrets among them.
 #[derive(Default)]
 struct Call {
     targets: Vec<PathBuf>,
     commands: Vec<(PathBuf, String, Shell)>,
+    named: Vec<PathBuf>,
 }
 
 impl Call {
@@ -550,7 +554,9 @@ impl Call {
                 call.commands
                     .push((base.to_path_buf(), named("command")?.to_string(), shell));
             }
-            _ if reads_only(tool) => {}
+            _ if reads_only(tool) => named_paths(input, 0, &mut |path| {
+                call.named.push(base.join(tilde(path)));
+            }),
             _ => named_paths(input, 0, &mut |path| {
                 call.targets.push(base.join(tilde(path)));
             }),
@@ -558,6 +564,8 @@ impl Call {
         Ok(call)
     }
 
+    /// Whether it changes nothing it names: it names no file it may change
+    /// and runs no command, though it may read.
     fn is_empty(&self) -> bool {
         self.targets.is_empty() && self.commands.is_empty()
     }
@@ -594,6 +602,16 @@ impl Refused {
         }
     }
 
+    /// A command whose code the guard cannot read, and why.
+    fn unread(shape: String, why: String) -> Self {
+        Refused {
+            said: format!("`{shape}` is refused: {why}"),
+            why,
+            instead: ". Run what it would run as a command of its own, or ask the user",
+            shape,
+        }
+    }
+
     /// A whole-tree git command git cannot say the files of.
     fn unknowable(shape: String, error: &anyhow::Error) -> Self {
         let why = format!(
@@ -612,20 +630,29 @@ impl Refused {
 struct Judged {
     guarded: Vec<Guarded>,
     /// Downloaded code piped into an interpreter, `flot` commands left to
-    /// the user, git commands whose files git cannot name.
+    /// the user, git commands whose files git cannot name, code the guard
+    /// cannot read.
     refused: Vec<Refused>,
+    /// The signing key and what goes with it, named by the call, flow or
+    /// not.
+    secrets: Vec<Guarded>,
     /// The flows found, each with its flow file.
     flows: Vec<Workspace>,
 }
 
 impl Judged {
     /// Each refusal in a sentence: the protected files first, then the
-    /// refused commands.
+    /// refused commands, then the secrets.
     fn reasons(&self) -> Vec<String> {
         self.guarded
             .iter()
             .map(|found| format!("{} is protected: {}", found.path, found.reason))
             .chain(self.refused.iter().map(|refused| refused.said.clone()))
+            .chain(
+                self.secrets
+                    .iter()
+                    .map(|found| format!("{} must not be read: {}", found.path, found.reason)),
+            )
             .collect()
     }
 
@@ -641,6 +668,12 @@ impl Judged {
         }
         for refused in &self.refused {
             said.push(format!("{}{}", refused.said, refused.instead));
+        }
+        if !self.secrets.is_empty() {
+            said.push(format!(
+                "{}. `flot key show` prints the public key; ask the user for anything that needs the key itself",
+                reasons[reasons.len() - self.secrets.len()..].join("; ")
+            ));
         }
         format!("flot: {}.", said.join(". "))
     }
@@ -918,10 +951,25 @@ fn brace_group(word: &str) -> Option<(usize, Vec<usize>, usize)> {
     None
 }
 
-/// `word` with `~`, `$HOME`, `${HOME}`, `$PWD` and `${PWD}` put in (in
-/// PowerShell, also `$env:HOME` and `$env:USERPROFILE`, in any case): as
-/// the path it names, and as a wildcard pattern with what was put in
-/// escaped.
+/// The value of the environment variable `name`, which the shell the
+/// agent runs is given too; `None` for one not set or not a name.
+fn environment(name: &str) -> Option<String> {
+    let mut chars = name.chars();
+    let is_name = chars
+        .next()
+        .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+        && chars.all(|c| c.is_ascii_alphanumeric() || c == '_');
+    if !is_name {
+        return None;
+    }
+    std::env::var_os(name).map(|value| value.to_string_lossy().into_owned())
+}
+
+/// `word` with `~`, `$HOME`, `$PWD` and the other environment variables
+/// put in, `${NAME}` too (in PowerShell, `$HOME`, `$PWD` and `$env:NAME`
+/// in any case, `$env:HOME` and `$env:USERPROFILE` as the home directory
+/// where they are not set): as the path it names, and as a wildcard
+/// pattern with what was put in escaped.
 fn variables(word: &str, dir: &Path, language: Shell) -> (String, String) {
     let home = home_dir().map(|home| home.to_string_lossy().into_owned());
     let here = dir.to_string_lossy().into_owned();
@@ -962,12 +1010,18 @@ fn variables(word: &str, dir: &Path, language: Shell) -> (String, String) {
             Shell::Posix => match name {
                 "HOME" => home.clone(),
                 "PWD" => Some(here.clone()),
-                _ => None,
+                _ => environment(name),
             },
             Shell::PowerShell => match name.to_lowercase().as_str() {
-                "home" | "env:home" | "env:userprofile" => home.clone(),
+                "home" => home.clone(),
                 "pwd" => Some(here.clone()),
-                _ => None,
+                lower => lower.strip_prefix("env:").and_then(|_| {
+                    environment(&name[4..]).or_else(|| {
+                        matches!(lower, "env:home" | "env:userprofile")
+                            .then(|| home.clone())
+                            .flatten()
+                    })
+                }),
             },
         };
         match value {
@@ -987,35 +1041,49 @@ fn variables(word: &str, dir: &Path, language: Shell) -> (String, String) {
     (literal, pattern)
 }
 
+/// The words a written `word` stands for before variables are put in:
+/// its braces expanded in a POSIX shell; in PowerShell on another system,
+/// with `\` as a separator.
+fn alternatives(word: &str, language: Shell) -> Vec<String> {
+    match language {
+        Shell::Posix => braces(word),
+        Shell::PowerShell if cfg!(not(windows)) => vec![word.replace('\\', "/")],
+        Shell::PowerShell => vec![word.to_string()],
+    }
+}
+
+/// A relative wildcard `pattern` as one from `dir`.
+fn anchored(dir: &Path, pattern: &str) -> String {
+    format!(
+        "{}/{pattern}",
+        glob::Pattern::escape(&dir.to_string_lossy())
+    )
+}
+
+/// How a shell matches a wildcard against paths.
+fn wildcard_match() -> glob::MatchOptions {
+    glob::MatchOptions {
+        case_sensitive: !cfg!(any(windows, target_os = "macos")),
+        require_literal_separator: true,
+        require_literal_leading_dot: true,
+    }
+}
+
 /// The paths a written `word` names from `dir`, expanded as the shell
-/// would: braces (in a POSIX shell), then `~`, `$HOME` and `$PWD`, then
+/// would: braces (in a POSIX shell), then `~` and variables, then
 /// wildcards against the disk. A wildcard that matches nothing is the word
 /// itself.
 fn expand(dir: &Path, word: &str, language: Shell) -> Vec<PathBuf> {
-    let words = match language {
-        Shell::Posix => braces(word),
-        // PowerShell on another system takes `\` as a separator too.
-        Shell::PowerShell if cfg!(not(windows)) => vec![word.replace('\\', "/")],
-        Shell::PowerShell => vec![word.to_string()],
-    };
     let mut paths = Vec::new();
-    for word in words {
+    for word in alternatives(word, language) {
         let (literal, pattern) = variables(&word, dir, language);
         if literal.contains(['*', '?', '[']) {
             let pattern = if Path::new(&literal).is_absolute() {
                 pattern
             } else {
-                format!(
-                    "{}/{pattern}",
-                    glob::Pattern::escape(&dir.to_string_lossy())
-                )
+                anchored(dir, &pattern)
             };
-            let options = glob::MatchOptions {
-                case_sensitive: !cfg!(any(windows, target_os = "macos")),
-                require_literal_separator: true,
-                require_literal_leading_dot: true,
-            };
-            let matched: Vec<PathBuf> = glob::glob_with(&pattern, options)
+            let matched: Vec<PathBuf> = glob::glob_with(&pattern, wildcard_match())
                 .map(|found| found.flatten().take(EXPANSION_LIMIT).collect())
                 .unwrap_or_default();
             if !matched.is_empty() {
@@ -1028,40 +1096,86 @@ fn expand(dir: &Path, word: &str, language: Shell) -> Vec<PathBuf> {
     paths
 }
 
+/// How many scripts the guard reads for one call; a call that runs more
+/// cannot be judged.
+const SCRIPT_LIMIT: usize = 64;
+/// The largest script the guard reads, in bytes.
+const SCRIPT_BYTES: u64 = 1 << 20;
+
+/// Code the guard reads: where it runs, in what language, and how many
+/// times the code that runs it was handed over as a string.
+struct Pending {
+    dir: PathBuf,
+    text: String,
+    language: Shell,
+    depth: usize,
+}
+
 /// Judge a call against `workspace`'s flow and, when `nearest`, every flow
 /// from each directory it runs in and each file it changes up to the top
 /// of the repository: an edit in a subproject touches that subproject's
-/// proofs, and a flow file below another does not hide it.
+/// proofs, and a flow file below another does not hide it. The scripts a
+/// command runs are read and judged as it is, and the code it hands an
+/// interpreter for what it names.
 fn judge(workspace: &Workspace, nearest: bool, call: Call) -> Result<Judged> {
     let mut guard = crate::service::Guard::new(workspace);
+    if nearest {
+        guard.consult(workspace.root());
+    }
+    let mut secrets: Vec<Guarded> = Vec::new();
+    for path in call.targets.iter().chain(&call.named) {
+        noted(&mut secrets, guard.secret(path));
+    }
     let mut targets: Vec<(PathBuf, Option<String>)> = call
         .targets
         .into_iter()
         .map(|target| (target, None))
         .collect();
     let mut refused = Vec::new();
-    for (dir, command, language) in &call.commands {
-        let read = |text: &str| match language {
-            Shell::Posix => shell::read(text),
-            Shell::PowerShell => powershell::read(text),
+    let mut pending: std::collections::VecDeque<Pending> = call
+        .commands
+        .into_iter()
+        .map(|(dir, text, language)| Pending {
+            dir,
+            text,
+            language,
+            depth: 0,
+        })
+        .collect();
+    let mut scripts_read = std::collections::HashSet::new();
+    // The scripts the call writes text into that it spells, and that text.
+    let mut written: Vec<(PathBuf, String)> = Vec::new();
+    while let Some(Pending {
+        dir,
+        text,
+        language,
+        depth,
+    }) = pending.pop_front()
+    {
+        if nearest {
+            guard.consult(&dir);
+        }
+        let read = |text: &str, depth: usize| match language {
+            Shell::Posix => shell::read_at(text, depth),
+            Shell::PowerShell => powershell::read_at(text, depth),
         };
-        let reading = read(command);
+        let reading = read(&text, depth);
         let mut words = reading.writes;
         // A whole-tree git command changes what git says it would. It is
         // asked where the call runs and where a `cd` before it leads, both:
         // the `cd` may be in a subshell.
-        let mut rest = command.clone();
+        let mut rest = text.clone();
         let mut asked = false;
         let mut here = dir.clone();
-        for simple in simple_commands(command, *language) {
+        for simple in simple_commands(&text, language) {
             let Some(at) = programs(&simple.words)
                 .find(|at| matches!(program_name(&simple.words[*at]).as_str(), "git" | "git.exe"))
             else {
-                here = moved(&here, &simple.words, *language);
+                here = moved(&here, &simple.words, language);
                 continue;
             };
             let mut places = vec![dir.clone()];
-            if here != *dir && here.is_dir() {
+            if here != dir && here.is_dir() {
                 places.push(here.clone());
                 if nearest {
                     guard.consult(&here);
@@ -1077,9 +1191,11 @@ fn judge(workspace: &Workspace, nearest: bool, call: Call) -> Result<Judged> {
                 };
                 answered = true;
                 match answer {
-                    Ok(paths) => {
-                        targets.extend(paths.into_iter().map(|path| (path, Some(shape.clone()))))
-                    }
+                    Ok(paths) => targets.extend(
+                        paths
+                            .into_iter()
+                            .map(|path| (path, Some(format!("`{shape}` would change it")))),
+                    ),
                     Err(error) => {
                         refused.push(Refused::unknowable(shape.clone(), &error));
                         break;
@@ -1095,10 +1211,10 @@ fn judge(workspace: &Workspace, nearest: bool, call: Call) -> Result<Judged> {
             // A directory only those commands wrote, `.` or the one `-C`
             // names, is the tree git answered for. A file they wrote, as
             // by a redirection, is judged still.
-            let others = read(&rest).writes;
+            let others = read(&rest, depth).writes;
             words.retain(|word| {
                 others.contains(word)
-                    || !expand(dir, word, *language)
+                    || !expand(&dir, word, language)
                         .iter()
                         .all(|path| path.is_dir())
             });
@@ -1109,22 +1225,152 @@ fn judge(workspace: &Workspace, nearest: bool, call: Call) -> Result<Judged> {
             }
         }
         for word in &words {
-            targets.extend(
-                expand(dir, word, *language)
-                    .into_iter()
-                    .map(|path| (path, None)),
-            );
+            if word.contains(shell::BUILT) {
+                // Part of the name is what a command prints when it runs:
+                // any guarded place it may spell.
+                let via = format!(
+                    "`{}` may name it: part of that name is built when the command runs",
+                    shell::shown(word)
+                );
+                for pattern in built_patterns(&dir, word, language) {
+                    targets.extend(
+                        guard
+                            .matching(&pattern)
+                            .into_iter()
+                            .map(|path| (path, Some(via.clone()))),
+                    );
+                }
+            } else {
+                targets.extend(
+                    expand(&dir, word, language)
+                        .into_iter()
+                        .map(|path| (path, None)),
+                );
+            }
         }
+        for word in &reading.named {
+            noted(&mut secrets, secret_named(&guard, &dir, word, language));
+        }
+        for code in &reading.code {
+            let at = located_dir(&dir, &code.dir, language);
+            let via = format!(
+                "{} code names it, and flot cannot tell whether that code writes it",
+                code.program
+            );
+            for path in guard.named_in(&code.text, &at) {
+                match guard.secret(&path) {
+                    Some(secret) => noted(&mut secrets, Some(secret)),
+                    None => targets.push((path, Some(via.clone()))),
+                }
+            }
+        }
+        for script in reading.scripts {
+            let Some(path) = expand(&dir, &script.path, language).into_iter().next() else {
+                continue;
+            };
+            let runs_in = located_dir(&dir, &script.dir, language);
+            let shape = shell::shown(&script.path);
+            if !scripts_read.insert((
+                path.clone(),
+                runs_in.clone(),
+                format!("{:?}", script.runner),
+            )) {
+                continue;
+            }
+            if scripts_read.len() > SCRIPT_LIMIT {
+                refused.push(Refused::unread(
+                    shape,
+                    format!("the call runs more than {SCRIPT_LIMIT} scripts, so flot cannot read all it runs"),
+                ));
+                break;
+            }
+            // What the call writes into it before running it is read as
+            // well as what is on the disk.
+            if let Some(text) = &script.text {
+                written.push((path.clone(), text.clone()));
+            }
+            let mut texts: Vec<String> = written
+                .iter()
+                .filter(|(known, _)| *known == path)
+                .map(|(_, text)| text.clone())
+                .collect();
+            match script_text(&path) {
+                Ok(Some(text)) => texts.push(text),
+                Ok(None) => {}
+                Err(error) => {
+                    refused.push(Refused::unread(
+                        shape,
+                        format!("{error:#}, so flot cannot read what it runs"),
+                    ));
+                    continue;
+                }
+            }
+            if texts.is_empty() {
+                continue;
+            }
+            if nearest {
+                guard.consult(&runs_in);
+            }
+            let depth = script.depth + 1;
+            for text in texts {
+                let (text, language) = match &script.runner {
+                    shell::Runner::Shell => (text, Shell::Posix),
+                    shell::Runner::PowerShell => (text, Shell::PowerShell),
+                    shell::Runner::Interpreter(program) => {
+                        // A script the flow guards is the user's check, as
+                        // the proof runs it: the agent cannot have changed
+                        // it.
+                        if guard.judge(&path).is_some() {
+                            continue;
+                        }
+                        let via = format!(
+                            "the {program} script {shape} names it, and flot cannot tell whether that script writes it"
+                        );
+                        for named in guard.named_in(&text, &runs_in) {
+                            match guard.secret(&named) {
+                                Some(secret) => noted(&mut secrets, Some(secret)),
+                                None => targets.push((named, Some(via.clone()))),
+                            }
+                        }
+                        continue;
+                    }
+                    // A program's `#!` line names what runs it, which reads
+                    // the script again; a text file without one is run by
+                    // the shell.
+                    shell::Runner::Program => match shebang(&text) {
+                        Some(line) => {
+                            let named = path.strip_prefix(&runs_in).unwrap_or(&path);
+                            (format!("{line} {}", quoted(named)), Shell::Posix)
+                        }
+                        None if path
+                            .extension()
+                            .is_some_and(|extension| extension.eq_ignore_ascii_case("ps1")) =>
+                        {
+                            (text, Shell::PowerShell)
+                        }
+                        None => (text, Shell::Posix),
+                    },
+                };
+                pending.push_back(Pending {
+                    dir: runs_in.clone(),
+                    text,
+                    language,
+                    depth,
+                });
+            }
+        }
+        refused.extend(
+            reading
+                .unread
+                .into_iter()
+                .map(|unread| Refused::unread(unread.shape, unread.why)),
+        );
         refused.extend(reading.remote_code.map(Refused::remote));
         let mut verbs = Vec::new();
-        flot_verbs(command, *language, 0, &mut verbs);
+        flot_verbs(&text, language, 0, &mut verbs);
         refused.extend(verbs.into_iter().map(Refused::verb));
-        if nearest {
-            guard.consult(dir);
-        }
     }
     if nearest {
-        guard.consult(workspace.root());
         for (target, _) in &targets {
             if let Some(parent) = target.parent() {
                 guard.consult(parent);
@@ -1140,20 +1386,136 @@ fn judge(workspace: &Workspace, nearest: bool, call: Call) -> Result<Judged> {
         if guarded.iter().any(|known| known.path == found.path) {
             continue;
         }
-        if let Some(shape) = via {
-            found.reason = format!("{}; `{shape}` would change it", found.reason);
+        if let Some(via) = via {
+            found.reason = format!("{}; {via}", found.reason);
         }
         guarded.push(found);
     }
-    // Commands are refused where a flow is, as files are.
+    // Commands are refused where a flow is, as files are. A secret is
+    // refused anywhere.
     if !guard.active() {
         refused.clear();
     }
     Ok(Judged {
         guarded,
         refused,
+        secrets,
         flows: guard.workspaces().cloned().collect(),
     })
+}
+
+/// Adds `found` to `secrets`, once for each secret.
+fn noted(secrets: &mut Vec<Guarded>, found: Option<Guarded>) {
+    if let Some(found) = found {
+        if !secrets.iter().any(|known| known.path == found.path) {
+            secrets.push(found);
+        }
+    }
+}
+
+/// The directory `dir`, as the reader locates where code runs, names from
+/// `base`; `base` for an empty one.
+fn located_dir(base: &Path, dir: &str, language: Shell) -> PathBuf {
+    if dir.is_empty() {
+        return base.to_path_buf();
+    }
+    expand(base, dir, language)
+        .into_iter()
+        .next()
+        .unwrap_or_else(|| base.to_path_buf())
+}
+
+/// The text of the script at `path`, up to [`SCRIPT_BYTES`]: `None` when it
+/// is no file, or no text (a NUL in its first 8 KiB, or not UTF-8), as a
+/// compiled program is; an error when it is larger or cannot be read.
+fn script_text(path: &Path) -> Result<Option<String>> {
+    use std::io::Read;
+    if !path.is_file() {
+        return Ok(None);
+    }
+    let mut file =
+        std::fs::File::open(path).with_context(|| format!("cannot read {}", path.display()))?;
+    let mut bytes = Vec::new();
+    (&mut file)
+        .take(8192)
+        .read_to_end(&mut bytes)
+        .with_context(|| format!("cannot read {}", path.display()))?;
+    if bytes.contains(&0) {
+        return Ok(None);
+    }
+    file.take(SCRIPT_BYTES + 1 - bytes.len() as u64)
+        .read_to_end(&mut bytes)
+        .with_context(|| format!("cannot read {}", path.display()))?;
+    if bytes.len() as u64 > SCRIPT_BYTES {
+        anyhow::bail!("{} is larger than 1 MiB", path.display());
+    }
+    if bytes.contains(&0) {
+        return Ok(None);
+    }
+    Ok(String::from_utf8(bytes).ok())
+}
+
+/// What a script's `#!` line runs it with, as `/usr/bin/env python3`.
+fn shebang(text: &str) -> Option<&str> {
+    let line = text.strip_prefix("#!")?.lines().next()?.trim();
+    (!line.is_empty()).then_some(line)
+}
+
+/// `path` as one word of a POSIX command line.
+fn quoted(path: &Path) -> String {
+    format!("'{}'", path.to_string_lossy().replace('\'', "'\\''"))
+}
+
+/// The wildcard patterns a written `word` that holds what a command prints
+/// when it runs may match, that part as `*`, from `dir`: a word that
+/// starts with it may be any path.
+fn built_patterns(dir: &Path, word: &str, language: Shell) -> Vec<String> {
+    alternatives(word, language)
+        .into_iter()
+        .map(|word| {
+            let (literal, pattern) = variables(&word, dir, language);
+            let pattern = pattern.replace(shell::BUILT, "*");
+            if literal.starts_with(shell::BUILT) || Path::new(&literal).is_absolute() {
+                pattern
+            } else {
+                anchored(dir, &pattern)
+            }
+        })
+        .collect()
+}
+
+/// The secret a `word` a command is given in `dir` may name: the path it
+/// names, or, with a wildcard, any secret it matches.
+fn secret_named(
+    guard: &crate::service::Guard,
+    dir: &Path,
+    word: &str,
+    language: Shell,
+) -> Option<Guarded> {
+    for word in alternatives(word, language) {
+        let (literal, pattern) = variables(&word, dir, language);
+        if literal.contains(['*', '?', '[']) {
+            let pattern = if Path::new(&literal).is_absolute() {
+                pattern
+            } else {
+                anchored(dir, &pattern)
+            };
+            let Ok(pattern) = glob::Pattern::new(&pattern) else {
+                continue;
+            };
+            let found = guard
+                .secrets()
+                .into_iter()
+                .filter(|secret| pattern.matches_path_with(secret, wildcard_match()))
+                .find_map(|secret| guard.secret(&secret));
+            if found.is_some() {
+                return found;
+            }
+        } else if let Some(found) = guard.secret(&dir.join(literal)) {
+            return Some(found);
+        }
+    }
+    None
 }
 
 /// `words` without their redirections, such as `< p.diff` or `2>/dev/null`:
@@ -1294,6 +1656,7 @@ fn answer_hook(workspace: &Workspace, nearest: bool, cwd: &Path, call: Call) -> 
         let mut call = call;
         call.targets.extend(asked.targets);
         call.commands.extend(asked.commands);
+        call.named.extend(asked.named);
         judge(workspace, nearest, call)
     });
     let (denial, reasons, flows) = match judged {
@@ -1404,10 +1767,18 @@ fn replay_transcripts(paths: &[PathBuf], json: bool) -> Result<ExitCode> {
                     continue;
                 }
                 // Another tool counts when it names a path it may change.
+                // One that only reads counts when what it reads is a
+                // secret, which is all it is judged for.
                 let cwd = entry["cwd"].as_str().unwrap_or_default();
                 let base = PathBuf::from(cwd);
                 let call = Call::of(&base, tool, &item["input"]);
-                if !GUARDED_TOOLS.contains(&tool) && call.as_ref().map_or(true, Call::is_empty) {
+                let reads = call
+                    .as_ref()
+                    .is_ok_and(|call| call.is_empty() && !call.named.is_empty());
+                if !GUARDED_TOOLS.contains(&tool)
+                    && call.as_ref().map_or(true, Call::is_empty)
+                    && !reads
+                {
                     continue;
                 }
                 // A call is written again when its message is.
@@ -1416,9 +1787,11 @@ fn replay_transcripts(paths: &[PathBuf], json: bool) -> Result<ExitCode> {
                         continue;
                     }
                 }
-                replay.calls += 1;
                 if cwd.is_empty() || !base.is_dir() {
-                    replay.unjudged += 1;
+                    if !reads {
+                        replay.calls += 1;
+                        replay.unjudged += 1;
+                    }
                     continue;
                 }
                 let workspace = Workspace::locate(&base, None)?;
@@ -1437,6 +1810,10 @@ fn replay_transcripts(paths: &[PathBuf], json: bool) -> Result<ExitCode> {
                         (guard.active(), reasons)
                     }
                 };
+                if reads && reasons.is_empty() {
+                    continue;
+                }
+                replay.calls += 1;
                 if in_a_flow {
                     replay.in_a_flow += 1;
                 }
@@ -1543,6 +1920,7 @@ fn dispatch(
                 return replay_transcripts(paths, cli.json);
             }
             let call = Call {
+                named: Vec::new(),
                 targets: paths.iter().map(|path| cwd.join(path)).collect(),
                 commands: command
                     .iter()
@@ -1572,6 +1950,7 @@ fn dispatch(
                 print_json(&serde_json::json!({
                     "protected": judged.guarded,
                     "refused": refused,
+                    "secret": judged.secrets,
                 }))?;
             } else {
                 for found in &judged.guarded {
@@ -1580,12 +1959,17 @@ fn dispatch(
                 for found in &refused {
                     say!("refused    {}: {}", found.path, found.reason);
                 }
+                for found in &judged.secrets {
+                    say!("secret     {}: {}", found.path, found.reason);
+                }
             }
-            Ok(if judged.guarded.is_empty() && refused.is_empty() {
-                ExitCode::SUCCESS
-            } else {
-                ExitCode::from(2)
-            })
+            Ok(
+                if judged.guarded.is_empty() && refused.is_empty() && judged.secrets.is_empty() {
+                    ExitCode::SUCCESS
+                } else {
+                    ExitCode::from(2)
+                },
+            )
         }
         Command::Plan {
             only,

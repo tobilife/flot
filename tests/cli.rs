@@ -4586,6 +4586,163 @@ verify = "sh check.sh && sh tests/accept.sh"
 verify_inputs = ["check.sh", "tests/accept.sh"]
 "#;
 
+#[test]
+fn guard_refuses_whatever_reads_the_signing_key_flow_or_not() {
+    let project = two_proofs_project();
+    project.flot(&["key", "init"]).ok();
+    // A run opens the store, which makes the host secret beside the key.
+    project.flot(&["plan"]);
+    let keys = project.path().join(".test-keys");
+    assert!(keys.join("host.secret").exists());
+    std::fs::write(keys.join("signing.key.retired-0123456789abcdef"), "old").unwrap();
+    std::fs::write(keys.join("signing.pub"), "ed25519:x\n").unwrap();
+    let key = project.key_path();
+    let key = key.to_str().unwrap();
+    for (command, named) in [
+        (
+            "cat .test-keys/signing.key".to_string(),
+            ".test-keys/signing.key",
+        ),
+        (
+            "base64 < $FLOT_SIGNING_KEY".to_string(),
+            ".test-keys/signing.key",
+        ),
+        (format!("cp {key} /tmp/k"), ".test-keys/signing.key"),
+        (
+            "cp .test-keys/host.secret /tmp/s".to_string(),
+            ".test-keys/host.secret",
+        ),
+        (
+            "cat .test-keys/signing.key.retired-*".to_string(),
+            ".test-keys/signing.key.retired-0123456789abcdef",
+        ),
+        ("tar czf /tmp/k.tgz .test-keys".to_string(), ".test-keys"),
+        (
+            "cd .test-keys && xxd signing.key".to_string(),
+            ".test-keys/signing.key",
+        ),
+        (
+            "python3 -c \"print(open('.test-keys/host.secret').read())\"".to_string(),
+            ".test-keys/host.secret",
+        ),
+    ] {
+        project
+            .flot(&["guard", "--command", &command])
+            .has(&format!("secret     {named}: "))
+            .has("an agent that reads it can");
+    }
+    for allowed in [
+        "flot key show",
+        "cat .test-keys/signing.pub",
+        "cat check.sh",
+    ] {
+        project.flot(&["guard", "--command", allowed]).ok();
+    }
+    let read = |path: &Path| {
+        hook_payload(
+            project.path(),
+            "Read",
+            serde_json::json!({ "file_path": path }),
+        )
+    };
+    project
+        .flot_stdin(&["guard", "--hook"], &read(&project.key_path()))
+        .ok()
+        .has("\"permissionDecision\": \"deny\"")
+        .has("must not be read: it is the signing key")
+        .has("`flot key show` prints the public key");
+    let allowed = project.flot_stdin(&["guard", "--hook"], &read(&keys.join("signing.pub")));
+    assert_eq!(allowed.ok().stdout.trim(), "");
+    // Where no flow is, the key is refused all the same.
+    let elsewhere = tempfile::tempdir().unwrap();
+    let outside = flot_from(
+        &project,
+        elsewhere.path(),
+        elsewhere.path(),
+        &["guard", "--command", &format!("cat {key}")],
+        "",
+    );
+    assert_eq!(outside.code, 2, "{}", outside.stdout);
+    outside.has("it is the signing key");
+    let payload = hook_payload(
+        elsewhere.path(),
+        "Read",
+        serde_json::json!({ "file_path": project.key_path() }),
+    );
+    flot_from(
+        &project,
+        elsewhere.path(),
+        elsewhere.path(),
+        &["guard", "--hook"],
+        &payload,
+    )
+    .ok()
+    .has("\"permissionDecision\": \"deny\"");
+    flot_from(
+        &project,
+        elsewhere.path(),
+        elsewhere.path(),
+        &["guard", "--command", "rm -rf x"],
+        "",
+    )
+    .ok();
+    // A key kept in the project leaves the project's directory to the work.
+    let beside = |command: &str| {
+        Command::new(flot_bin())
+            .args(["guard", "--command", command])
+            .current_dir(project.path())
+            .env("FLOT_SIGNING_KEY", project.path().join("signing.key"))
+            .output()
+            .unwrap()
+    };
+    assert_eq!(beside("ls . && grep -r x .").status.code(), Some(0));
+    assert_eq!(beside("cat signing.key").status.code(), Some(2));
+}
+
+#[test]
+fn guard_reads_the_scripts_a_command_runs() {
+    let project = two_proofs_project();
+    project.write("scripts/ok.sh", "echo ok\n");
+    project.write("scripts/bad.sh", "rm check.sh\n");
+    project.write("scripts/loop.sh", "sh scripts/loop.sh\nsh scripts/ok.sh\n");
+    project.write("scripts/deep.sh", "sh scripts/deep2.sh\n");
+    project.write("scripts/deep2.sh", "cd tests && sh ../scripts/here.sh\n");
+    project.write("scripts/here.sh", "rm accept.sh\n");
+    project.write("scripts/edit.py", "open('tests/accept.sh', 'w')\n");
+    project.write("bin.dat", "\0\0rm check.sh\n");
+    project.write("huge.sh", &"#\n".repeat(600_000));
+    for (command, named) in [
+        ("sh scripts/bad.sh", "check.sh: the proof of step `work` reads it"),
+        (". ./scripts/bad.sh", "check.sh: the proof of step `work` reads it"),
+        // A subshell's cd stays in it.
+        ("(cd scripts && sh bad.sh); sh scripts/bad.sh", "check.sh"),
+        // A script's cd moves the paths in the script it runs.
+        (
+            "sh scripts/deep.sh",
+            "tests/accept.sh: the proof of step `work` reads it",
+        ),
+        (
+            "python3 scripts/edit.py",
+            "tests/accept.sh: the proof of step `work` reads it; the python3 script scripts/edit.py names it",
+        ),
+        ("bash huge.sh", "is larger than 1 MiB, so flot cannot read what it runs"),
+    ] {
+        let guarded = project.flot(&["guard", "--command", command]);
+        assert_eq!(guarded.code, 2, "{command}: {}", guarded.stdout);
+        guarded.has(named);
+    }
+    // A script that runs itself is read once; a binary and a missing
+    // script are not read.
+    for allowed in [
+        "sh scripts/loop.sh",
+        "sh bin.dat",
+        "sh missing.sh",
+        "sh scripts/ok.sh",
+    ] {
+        project.flot(&["guard", "--command", allowed]).ok();
+    }
+}
+
 fn two_proofs_project() -> Project {
     let project = Project::new(TWO_PROOFS);
     project.write("check.sh", "grep -q 1 out.txt\n");

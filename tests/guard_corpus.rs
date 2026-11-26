@@ -52,6 +52,30 @@ verify = "sh check.sh && sh tests/accept.sh"
 verify_inputs = ["check.sh", "tests/accept.sh"]
 "#;
 
+/// Scripts a command can run, committed with the project: what each one
+/// does is what its name says.
+const SCRIPTS: &[(&str, &str)] = &[
+    ("scripts/ok.sh", "echo ok\nmkdir -p build\n"),
+    ("scripts/bad.sh", "rm -f check.sh\n"),
+    ("scripts/cdbad.sh", "cd tests\nrm accept.sh\n"),
+    ("scripts/nested.sh", "sh scripts/bad.sh\n"),
+    ("scripts/plain", "rm check.sh\n"),
+    ("scripts/bad.py", "open('check.sh', 'w').write('exit 0')\n"),
+    (
+        "scripts/bad.js",
+        "require('fs').writeFileSync('check.sh', 'exit 0')\n",
+    ),
+    (
+        "scripts/tool",
+        "#!/usr/bin/env python3\nopen('tests/accept.sh', 'w').write('exit 0')\n",
+    ),
+    (
+        "build.ps1",
+        "Write-Output 'building'\nNew-Item -ItemType Directory -Force out | Out-Null\n",
+    ),
+    ("bad.ps1", "Remove-Item check.sh\n"),
+];
+
 const PATCH: &str = "--- a/check.sh\n+++ b/check.sh\n@@ -1 +1 @@\n-grep -q 1 out.txt\n+exit 0\n";
 
 fn write(path: &Path, text: &str) {
@@ -82,6 +106,11 @@ fn git(dir: &Path, home: &Path, args: &[&str]) {
 fn fixture(dir: &Path, home: &Path) {
     write(&home.join(".claude/settings.json"), "{}\n");
     write(&home.join(".claude/plugins/p/hooks/hooks.json"), "{}\n");
+    // The signing key where flot keeps it by default, with what goes with
+    // it.
+    write(&home.join(".config/flot/signing.key"), &"0".repeat(64));
+    write(&home.join(".config/flot/host.secret"), &"1".repeat(64));
+    write(&home.join(".config/flot/signing.pub"), "ed25519:x\n");
     git(dir, home, &["init", "-q"]);
     write(&dir.join("flot.toml"), FLOW);
     write(&dir.join("check.sh"), "grep -q 0 out.txt\n");
@@ -93,6 +122,15 @@ fn fixture(dir: &Path, home: &Path) {
     write(&dir.join(".gitignore"), ".flot/\nhard.sh\n");
     write(&dir.join("notes.md"), "notes\n");
     write(&dir.join("src.txt"), "0\n");
+    for (path, text) in SCRIPTS {
+        write(&dir.join(path), text);
+    }
+    std::fs::set_permissions(
+        dir.join("scripts/tool"),
+        std::os::unix::fs::PermissionsExt::from_mode(0o755),
+    )
+    .unwrap();
+    write(&dir.join("big.sh"), &"# padding\n".repeat(110_000));
     std::os::unix::fs::symlink("check.sh", dir.join("alias.sh")).unwrap();
     std::os::unix::fs::symlink("tests", dir.join("t")).unwrap();
     git(dir, home, &["add", "-A"]);
@@ -143,6 +181,8 @@ fn judge(dir: &Path, home: &Path, row: &Row) -> Judged {
         .env("HOME", home)
         .env("USERPROFILE", home)
         .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env_remove("FLOT_SIGNING_KEY")
+        .env_remove("XDG_CONFIG_HOME")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -200,7 +240,7 @@ fn judge(dir: &Path, home: &Path, row: &Row) -> Judged {
     let found: serde_json::Value = serde_json::from_str(&stdout)
         .unwrap_or_else(|_| panic!("flot guard --json printed JSON: {shown}"));
     let mut said = Vec::new();
-    for key in ["protected", "refused"] {
+    for key in ["protected", "refused", "secret"] {
         for item in found[key].as_array().unwrap() {
             said.push((
                 item["path"].as_str().unwrap().to_string(),

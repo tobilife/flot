@@ -106,7 +106,7 @@ pub fn export(
     for (step_id, receipt_id, observed_digest) in manifest.evidence() {
         objects.insert(
             observed_digest.to_string(),
-            encode(
+            digest::base64_encode(
                 &store
                     .read_bytes(observed_digest)
                     .with_context(|| format!("step `{step_id}` has no readable observation"))?,
@@ -131,7 +131,7 @@ pub fn export(
             let bytes = store
                 .read_bytes(object)
                 .with_context(|| format!("step `{step_id}` references missing object {object}"))?;
-            objects.insert(object.to_string(), encode(&bytes));
+            objects.insert(object.to_string(), digest::base64_encode(&bytes));
         }
         // The stored receipt carries its latest execution's observation; the
         // bundle carries this run's, which is what the manifest names.
@@ -242,7 +242,7 @@ pub fn exposures(bundle: &Bundle) -> Result<Vec<Exposure>> {
             .get(object.as_str())
             .cloned()
             .unwrap_or_else(|| format!("object {}", digest::short(object)));
-        note(place, &decode(encoded)?);
+        note(place, &digest::base64_decode(encoded)?);
     }
     Ok(found)
 }
@@ -259,8 +259,8 @@ struct Authenticated<'a> {
 fn authenticate<'a>(store: &Store, bundle: &'a Bundle) -> Result<Authenticated<'a>> {
     let mut decoded: BTreeMap<String, Vec<u8>> = BTreeMap::new();
     for (object, encoded) in &bundle.objects {
-        let bytes =
-            decode(encoded).with_context(|| format!("object {object} is not valid base64"))?;
+        let bytes = digest::base64_decode(encoded)
+            .with_context(|| format!("object {object} is not valid base64"))?;
         let actual = digest::bytes(&bytes);
         if &actual != object {
             bail!("object {object} does not match its content (found {actual})");
@@ -539,68 +539,6 @@ pub fn parse(text: &str) -> Result<Bundle> {
     Ok(serde_json::from_str(text)?)
 }
 
-const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-
-/// Standard base64 with padding. Bundles must stay readable by any JSON tool,
-/// and step output is arbitrary bytes, so text is not an option.
-fn encode(data: &[u8]) -> String {
-    let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
-    for chunk in data.chunks(3) {
-        let b = [
-            chunk[0],
-            *chunk.get(1).unwrap_or(&0),
-            *chunk.get(2).unwrap_or(&0),
-        ];
-        let bits = ((b[0] as u32) << 16) | ((b[1] as u32) << 8) | b[2] as u32;
-        out.push(ALPHABET[(bits >> 18) as usize & 63] as char);
-        out.push(ALPHABET[(bits >> 12) as usize & 63] as char);
-        out.push(if chunk.len() > 1 {
-            ALPHABET[(bits >> 6) as usize & 63] as char
-        } else {
-            '='
-        });
-        out.push(if chunk.len() > 2 {
-            ALPHABET[bits as usize & 63] as char
-        } else {
-            '='
-        });
-    }
-    out
-}
-
-fn decode(text: &str) -> Result<Vec<u8>> {
-    let value = |symbol: u8| -> Result<u32> {
-        ALPHABET
-            .iter()
-            .position(|candidate| *candidate == symbol)
-            .map(|position| position as u32)
-            .with_context(|| format!("`{}` is not a base64 symbol", symbol as char))
-    };
-    let symbols: Vec<u8> = text
-        .bytes()
-        .filter(|byte| !byte.is_ascii_whitespace())
-        .collect();
-    if !symbols.len().is_multiple_of(4) {
-        bail!("base64 length {} is not a multiple of four", symbols.len());
-    }
-    let mut out = Vec::with_capacity(symbols.len() / 4 * 3);
-    for quad in symbols.chunks(4) {
-        let padding = quad.iter().filter(|symbol| **symbol == b'=').count();
-        let bits = (value(quad[0])? << 18)
-            | (value(quad[1])? << 12)
-            | (if padding > 1 { 0 } else { value(quad[2])? } << 6)
-            | (if padding > 0 { 0 } else { value(quad[3])? });
-        out.push((bits >> 16) as u8);
-        if padding < 2 {
-            out.push((bits >> 8) as u8);
-        }
-        if padding < 1 {
-            out.push(bits as u8);
-        }
-    }
-    Ok(out)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -638,23 +576,6 @@ verify = "grep -q flot artifact.txt"
         let dir = tempfile::tempdir().unwrap();
         let store = Store::open(dir.path(), HostSecret::from_bytes([7; 32])).unwrap();
         (dir, store)
-    }
-
-    #[test]
-    fn base64_round_trips_arbitrary_bytes() {
-        let cases: [&[u8]; 7] = [b"", b"f", b"fo", b"foo", b"foob", b"fooba", b"foobar"];
-        for data in cases {
-            assert_eq!(decode(&encode(data)).unwrap(), data, "{data:?}");
-        }
-        let binary: Vec<u8> = (0u8..=255).collect();
-        assert_eq!(decode(&encode(&binary)).unwrap(), binary);
-    }
-
-    #[test]
-    fn base64_matches_known_encodings() {
-        assert_eq!(encode(b"f"), "Zg==");
-        assert_eq!(encode(b"fo"), "Zm8=");
-        assert_eq!(encode(b"foo"), "Zm9v");
     }
 
     #[test]
@@ -707,7 +628,9 @@ verify = "grep -q flot artifact.txt"
         let (_source, store, manifest) = recorded();
         let mut bundle = export(&store, &manifest, None).unwrap();
         let victim = bundle.objects.keys().next().unwrap().clone();
-        bundle.objects.insert(victim, encode(b"swapped"));
+        bundle
+            .objects
+            .insert(victim, digest::base64_encode(b"swapped"));
 
         let (_target, fresh) = empty_store();
         let error = import(&fresh, &bundle, ImportPolicy::default()).unwrap_err();
@@ -1033,7 +956,7 @@ verify = "grep -q flot artifact.txt"
         let mut bundle = export(&store, &manifest, None).unwrap();
         bundle
             .objects
-            .insert(digest::bytes(b"payload"), encode(b"payload"));
+            .insert(digest::bytes(b"payload"), digest::base64_encode(b"payload"));
         let (_target, fresh) = empty_store();
         let error = import(&fresh, &bundle, ImportPolicy::default()).unwrap_err();
         assert!(
@@ -1092,13 +1015,14 @@ verify = "grep -q flot artifact.txt"
     fn forge_observation(bundle: &mut Bundle, edit: impl Fn(&mut Observed)) {
         let named = bundle.run.steps[0].observed_digest.clone();
         let mut observed: Observed =
-            serde_json::from_slice(&decode(&bundle.objects[&named]).unwrap()).unwrap();
+            serde_json::from_slice(&digest::base64_decode(&bundle.objects[&named]).unwrap())
+                .unwrap();
         edit(&mut observed);
         let text = digest::canonical_json(&observed);
         let forged = digest::bytes(text.as_bytes());
         bundle
             .objects
-            .insert(forged.clone(), encode(text.as_bytes()));
+            .insert(forged.clone(), digest::base64_encode(text.as_bytes()));
         bundle.run.steps[0].observed_digest = forged;
         bundle.receipts[0].observed = observed;
     }

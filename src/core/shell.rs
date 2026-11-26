@@ -6,12 +6,19 @@
 //! (`rm`, `sed -i`, `tee`, `git checkout --`, `curl -o`, `tar -x`, ...),
 //! also behind reserved words such as `if` or `!` and wrappers such as
 //! `sudo`, `timeout` or `xargs`; code handed to a shell as a string
-//! (`eval`, `sh -c`, `$(..)` in double quotes, a here-document or an `echo`
-//! piped into `sh`), read again; and code fetched from the network piped
-//! into an interpreter. A `cd` moves the relative paths after it. A command
-//! that writes some other way, through a script, a variable or `python -c`,
-//! is not seen. Seeing less is the point: what is reported is a write the
-//! command line itself names.
+//! (`eval`, `sh -c`, `$(..)`, a here-document or an `echo` piped into
+//! `sh`), read again; and code fetched from the network piped into an
+//! interpreter. A `cd` moves the relative paths after it, and a variable
+//! the line sets (`f=x; rm $f`, `for f in x`) is put in where it is used
+//! after. Code given to an interpreter (`python3 -c`, `node -e`, a
+//! here-document piped into `perl`) and the script files a shell or an
+//! interpreter runs are handed back for the caller to look into: this
+//! module never reads the disk. A command whose code or program is built
+//! when the line runs (`sh -c "$(..)"`) is named as one no reading can
+//! know. A command that writes some other way, through a program that does
+//! it on its own or a variable set before the line, is not seen. Seeing
+//! less is the point: what is reported is a write the command line itself
+//! names.
 
 use std::collections::HashSet;
 
@@ -20,13 +27,82 @@ use std::collections::HashSet;
 pub struct Reading {
     /// Paths it writes, deletes, moves or changes the mode of, as written:
     /// a glob, a brace, `$PWD`, `$HOME`, `~` or a directory is the caller's
-    /// to expand, and `.` stands for the whole tree (`git stash`, `tar -x`).
-    /// A sed script or an option's value can be among them: a caller looks
-    /// for the files it cares about, not for what is missing.
+    /// to expand, `.` stands for the whole tree (`git stash`, `tar -x`), and
+    /// [`BUILT`] for a part built when the line runs. A sed script or an
+    /// option's value can be among them: a caller looks for the files it
+    /// cares about, not for what is missing.
     pub writes: Vec<String>,
     /// `fetcher | interpreter` when it pipes downloaded code into one.
     pub remote_code: Option<String>,
+    /// Code given to an interpreter on its command line or its input.
+    pub code: Vec<Code>,
+    /// Script files a shell or an interpreter is given to run.
+    pub scripts: Vec<Script>,
+    /// Commands whose code no reading of the line can see.
+    pub unread: Vec<Unread>,
+    /// Every word the line's commands are given, and the files redirected
+    /// into them, located as `writes` are: where a caller looks for a file
+    /// that must not even be read.
+    pub named: Vec<String>,
 }
+
+/// Code an interpreter is given, which this reader does not read: only the
+/// files it names can be looked for.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Code {
+    /// The interpreter, as `python3`.
+    pub program: String,
+    pub text: String,
+    /// The directory it runs in, from where the line starts; empty for there.
+    pub dir: String,
+}
+
+/// A script file a command runs, for the caller to read from the disk.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Script {
+    /// Its path as written, from where the line starts.
+    pub path: String,
+    /// The directory it runs in, from where the line starts; empty for there.
+    pub dir: String,
+    pub runner: Runner,
+    /// How many times the code naming it was handed over as a string: its
+    /// own text is read one deeper.
+    pub depth: usize,
+    /// What the line writes into it before running it, when the line
+    /// spells that: a here-document or an `echo` redirected into it.
+    pub text: Option<String>,
+}
+
+/// What runs a script.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Runner {
+    /// A POSIX shell, which reads it as commands.
+    Shell,
+    /// PowerShell.
+    PowerShell,
+    /// An interpreter, by its name: its text is code.
+    Interpreter(String),
+    /// The system, as a program: its `#!` line names what runs it, and a
+    /// text file with none is run by the shell.
+    Program,
+}
+
+/// A command whose code this reader cannot see.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Unread {
+    /// The command as spelled, such as `sh $(..)`.
+    pub shape: String,
+    /// Why its code cannot be seen, said of the command.
+    pub why: String,
+}
+
+/// What a word holds in place of a command substituted in it, `$(..)` or
+/// backquotes, whose output no reading of the line can know.
+pub const BUILT: char = '\u{FFFC}';
+
+/// Why a command whose code is built when the line runs is not seen.
+const BUILT_CODE: &str =
+    "what it runs is built when the command runs, so flot cannot read it before it runs";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Token {
@@ -35,24 +111,25 @@ enum Token {
     Pipe,
     /// `&&`: the next command runs only if this one succeeded.
     And,
-    /// `;`, `||`, `&`, a newline or a backquote.
+    /// `;`, `||`, `&` or a newline.
     Break,
-    /// `(` or `$(`: a nested command, whose `cd` stays inside it.
+    /// `(`: a subshell, whose `cd` and variables stay inside it.
     Open,
     /// `)`.
     Close,
     /// `>`, `>>`, `>|`, `2>`, `&>`, `>&`, `<>`: the next word is written.
     WriteTo,
-    /// `<`: the next word is only read.
+    /// `<`: the next word is the command's input, only read.
     ReadFrom,
     /// `<<<`: the next word is the command's input.
     HereString,
     /// A here-document's body: the command's input.
     Input(String),
-    /// A command substituted in a double-quoted word, an arithmetic
-    /// expression or a here-document body, to be read on its own.
+    /// A command substituted in a word, an arithmetic expression or a
+    /// here-document body, to be read on its own.
     Nested(String),
-    /// `<(`: a nested command whose output the command before reads.
+    /// `<(`: a nested command whose output the command around it reads,
+    /// as a file the shell names.
     Feeds,
 }
 
@@ -253,18 +330,19 @@ fn tokens(command: &str) -> Vec<Token> {
                         // A command substituted in double quotes still runs.
                         '$' if chars.get(at + 1) == Some(&'(') => {
                             let close = closing(&chars, at + 2, 1, usize::MAX);
-                            out.extend(
-                                substituted(&chars[at + 2..close], 0)
-                                    .into_iter()
-                                    .map(Token::Nested),
-                            );
-                            word.extend(&chars[at..chars.len().min(close + 1)]);
+                            let inner = &chars[at + 2..close];
+                            out.extend(substituted(inner, 0).into_iter().map(Token::Nested));
+                            if arithmetic(inner) {
+                                word.extend(&chars[at..chars.len().min(close + 1)]);
+                            } else {
+                                word.push(BUILT);
+                            }
                             at = close;
                         }
                         '`' => {
                             let close = backquoted(&chars, at + 1);
                             out.push(Token::Nested(chars[at + 1..close].iter().collect()));
-                            word.extend(&chars[at..chars.len().min(close + 1)]);
+                            word.push(BUILT);
                             at = close;
                         }
                         other => word.push(other),
@@ -304,10 +382,19 @@ fn tokens(command: &str) -> Vec<Token> {
                     word.extend(&chars[at..=close]);
                     at = close;
                 } else {
-                    end_word(&mut word, &mut quoted, &mut out);
-                    at += 1;
-                    out.push(Token::Open);
+                    // What the command substituted prints is part of the
+                    // word, which goes on after it.
+                    let close = closing(&chars, at + 2, 1, usize::MAX);
+                    out.push(Token::Nested(chars[at + 2..close].iter().collect()));
+                    word.push(BUILT);
+                    at = close;
                 }
+            }
+            '`' => {
+                let close = backquoted(&chars, at + 1);
+                out.push(Token::Nested(chars[at + 1..close].iter().collect()));
+                word.push(BUILT);
+                at = close;
             }
             '\\' => {
                 at += 1;
@@ -365,7 +452,7 @@ fn tokens(command: &str) -> Vec<Token> {
                 }
                 out.extend(nested.into_iter().map(Token::Nested));
             }
-            '|' | '&' | ';' | '(' | ')' | '`' => {
+            '|' | '&' | ';' | '(' | ')' => {
                 if c == '&' && next == Some('>') {
                     end_word(&mut word, &mut quoted, &mut out);
                     at += 1;
@@ -579,11 +666,164 @@ const WRAPPERS: &[(&str, &str, &[&str], usize)] = &[
     ),
 ];
 const FETCHERS: &[&str] = &["curl", "wget"];
-const INTERPRETERS: &[&str] = &[
-    "sh", "bash", "zsh", "dash", "ksh", "fish", "python", "python3", "perl", "ruby", "node",
-];
 /// Shells, which run the string after `-c` or the commands on their input.
 const SHELLS: &[&str] = &["sh", "bash", "zsh", "dash", "ksh", "mksh", "ash", "fish"];
+
+/// An interpreter whose code this reader hands back for what it names,
+/// and how its options give that code.
+struct Language {
+    /// Its names; each also with a version after it, as `python3.12`.
+    names: &'static [&'static str],
+    /// Options whose value is code, as `-c` or `--eval`.
+    code: &'static [&'static str],
+    /// Options whose value is the script, as php's `-f`.
+    script: &'static [&'static str],
+    /// Other options that take a value.
+    valued: &'static [&'static str],
+    /// Letters that take the rest of their word, however short, as perl's
+    /// `-i.bak`.
+    attached: &'static str,
+    /// Whether a letter's value may be the rest of its word, as `-cCODE`;
+    /// otherwise it is the next word.
+    glued: bool,
+    /// Options past which every word is the program's own, as python's `-c`
+    /// and `-m`.
+    ends: &'static [&'static str],
+    /// Whether its first operand may be `eval`, whose next is code, or
+    /// `run`, whose next is the script.
+    subcommands: bool,
+}
+
+const LANGUAGES: &[Language] = &[
+    Language {
+        names: &["python", "pypy"],
+        code: &["c"],
+        script: &[],
+        valued: &["W", "X", "check-hash-based-pycs"],
+        attached: "",
+        glued: true,
+        ends: &["c", "m"],
+        subcommands: false,
+    },
+    Language {
+        names: &["node", "nodejs"],
+        code: &["e", "p", "eval", "print"],
+        script: &[],
+        valued: &[
+            "r",
+            "require",
+            "import",
+            "loader",
+            "experimental-loader",
+            "C",
+            "conditions",
+            "input-type",
+            "env-file",
+            "title",
+        ],
+        attached: "",
+        glued: false,
+        ends: &[],
+        subcommands: false,
+    },
+    Language {
+        names: &["deno"],
+        code: &["eval"],
+        script: &[],
+        valued: &["c", "config", "import-map", "lock", "cert", "env-file"],
+        attached: "",
+        glued: false,
+        ends: &[],
+        subcommands: true,
+    },
+    Language {
+        names: &["bun"],
+        code: &["e", "p", "eval", "print"],
+        script: &[],
+        valued: &["r", "preload", "cwd", "env-file", "config"],
+        attached: "",
+        glued: false,
+        ends: &[],
+        subcommands: true,
+    },
+    Language {
+        names: &["perl"],
+        code: &["e", "E"],
+        script: &[],
+        valued: &[],
+        attached: "iIMmxdDC",
+        glued: true,
+        ends: &[],
+        subcommands: false,
+    },
+    Language {
+        names: &["ruby"],
+        code: &["e"],
+        script: &[],
+        valued: &["r", "I", "C", "E", "F", "encoding"],
+        attached: "ixWKT",
+        glued: true,
+        ends: &[],
+        subcommands: false,
+    },
+    Language {
+        names: &["php"],
+        code: &["r", "B", "R", "E"],
+        script: &["f"],
+        valued: &["c", "d", "t", "S", "z"],
+        attached: "",
+        glued: true,
+        ends: &[],
+        subcommands: false,
+    },
+    Language {
+        names: &["Rscript"],
+        code: &["e"],
+        script: &[],
+        valued: &[],
+        attached: "",
+        glued: false,
+        ends: &[],
+        subcommands: false,
+    },
+    Language {
+        names: &["lua", "luajit"],
+        code: &["e"],
+        script: &[],
+        valued: &["l"],
+        attached: "",
+        glued: true,
+        ends: &[],
+        subcommands: false,
+    },
+    Language {
+        names: &["osascript"],
+        code: &["e"],
+        script: &[],
+        valued: &["l", "s"],
+        attached: "",
+        glued: false,
+        ends: &[],
+        subcommands: false,
+    },
+];
+
+/// The interpreter a program is, by its name, if this reader knows it.
+fn language(name: &str) -> Option<&'static Language> {
+    LANGUAGES.iter().find(|language| {
+        language.names.iter().any(|known| {
+            name.strip_prefix(known)
+                .is_some_and(|version| version.chars().all(|c| c.is_ascii_digit() || c == '.'))
+        })
+    })
+}
+
+/// Whether a program runs the code it is given: a shell or an interpreter
+/// this reader knows.
+fn runs_code(name: &str) -> bool {
+    SHELLS.contains(&name) || language(name).is_some()
+}
+
 const COMPRESSORS: &[&str] = &[
     "gzip",
     "gunzip",
@@ -656,6 +896,13 @@ fn command(words: &[String]) -> Command<'_> {
             if arg.starts_with('-') {
                 if name == "xargs" {
                     replace = replace.or_else(|| xargs_replace(arg, words.get(at + 1)));
+                }
+                // `command -v x` says what `x` is, and runs nothing.
+                if name == "command" && arg.trim_start_matches('-').contains(['v', 'V']) {
+                    return Command {
+                        words: &[],
+                        xargs: None,
+                    };
                 }
                 at += 1 + usize::from(takes_value(arg, short, long));
             } else if operands > 0 {
@@ -783,9 +1030,10 @@ fn strings(values: Vec<&str>) -> Vec<String> {
     values.into_iter().map(str::to_string).collect()
 }
 
-/// The paths one simple command changes through its arguments.
-pub(crate) fn changed_by(words: &[String]) -> Vec<String> {
-    changed(words, None, 0).writes
+/// What one simple command of `words` changes and runs, `depth` strings
+/// deep.
+pub(crate) fn changed_by(words: &[String], depth: usize) -> Reading {
+    changed(words, Input::Unknown, depth, &Variables::default())
 }
 
 fn merge(into: &mut Reading, found: Reading) {
@@ -793,26 +1041,82 @@ fn merge(into: &mut Reading, found: Reading) {
     if into.remote_code.is_none() {
         into.remote_code = found.remote_code;
     }
+    into.code.extend(found.code);
+    into.scripts.extend(found.scripts);
+    into.unread.extend(found.unread);
+    into.named.extend(found.named);
 }
 
-/// What one simple command changes, given the input the line spells for
-/// it, `depth` strings deep.
-fn changed(words: &[String], input: Option<&str>, depth: usize) -> Reading {
+/// `word` as it is shown, with what a command substituted in it prints as
+/// `$(..)`.
+pub fn shown(word: &str) -> String {
+    word.replace(BUILT, "$(..)")
+}
+
+/// A command whose code is built when the line runs, as `program $(..)`.
+fn built(program: &str) -> Reading {
+    Reading {
+        unread: vec![Unread {
+            shape: format!("{program} $(..)"),
+            why: BUILT_CODE.to_string(),
+        }],
+        ..Reading::default()
+    }
+}
+
+/// What `program` runs of `code`, a string it reads as commands: the code
+/// read again, `depth` strings deep, with `vars` the variables it sees.
+fn code_of(program: &str, code: &str, depth: usize, vars: &Variables) -> Reading {
+    if code.contains(BUILT) {
+        built(program)
+    } else {
+        read_in(code, depth + 1, vars)
+    }
+}
+
+/// The script `program` runs at `path`, for the caller to read.
+fn script_of(program: &str, path: &str, runner: Runner, depth: usize) -> Reading {
+    if path.contains(BUILT) {
+        return built(program);
+    }
+    Reading {
+        scripts: vec![Script {
+            path: path.to_string(),
+            dir: String::new(),
+            runner,
+            depth,
+            text: None,
+        }],
+        ..Reading::default()
+    }
+}
+
+/// What one simple command of `words` changes and runs, `depth` strings
+/// deep, given what it reads on its input and the variables the line set.
+fn changed(words: &[String], input: Input, depth: usize, vars: &Variables) -> Reading {
     if depth > DEPTH {
         return Reading {
             writes: words.to_vec(),
-            remote_code: None,
+            ..Reading::default()
         };
     }
     let found = command(words);
     if let Some(replace) = found.xargs {
-        return xargs(found.words, replace.as_deref(), input, depth);
+        return xargs(found.words, replace.as_deref(), input.text(), depth, vars);
     }
     let Some((name, args)) = found.words.split_first() else {
         return Reading::default();
     };
+    // A program whose name is built when the line runs may be any: every
+    // word it is given may be a path it writes.
+    if program(name).contains(BUILT) {
+        return Reading {
+            writes: args.to_vec(),
+            ..Reading::default()
+        };
+    }
     match program(name) {
-        "eval" => read_at(&args.join(" "), depth + 1),
+        "eval" => code_of("eval", &args.join(" "), depth, vars),
         "su" => {
             let parsed = parse(
                 args,
@@ -828,24 +1132,83 @@ fn changed(words: &[String], input: Option<&str>, depth: usize) -> Reading {
             );
             let mut reading = Reading::default();
             for code in parsed.values(&["c", "command", "session-command"]) {
-                merge(&mut reading, read_at(code, depth + 1));
+                merge(
+                    &mut reading,
+                    code_of("su", code, depth, &Variables::default()),
+                );
             }
             reading
         }
-        "find" => find(args, depth),
-        name if SHELLS.contains(&name) => shell_code(args, input)
-            .map(|code| read_at(code, depth + 1))
-            .unwrap_or_default(),
-        name => Reading {
-            writes: written(name, args),
-            remote_code: None,
+        "find" => find(args, depth, vars),
+        "." | "source" => match args.first() {
+            Some(path) => script_of(program(name), path, Runner::Shell, depth),
+            None => Reading::default(),
         },
+        "pwsh" | "powershell" => super::powershell::invoked(args, depth),
+        shell if SHELLS.contains(&shell) => match shell_code(args, input) {
+            Given::Code(code) => code_of(shell, &code, depth, vars),
+            Given::Script(path) => script_of(shell, &path, Runner::Shell, depth),
+            Given::Nothing => Reading::default(),
+        },
+        program_name => {
+            let mut reading = Reading {
+                writes: written(program_name, args),
+                ..Reading::default()
+            };
+            if let Some(language) = language(program_name) {
+                let runner = Runner::Interpreter(program_name.to_string());
+                merge(
+                    &mut reading,
+                    match interpreted(language, args, input) {
+                        // Code that is all built when the line runs may be
+                        // any; code with a name built in it is judged by
+                        // what it spells.
+                        Given::Code(text)
+                            if text.chars().all(|c| c == BUILT || c.is_whitespace()) =>
+                        {
+                            built(program_name)
+                        }
+                        Given::Code(text) => Reading {
+                            code: vec![Code {
+                                program: program_name.to_string(),
+                                text: text.replace(BUILT, " "),
+                                dir: String::new(),
+                            }],
+                            ..Reading::default()
+                        },
+                        // A script whose path is built when the line runs
+                        // is no more known than any program's code.
+                        Given::Script(path) if path.contains(BUILT) => Reading::default(),
+                        Given::Script(path) => script_of(program_name, &path, runner, depth),
+                        Given::Nothing => Reading::default(),
+                    },
+                );
+            } else if reading.writes.is_empty()
+                && program_name.len() < name.len()
+                && !name.contains(BUILT)
+            {
+                // A program named by its path may be a script. One in a
+                // directory built when the line runs is no shell this
+                // reader knows, and is left unread.
+                merge(
+                    &mut reading,
+                    script_of(program_name, name, Runner::Program, depth),
+                );
+            }
+            reading
+        }
     }
 }
 
 /// What `xargs` runs `words` as: with the items of its input appended, or
 /// each in place of `replace`. Items come only from input the line spells.
-fn xargs(words: &[String], replace: Option<&str>, input: Option<&str>, depth: usize) -> Reading {
+fn xargs(
+    words: &[String],
+    replace: Option<&str>,
+    input: Option<&str>,
+    depth: usize,
+    vars: &Variables,
+) -> Reading {
     let mut reading = Reading::default();
     if words.is_empty() {
         return reading;
@@ -876,28 +1239,75 @@ fn xargs(words: &[String], replace: Option<&str>, input: Option<&str>, depth: us
             .collect()],
     };
     for run in runs {
-        merge(&mut reading, changed(&run, None, depth + 1));
+        merge(&mut reading, changed(&run, Input::Unknown, depth + 1, vars));
     }
     reading
 }
 
-/// The code a shell is given: the string after `-c`, or its input when it
-/// reads its commands from it; `None` when it runs a script.
-fn shell_code<'a>(args: &'a [String], input: Option<&'a str>) -> Option<&'a str> {
+/// What a command reads on its input, as far as the line spells it.
+#[derive(Clone, Copy)]
+enum Input<'a> {
+    /// Nothing the line spells.
+    Unknown,
+    /// Text: a here-document, a here-string, or what `echo` pipes.
+    Text(&'a str),
+    /// A file redirected into it with `<`.
+    File(&'a str),
+}
+
+impl<'a> Input<'a> {
+    fn text(self) -> Option<&'a str> {
+        match self {
+            Input::Text(text) => Some(text),
+            _ => None,
+        }
+    }
+}
+
+/// What a shell or an interpreter is given to run.
+enum Given {
+    Code(String),
+    /// A script file, by its path as written.
+    Script(String),
+    Nothing,
+}
+
+/// What a command that runs code reads it from when its arguments name
+/// neither code nor a script: its input.
+fn from_input(input: Input) -> Given {
+    match input {
+        Input::Text(text) => Given::Code(text.to_string()),
+        Input::File(path) => Given::Script(path.to_string()),
+        Input::Unknown => Given::Nothing,
+    }
+}
+
+/// What a shell is given to run: the string after `-c`, its script, or its
+/// input when it reads its commands from it.
+fn shell_code(args: &[String], input: Input) -> Given {
     let mut code = false;
     let mut stdin = false;
     let mut at = 0;
     while let Some(arg) = args.get(at) {
-        if arg == "--" || arg == "-" {
+        if arg == "-" {
+            stdin = true;
+            at += 1;
+            break;
+        }
+        if arg == "--" {
             at += 1;
             break;
         }
         if let Some(long) = arg.strip_prefix("--") {
             if let Some(code) = long.strip_prefix("command=") {
-                return Some(code);
+                return Given::Code(code.to_string());
             }
             match long {
-                "command" => return args.get(at + 1).map(String::as_str),
+                "command" => {
+                    return args
+                        .get(at + 1)
+                        .map_or(Given::Nothing, |code| Given::Code(code.clone()))
+                }
                 "rcfile" | "init-file" => at += 2,
                 _ => at += 1,
             }
@@ -914,15 +1324,116 @@ fn shell_code<'a>(args: &'a [String], input: Option<&'a str>) -> Option<&'a str>
         break;
     }
     match args.get(at) {
-        operand if code => operand.map(String::as_str),
-        Some(_) if !stdin => None,
-        _ => input,
+        Some(operand) if code => Given::Code(operand.clone()),
+        Some(script) if !stdin => Given::Script(script.clone()),
+        _ if code => Given::Nothing,
+        _ => from_input(input),
+    }
+}
+
+/// What an interpreter in `language` is given to run: the code its options
+/// carry, else its script, else what is on its input. A module it runs by
+/// name, as `python -m`, is neither.
+fn interpreted(language: &Language, args: &[String], input: Input) -> Given {
+    let takes = |name: &str| {
+        language.code.contains(&name)
+            || language.script.contains(&name)
+            || language.valued.contains(&name)
+    };
+    let mut code: Vec<String> = Vec::new();
+    let mut options = true;
+    let mut subcommand: Option<&str> = None;
+    let mut at = 0;
+    while let Some(arg) = args.get(at) {
+        at += 1;
+        if options && arg == "--" {
+            options = false;
+            continue;
+        }
+        if options && arg == "-" {
+            break;
+        }
+        if !(options && arg.len() > 1 && arg.starts_with('-')) {
+            if language.subcommands
+                && subcommand.is_none()
+                && code.is_empty()
+                && matches!(arg.as_str(), "eval" | "run")
+            {
+                subcommand = Some(arg);
+                continue;
+            }
+            if subcommand == Some("eval") {
+                code.push(arg.clone());
+            } else if code.is_empty() {
+                return Given::Script(arg.clone());
+            }
+            break;
+        }
+        // The options this word gives, each with the value written in it.
+        let mut given: Vec<(&str, Option<&str>)> = Vec::new();
+        if let Some(long) = arg.strip_prefix("--") {
+            given.push(match long.split_once('=') {
+                Some((name, value)) => (name, Some(value)),
+                None => (long, None),
+            });
+        } else {
+            let letters = &arg[1..];
+            for (index, letter) in letters.char_indices() {
+                if language.attached.contains(letter) {
+                    break;
+                }
+                let end = index + letter.len_utf8();
+                let (name, rest) = (&letters[index..end], &letters[end..]);
+                if !takes(name) {
+                    given.push((name, None));
+                } else if language.glued {
+                    given.push((name, Some(rest).filter(|rest| !rest.is_empty())));
+                    break;
+                } else {
+                    given.push((name, None));
+                }
+            }
+        }
+        // Those that take a value and have none in the word share the next.
+        let mut next: Option<Option<&String>> = None;
+        for (name, value) in given {
+            if takes(name) {
+                let value = match value {
+                    Some(value) => Some(value),
+                    None => next
+                        .get_or_insert_with(|| {
+                            at += 1;
+                            args.get(at - 1)
+                        })
+                        .map(String::as_str),
+                };
+                if let Some(value) = value {
+                    if language.code.contains(&name) {
+                        code.push(value.to_string());
+                    } else if language.script.contains(&name) {
+                        return Given::Script(value.to_string());
+                    }
+                }
+            }
+            if language.ends.contains(&name) {
+                return if code.is_empty() {
+                    Given::Nothing
+                } else {
+                    Given::Code(code.join("\n"))
+                };
+            }
+        }
+    }
+    if code.is_empty() {
+        from_input(input)
+    } else {
+        Given::Code(code.join("\n"))
     }
 }
 
 /// What `find` changes: the directories it searches when it deletes or
 /// runs a command that changes what it finds, and the files it prints to.
-fn find(args: &[String], depth: usize) -> Reading {
+fn find(args: &[String], depth: usize, vars: &Variables) -> Reading {
     let mut at = 0;
     while let Some(arg) = args.get(at) {
         match arg.as_str() {
@@ -957,14 +1468,15 @@ fn find(args: &[String], depth: usize) -> Reading {
                 let end = (at + 1..args.len())
                     .find(|end| args[*end] == ";" || (args[*end] == "+" && args[*end - 1] == "{}"))
                     .unwrap_or(args.len());
-                let found = changed(&args[at + 1..end], None, depth + 1);
+                let mut found = changed(&args[at + 1..end], Input::Unknown, depth + 1, vars);
                 changes |= !found.writes.is_empty();
+                let writes = std::mem::take(&mut found.writes);
                 reading
                     .writes
-                    .extend(found.writes.into_iter().filter(|path| !path.contains("{}")));
-                if reading.remote_code.is_none() {
-                    reading.remote_code = found.remote_code;
-                }
+                    .extend(writes.into_iter().filter(|path| !path.contains("{}")));
+                // What it is given to run is each file found.
+                found.scripts.retain(|script| !script.path.contains("{}"));
+                merge(&mut reading, found);
                 at = end;
             }
             _ => {}
@@ -1610,7 +2122,7 @@ fn base(path: &str) -> &str {
 }
 
 /// `path` in the directory `dir`, as written; an empty `dir` or `.` is here.
-fn joined(dir: &str, path: &str) -> String {
+pub(crate) fn joined(dir: &str, path: &str) -> String {
     if dir.is_empty() || dir == "." {
         return path.to_string();
     }
@@ -1622,10 +2134,30 @@ fn joined(dir: &str, path: &str) -> String {
     }
 }
 
+/// `path` with its `.` and each `..` after a name taken out, as text: how
+/// two spellings of one path are told to be the same.
+fn lexical(path: &str) -> String {
+    let mut parts: Vec<&str> = Vec::new();
+    for part in path.split('/') {
+        match part {
+            "." => {}
+            ".." if parts
+                .last()
+                .is_some_and(|last| !last.is_empty() && *last != "..") =>
+            {
+                parts.pop();
+            }
+            part => parts.push(part),
+        }
+    }
+    parts.join("/")
+}
+
 /// `path` as a command run in `dir` names it, `dir` relative to where the
-/// line starts: an absolute path, `~` or a variable other than `$PWD`
-/// stays as written, and so does every path when `dir` is not known.
-fn located(dir: Option<&str>, path: &str) -> String {
+/// line starts: an absolute path, `~`, a variable other than `$PWD` or a
+/// start built when the line runs stays as written, and so does every path
+/// when `dir` is not known.
+pub(crate) fn located(dir: Option<&str>, path: &str) -> String {
     let Some(dir) = dir.filter(|dir| !dir.is_empty()) else {
         return path.to_string();
     };
@@ -1637,7 +2169,7 @@ fn located(dir: Option<&str>, path: &str) -> String {
             return joined(dir, rest.trim_start_matches('/'));
         }
     }
-    if path.starts_with(['/', '~', '$']) {
+    if path.starts_with(['/', '~', '$', BUILT]) {
         path.to_string()
     } else {
         joined(dir, path)
@@ -1657,7 +2189,7 @@ fn moved(dirs: &mut Vec<Option<String>>, words: &[String], certain: bool) {
             .iter()
             .map(String::as_str)
             .find(|arg| *arg == "-" || !arg.starts_with('-'))
-            .filter(|dir| *dir != "-" && !dir.contains(['$', '`'])),
+            .filter(|dir| *dir != "-" && !dir.contains(['$', '`', BUILT])),
         "popd" => None,
         _ => return,
     };
@@ -1689,7 +2221,7 @@ fn moved(dirs: &mut Vec<Option<String>>, words: &[String], certain: bool) {
 
 /// What a simple command writes to its output when the line spells it:
 /// `echo` and `printf` their words, `cat` with no file its input.
-fn output_of(words: &[String], input: Option<&str>) -> Option<String> {
+fn output_of(words: &[String], input: Input) -> Option<String> {
     let (name, args) = command(words).words.split_first()?;
     let text = match program(name) {
         "echo" => args
@@ -1700,11 +2232,47 @@ fn output_of(words: &[String], input: Option<&str>) -> Option<String> {
             .cloned()
             .collect::<Vec<_>>()
             .join(" "),
-        "printf" => args.join(" "),
-        "cat" if args.iter().all(|arg| arg == "-") => return input.map(str::to_string),
+        "printf" => match args.split_first() {
+            Some((format, values)) => printed(format, values),
+            None => String::new(),
+        },
+        "cat" if args.iter().all(|arg| arg == "-") => return input.text().map(str::to_string),
         _ => return None,
     };
     Some(text.replace("\\n", "\n"))
+}
+
+/// What `printf format values..` prints: each `%s`, `%b`, `%d`, `%i` or
+/// `%q` in `format` given the next value, and `format` again while values
+/// are left; `%%` is `%`. Widths and flags are not read.
+fn printed(format: &str, values: &[String]) -> String {
+    let mut out = String::new();
+    let mut values = values.iter();
+    loop {
+        let mut took = false;
+        let mut chars = format.chars();
+        while let Some(c) = chars.next() {
+            if c != '%' {
+                out.push(c);
+                continue;
+            }
+            match chars.next() {
+                Some('%') => out.push('%'),
+                Some('s' | 'b' | 'd' | 'i' | 'q') => {
+                    took = true;
+                    out.extend(values.next().map(String::as_str));
+                }
+                Some(other) => {
+                    out.push('%');
+                    out.push(other);
+                }
+                None => out.push('%'),
+            }
+        }
+        if !took || values.len() == 0 {
+            return out;
+        }
+    }
 }
 
 /// The program a simple command runs, past assignments and wrappers.
@@ -1715,13 +2283,243 @@ fn program_of(words: &[String]) -> Option<String> {
         .map(|word| program(word).to_string())
 }
 
+/// Whether `name` can name a shell variable.
+fn is_name(name: &str) -> bool {
+    let mut chars = name.chars();
+    chars
+        .next()
+        .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+        && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+}
+
+/// The name and value of `NAME=value` or `NAME+=value`, the name with its
+/// `+`.
+fn assignment(word: &str) -> Option<(&str, &str)> {
+    let (name, value) = word.split_once('=')?;
+    is_name(name.strip_suffix('+').unwrap_or(name)).then_some((name, value))
+}
+
+/// The variables the line has set: each name with the values it may hold.
+/// Whether one is exported is not told apart: a `$name` is put in wherever
+/// the line spells it, in a string another shell runs too, so `f=x; sh -c
+/// 'rm $f'` is read as removing `x`. Seeing more than runs is the safe way
+/// to be wrong.
+#[derive(Debug, Clone, Default)]
+struct Variables(Vec<(String, Vec<String>)>);
+
+impl Variables {
+    fn values(&self, name: &str) -> Option<&[String]> {
+        self.0
+            .iter()
+            .find(|(known, _)| known == name)
+            .map(|(_, values)| values.as_slice())
+    }
+
+    /// Sets `name` (with a `+`, appends to it) to each of the values `value`
+    /// may stand for.
+    fn set(&mut self, name: &str, value: &str) {
+        let values = self.substituted(value);
+        let (name, values) = match name.strip_suffix('+') {
+            Some(name) => {
+                let before = self.values(name).unwrap_or(&[]).to_vec();
+                let before = if before.is_empty() {
+                    vec![String::new()]
+                } else {
+                    before
+                };
+                let joined = before
+                    .iter()
+                    .flat_map(|old| values.iter().map(move |new| format!("{old}{new}")))
+                    .take(RUNS)
+                    .collect();
+                (name, joined)
+            }
+            None => (name, values),
+        };
+        self.put(name, values);
+    }
+
+    fn put(&mut self, name: &str, values: Vec<String>) {
+        match self.0.iter_mut().find(|(known, _)| known == name) {
+            Some(known) => known.1 = values,
+            None => self.0.push((name.to_string(), values)),
+        }
+    }
+
+    /// `word` with each `$NAME` and `${NAME}` the line set put in: one text
+    /// for each value they may hold, as many as [`RUNS`]. Any other
+    /// variable stays as written.
+    fn substituted(&self, word: &str) -> Vec<String> {
+        if self.0.is_empty() || !word.contains('$') {
+            return vec![word.to_string()];
+        }
+        let mut done = vec![String::new()];
+        let mut rest = word;
+        while let Some(at) = rest.find('$') {
+            for text in &mut done {
+                text.push_str(&rest[..at]);
+            }
+            let after = &rest[at + 1..];
+            let (name, used) = match after.strip_prefix('{') {
+                Some(inner) => match inner.find('}') {
+                    Some(end) => (&inner[..end], end + 2),
+                    None => ("", 0),
+                },
+                None => {
+                    let end = after
+                        .find(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+                        .unwrap_or(after.len());
+                    (&after[..end], end)
+                }
+            };
+            match self.values(name) {
+                Some(values) => {
+                    done = done
+                        .iter()
+                        .flat_map(|text| values.iter().map(move |value| format!("{text}{value}")))
+                        .take(RUNS)
+                        .collect();
+                    rest = &after[used..];
+                }
+                None => {
+                    for text in &mut done {
+                        text.push('$');
+                    }
+                    rest = after;
+                }
+            }
+        }
+        for text in &mut done {
+            text.push_str(rest);
+        }
+        done
+    }
+
+    /// The words `word` may run as: itself, or each text it stands for,
+    /// and that text split at whitespace too when a value put whitespace in
+    /// it, as an unquoted variable is split.
+    fn choices(&self, word: &str) -> Vec<Vec<String>> {
+        let mut choices = Vec::new();
+        for text in self.substituted(word) {
+            if text != word && text.contains(char::is_whitespace) {
+                choices.push(text.split_whitespace().map(str::to_string).collect());
+            }
+            choices.push(vec![text]);
+        }
+        choices
+    }
+
+    /// The simple commands `words` may run as: every combination of the
+    /// choices of its words, as many as [`RUNS`]; past them, runs in which
+    /// each choice of each word is taken once.
+    fn runs(&self, words: &[String]) -> Vec<Vec<String>> {
+        let choices: Vec<Vec<Vec<String>>> = words.iter().map(|word| self.choices(word)).collect();
+        let combinations = choices
+            .iter()
+            .try_fold(1usize, |count, choice| count.checked_mul(choice.len()))
+            .filter(|count| *count <= RUNS);
+        if combinations.is_none() {
+            let most = choices.iter().map(Vec::len).max().unwrap_or(1);
+            return (0..most)
+                .map(|at| {
+                    choices
+                        .iter()
+                        .flat_map(|choice| choice[at % choice.len()].clone())
+                        .collect()
+                })
+                .collect();
+        }
+        let mut runs: Vec<Vec<String>> = vec![Vec::new()];
+        for choice in &choices {
+            runs = runs
+                .iter()
+                .flat_map(|run| {
+                    choice.iter().map(move |words| {
+                        let mut run = run.clone();
+                        run.extend(words.iter().cloned());
+                        run
+                    })
+                })
+                .collect();
+        }
+        runs
+    }
+
+    /// Records what the simple command `words` sets: `NAME=value` alone, or
+    /// after `export`, `readonly`, `local`, `declare` or `typeset`; and the
+    /// words a `for NAME in` loop goes through. An assignment before a
+    /// program is that program's environment, not the line's.
+    fn assign(&mut self, words: &[String]) {
+        let start = words
+            .iter()
+            .position(|word| !KEYWORDS.contains(&word.as_str()))
+            .unwrap_or(words.len());
+        let words = &words[start..];
+        match words.first().map(String::as_str) {
+            Some("for") => {
+                if let (Some(name), Some("in")) = (words.get(1), words.get(2).map(String::as_str)) {
+                    if is_name(name) {
+                        let values = words[3..]
+                            .iter()
+                            .flat_map(|word| self.choices(word).into_iter().flatten())
+                            .take(RUNS)
+                            .collect();
+                        self.put(name, values);
+                    }
+                }
+            }
+            Some("export" | "readonly" | "local" | "declare" | "typeset") => {
+                for (name, value) in words[1..].iter().filter_map(|word| assignment(word)) {
+                    self.set(name, value);
+                }
+            }
+            Some(_) if words.iter().all(|word| assignment(word).is_some()) => {
+                for (name, value) in words.iter().filter_map(|word| assignment(word)) {
+                    self.set(name, value);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
 /// Read `command` for the writes and downloads it names.
 pub fn read(command: &str) -> Reading {
     read_at(command, 0)
 }
 
-/// Read `command`, code handed over as a string `depth` times.
-fn read_at(command: &str, depth: usize) -> Reading {
+/// Read `command`, code handed over as a string `depth` times. A script's
+/// text is read one deeper than the code that runs it, so past [`DEPTH`],
+/// where every word is taken for a path it may write, counts both.
+pub fn read_at(command: &str, depth: usize) -> Reading {
+    read_in(command, depth, &Variables::default())
+}
+
+/// A command that a `<(..)` in it interrupts, read on once that closes.
+struct Interrupted {
+    words: Vec<String>,
+    redirected: Vec<String>,
+    input: Option<String>,
+    from: Option<String>,
+    piped: bool,
+    output: Option<String>,
+}
+
+/// What a `(` or `<(` opened: the directories and variables to go back to
+/// when it closes, and the command a `<(` interrupts.
+struct Scope {
+    dirs: Vec<Option<String>>,
+    vars: Variables,
+    outer: Option<Interrupted>,
+}
+
+/// The file a command reads what a `<(..)` prints from, as the shell
+/// names it.
+const FED: &str = "/dev/fd/63";
+
+/// Read `command`, `depth` strings deep, seeing the variables `vars` the
+/// code around it set.
+fn read_in(command: &str, depth: usize, vars: &Variables) -> Reading {
     let tokens = tokens(command);
     if depth > DEPTH {
         let writes = tokens
@@ -1733,25 +2531,32 @@ fn read_at(command: &str, depth: usize) -> Reading {
             .collect();
         return Reading {
             writes,
-            remote_code: None,
+            ..Reading::default()
         };
     }
     let mut reading = Reading::default();
+    let mut vars = vars.clone();
     let mut nested_remote = None;
     // Each simple command's program and the token that ended it.
     let mut commands: Vec<(Option<String>, Option<Token>)> = Vec::new();
     let mut words: Vec<String> = Vec::new();
-    // What the command being read writes by redirection or substitution.
-    let mut writes: Vec<String> = Vec::new();
+    // What the command being read names, from where it runs: by
+    // redirection, by the commands substituted in it, and by itself.
+    let mut found = Reading::default();
+    let mut redirected: Vec<String> = Vec::new();
     let mut input: Option<String> = None;
+    let mut from: Option<String> = None;
     // What the command before wrote into the pipe, when the line spells it.
     let mut output: Option<String> = None;
     let mut piped = false;
     // Where commands run, relative to where the line starts: a directory
     // for each way the `cd`s before may have gone, `None` for one this
-    // reader cannot name. A nested command's `cd` stays inside it.
+    // reader cannot name. A subshell's `cd` and variables stay inside it.
     let mut dirs: Vec<Option<String>> = vec![Some(String::new())];
-    let mut scopes: Vec<Vec<Option<String>>> = Vec::new();
+    let mut scopes: Vec<Scope> = Vec::new();
+    // The files a command wrote text the line spells into, from where the
+    // line starts, and that text.
+    let mut spelled: Vec<(String, String)> = Vec::new();
     let mut tokens = tokens.into_iter().peekable();
     loop {
         let end = match tokens.next() {
@@ -1761,12 +2566,14 @@ fn read_at(command: &str, depth: usize) -> Reading {
             }
             Some(Token::WriteTo) => {
                 if let Some(Token::Word(target)) = tokens.next_if(is_word) {
-                    writes.push(target);
+                    redirected.push(target);
                 }
                 continue;
             }
             Some(Token::ReadFrom) => {
-                tokens.next_if(is_word);
+                if let Some(Token::Word(file)) = tokens.next_if(is_word) {
+                    from = Some(file);
+                }
                 continue;
             }
             Some(Token::HereString) => {
@@ -1780,42 +2587,141 @@ fn read_at(command: &str, depth: usize) -> Reading {
                 continue;
             }
             Some(Token::Nested(code)) => {
-                let found = read_at(&code, depth + 1);
-                writes.extend(found.writes);
-                nested_remote = nested_remote.or(found.remote_code);
+                merge(&mut found, read_in(&code, depth + 1, &vars));
+                continue;
+            }
+            // The command around a `<(..)` goes on after it, reading it as
+            // a file.
+            Some(Token::Feeds) => {
+                let program = vars.runs(&words).first().and_then(|run| program_of(run));
+                commands.push((program, Some(Token::Feeds)));
+                scopes.push(Scope {
+                    dirs: dirs.clone(),
+                    vars: vars.clone(),
+                    outer: Some(Interrupted {
+                        words: std::mem::take(&mut words),
+                        redirected: std::mem::take(&mut redirected),
+                        input: input.take(),
+                        from: from.take(),
+                        piped,
+                        output: output.take(),
+                    }),
+                });
+                piped = false;
                 continue;
             }
             end => end,
         };
-        let stdin = input
+        let mut targets: Vec<String> = Vec::new();
+        for target in redirected.drain(..) {
+            targets.extend(vars.substituted(&target));
+        }
+        found.named.extend(targets.iter().cloned());
+        found.writes.extend(targets.iter().cloned());
+        let text = match input.take() {
+            Some(text) => vars.substituted(&text).swap_remove(0),
+            None if piped => output.take().unwrap_or_default(),
+            None => String::new(),
+        };
+        let file = from
             .take()
-            .or_else(|| if piped { output.take() } else { None });
-        let found = changed(&words, stdin.as_deref(), depth);
-        writes.extend(found.writes);
-        nested_remote = nested_remote.or(found.remote_code);
-        for path in writes.drain(..) {
+            .map(|file| vars.substituted(&file).swap_remove(0));
+        let stdin = match (&file, text.is_empty()) {
+            (_, false) => Input::Text(&text),
+            (Some(file), true) => Input::File(file),
+            (None, true) => Input::Unknown,
+        };
+        let runs = vars.runs(&words);
+        for run in &runs {
+            merge(&mut found, changed(run, stdin, depth, &vars));
+            found.named.extend(run.iter().cloned());
+        }
+        // What it writes into the files it is redirected to, when the line
+        // spells it, is the text of a script run from one of them after.
+        if let Some(text) = runs.first().and_then(|run| output_of(run, stdin)) {
+            for target in &targets {
+                for dir in &dirs {
+                    spelled.push((located(dir.as_deref(), target), text.clone()));
+                }
+            }
+        }
+        found.named.extend(file.clone());
+        for path in found.writes.drain(..) {
             for dir in &dirs {
                 reading.writes.push(located(dir.as_deref(), &path));
             }
         }
+        for path in found.named.drain(..) {
+            for dir in &dirs {
+                reading.named.push(located(dir.as_deref(), &path));
+            }
+        }
+        for script in found.scripts.drain(..) {
+            for dir in &dirs {
+                let path = located(dir.as_deref(), &script.path);
+                let text = script.text.clone().or_else(|| {
+                    spelled
+                        .iter()
+                        .rev()
+                        .find(|(written, _)| lexical(written) == lexical(&path))
+                        .map(|(_, text)| text.clone())
+                });
+                reading.scripts.push(Script {
+                    path,
+                    dir: located(dir.as_deref(), &script.dir),
+                    text,
+                    ..script.clone()
+                });
+            }
+        }
+        for code in found.code.drain(..) {
+            for dir in &dirs {
+                reading.code.push(Code {
+                    dir: located(dir.as_deref(), &code.dir),
+                    ..code.clone()
+                });
+            }
+        }
+        reading.unread.append(&mut found.unread);
+        nested_remote = nested_remote.or(found.remote_code.take());
+        let first = runs.first().map(Vec::as_slice).unwrap_or_default();
         let pipes = end == Some(Token::Pipe);
         // A `cd` in a pipeline runs in a subshell of its own.
         if !piped && !pipes {
-            moved(&mut dirs, &words, end == Some(Token::And));
+            moved(&mut dirs, first, end == Some(Token::And));
         }
         output = if pipes {
-            output_of(&words, stdin.as_deref())
+            let printed: Vec<String> = runs
+                .iter()
+                .filter_map(|run| output_of(run, stdin))
+                .collect();
+            (!printed.is_empty()).then(|| printed.join("\n"))
         } else {
             None
         };
         piped = pipes;
-        commands.push((program_of(&words), end.clone()));
+        commands.push((program_of(first), end.clone()));
+        vars.assign(&words);
         words.clear();
         match end {
-            Some(Token::Open | Token::Feeds) => scopes.push(dirs.clone()),
+            Some(Token::Open) => scopes.push(Scope {
+                dirs: dirs.clone(),
+                vars: vars.clone(),
+                outer: None,
+            }),
             Some(Token::Close) => {
-                if let Some(outer) = scopes.pop() {
-                    dirs = outer;
+                if let Some(scope) = scopes.pop() {
+                    dirs = scope.dirs;
+                    vars = scope.vars;
+                    if let Some(outer) = scope.outer {
+                        words = outer.words;
+                        words.push(FED.to_string());
+                        redirected = outer.redirected;
+                        input = outer.input;
+                        from = outer.from;
+                        piped = outer.piped;
+                        output = outer.output;
+                    }
                 }
             }
             None => break,
@@ -1828,16 +2734,10 @@ fn read_at(command: &str, depth: usize) -> Reading {
             return None;
         };
         match end {
-            Some(Token::Pipe)
-                if FETCHERS.contains(&first.as_str())
-                    && INTERPRETERS.contains(&second.as_str()) =>
-            {
+            Some(Token::Pipe) if FETCHERS.contains(&first.as_str()) && runs_code(second) => {
                 Some(format!("{first} | {second}"))
             }
-            Some(Token::Feeds)
-                if INTERPRETERS.contains(&first.as_str())
-                    && FETCHERS.contains(&second.as_str()) =>
-            {
+            Some(Token::Feeds) if runs_code(first) && FETCHERS.contains(&second.as_str()) => {
                 Some(format!("{first} <({second})"))
             }
             _ => None,
@@ -1848,6 +2748,10 @@ fn read_at(command: &str, depth: usize) -> Reading {
     reading.writes.retain(|path| {
         !path.is_empty() && path != "/dev/null" && path != "-" && seen.insert(path.clone())
     });
+    let mut seen = HashSet::new();
+    reading
+        .named
+        .retain(|path| !path.is_empty() && seen.insert(path.clone()));
     reading
 }
 
@@ -1946,6 +2850,167 @@ mod tests {
             assert_eq!(reading.writes, expected, "{command}");
             assert_eq!(reading.remote_code, None, "{command}");
         }
+    }
+
+    #[test]
+    fn variables_the_line_sets_are_put_in() {
+        assert_eq!(writes("f=check.sh; rm $f"), ["check.sh"]);
+        assert_eq!(writes("f=check.sh && rm \"${f}\""), ["check.sh"]);
+        assert_eq!(writes("d=tests\nf=$d/a.sh\nrm $f"), ["tests/a.sh"]);
+        assert_eq!(writes("f=a; f+=.sh; rm $f"), ["a.sh"]);
+        assert_eq!(writes("for f in a b; do rm $f; done"), ["a", "b"]);
+        assert_eq!(writes("export f=x; bash -c 'rm $f'"), ["x"]);
+        assert_eq!(writes("f='a b'; rm $f"), ["a", "b", "a b"]);
+        // A brace group shares the line's variables; a subshell keeps its
+        // own.
+        assert_eq!(writes("{ f=x; }; rm $f"), ["x"]);
+        assert_eq!(writes("(f=x); rm $f"), ["$f"]);
+        // An assignment before a program is that program's environment,
+        // gone once it ends.
+        assert_eq!(writes("f=x rm $f"), ["$f"]);
+        assert_eq!(writes("f=x true; rm $f"), ["$f"]);
+        // Put in wherever the line spells it, whether the shell that runs
+        // it would see it or not.
+        assert_eq!(writes("f=x; sh -c 'rm $f'"), ["x"]);
+        assert_eq!(writes("f=x; eval rm '$f'"), ["x"]);
+        assert_eq!(writes("readonly f=x; rm $f"), ["x"]);
+        // Every value a variable may hold, as many as RUNS.
+        let many: Vec<String> = (0..100).map(|n| format!("f{n}")).collect();
+        let found = writes(&format!("for f in {}; do rm $f; done", many.join(" ")));
+        assert_eq!(found.len(), RUNS);
+    }
+
+    #[test]
+    fn what_a_command_prints_is_built_into_the_word() {
+        assert_eq!(
+            writes("rm -f $(echo x) check.sh"),
+            [format!("{BUILT}"), "check.sh".to_string()]
+        );
+        assert_eq!(
+            writes("rm `echo x` check.sh"),
+            [format!("{BUILT}"), "check.sh".to_string()]
+        );
+        assert_eq!(
+            writes("rm \"$(pwd)/check.sh\""),
+            [format!("{BUILT}/check.sh")]
+        );
+        // The substituted command is read as well.
+        assert_eq!(writes("echo $(rm x)"), ["x"]);
+        assert_eq!(writes("echo $(date)"), Vec::<String>::new());
+        // A program named when the line runs may change every word.
+        assert_eq!(writes("$(echo rm) check.sh"), ["check.sh"]);
+        let unread = |command: &str| {
+            read(command)
+                .unread
+                .into_iter()
+                .map(|unread| unread.shape)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(unread("sh -c \"$(printf 'rm che%s' ck.sh)\""), ["sh $(..)"]);
+        assert_eq!(unread("eval \"$(cat x)\""), ["eval $(..)"]);
+        assert_eq!(unread("python3 -c \"$(cat x)\""), ["python3 $(..)"]);
+        assert_eq!(unread("sh \"$(dirname $0)/x.sh\""), ["sh $(..)"]);
+        assert!(unread("echo $(date)").is_empty());
+        assert!(unread("node \"$(dirname $0)/x.js\"").is_empty());
+        // `<(..)` is a file the command around it reads.
+        assert_eq!(writes("diff <(sort a) b.sh && rm c"), ["c"]);
+        assert!(read("diff <(sort a) ./tool.mjs").scripts.is_empty());
+        // `command -v` runs nothing.
+        assert_eq!(writes("command -v unzip"), Vec::<String>::new());
+    }
+
+    #[test]
+    fn code_given_to_an_interpreter_is_handed_back() {
+        let code = |command: &str| {
+            read(command)
+                .code
+                .into_iter()
+                .map(|code| (code.program, code.text))
+                .collect::<Vec<_>>()
+        };
+        let one = |program: &str, text: &str| vec![(program.to_string(), text.to_string())];
+        assert_eq!(code("python3 -c 'print(1)'"), one("python3", "print(1)"));
+        assert_eq!(code("python3.12 -Bc 'x'"), one("python3.12", "x"));
+        assert_eq!(code("node -e 'a' -p 'b'"), one("node", "a\nb"));
+        assert_eq!(code("node --eval='a'"), one("node", "a"));
+        assert_eq!(code("perl -ne 'print' f"), one("perl", "print"));
+        assert_eq!(code("perl -i.bak -pe 's/a/b/' f"), one("perl", "s/a/b/"));
+        assert_eq!(code("ruby -e 'x'"), one("ruby", "x"));
+        assert_eq!(code("php -r 'x;'"), one("php", "x;"));
+        assert_eq!(code("deno eval 'x'"), one("deno", "x"));
+        assert_eq!(code("Rscript -e 'x'"), one("Rscript", "x"));
+        assert_eq!(code("lua -e 'x'"), one("lua", "x"));
+        assert_eq!(code("osascript -e 'x'"), one("osascript", "x"));
+        assert_eq!(code("python3 - <<'EOF'\nx\nEOF"), one("python3", "x"));
+        assert_eq!(code("python3 <<< 'x'"), one("python3", "x"));
+        assert_eq!(code("echo 'x' | python3"), one("python3", "x"));
+        assert_eq!(code("cd sub && python3 -c x")[0].1, "x");
+        assert_eq!(read("cd sub && python3 -c x").code[0].dir, "sub");
+        assert!(code("python3 -m pytest -c x").is_empty());
+        assert!(code("python3 script.py -c x").is_empty());
+    }
+
+    #[test]
+    fn scripts_a_command_runs_are_handed_back() {
+        let scripts = |command: &str| {
+            read(command)
+                .scripts
+                .into_iter()
+                .map(|script| (script.path, script.runner, script.depth))
+                .collect::<Vec<_>>()
+        };
+        let shell = |path: &str| vec![(path.to_string(), Runner::Shell, 0)];
+        assert_eq!(scripts("sh x.sh"), shell("x.sh"));
+        assert_eq!(scripts("bash -e -o pipefail x.sh a"), shell("x.sh"));
+        assert_eq!(scripts(". x.sh"), shell("x.sh"));
+        assert_eq!(scripts("source x.sh"), shell("x.sh"));
+        assert_eq!(scripts("sh < x.sh"), shell("x.sh"));
+        assert_eq!(scripts("cd d && sh x.sh"), shell("d/x.sh"));
+        assert_eq!(
+            scripts("./x"),
+            vec![("./x".to_string(), Runner::Program, 0)]
+        );
+        assert_eq!(
+            scripts("python3 x.py"),
+            vec![(
+                "x.py".to_string(),
+                Runner::Interpreter("python3".to_string()),
+                0
+            )]
+        );
+        assert_eq!(
+            scripts("sh -c 'sh x.sh'"),
+            vec![("x.sh".to_string(), Runner::Shell, 1)]
+        );
+        assert!(scripts("sh -c 'echo'").is_empty());
+        let written = read("cat > x.sh <<'EOF'\nrm a\nEOF\ncd d && sh ../x.sh").scripts;
+        assert_eq!(written[0].text.as_deref(), Some("rm a"));
+        assert_eq!(
+            read("echo 'rm a' > x.sh; sh x.sh").scripts[0]
+                .text
+                .as_deref(),
+            Some("rm a")
+        );
+        assert_eq!(read("sh x.sh; echo 'rm a' > x.sh").scripts[0].text, None);
+        assert_eq!(
+            read("printf 'X=%s\\nrm %s\\n' \"$(date)\" a > x.sh; . ./x.sh").scripts[0]
+                .text
+                .as_deref(),
+            Some(format!("X={BUILT}\nrm a\n").as_str())
+        );
+        assert_eq!(
+            printed("%s-%s;", &["a".into(), "b".into(), "c".into()]),
+            "a-b;c-;"
+        );
+        assert_eq!(printed("100%% x", &["a".into()]), "100% x");
+        assert!(scripts("rm ./x").is_empty());
+        assert!(scripts("cat x.sh").is_empty());
+    }
+
+    #[test]
+    fn every_word_a_command_is_given_is_named() {
+        let named = read("cd d && cat < k; cp a /b").named;
+        assert_eq!(named, ["cd", "d", "d/cat", "d/k", "d/cp", "d/a", "/b"]);
     }
 
     #[test]

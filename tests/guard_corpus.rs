@@ -22,6 +22,10 @@ struct Row {
     protects: Vec<String>,
     status: String,
     note: String,
+    /// The one system the row holds on, as `std::env::consts::OS` names it,
+    /// for a path only that system has.
+    #[serde(default)]
+    os: Option<String>,
 }
 
 /// The flot binary under test, as tests/cli.rs finds it.
@@ -223,7 +227,12 @@ fn the_guard_corpus_holds() {
         Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/guard_corpus.toml"),
     )
     .unwrap();
-    let corpus: Corpus = toml::from_str(&text).unwrap();
+    let mut corpus: Corpus = toml::from_str(&text).unwrap();
+    corpus.row.retain(|row| {
+        row.os
+            .as_deref()
+            .is_none_or(|os| os == std::env::consts::OS)
+    });
     let root = tempfile::tempdir().unwrap();
     let dir = root.path().join("project");
     let home = root.path().join("home");

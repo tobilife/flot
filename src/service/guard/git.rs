@@ -395,7 +395,7 @@ fn apply_changes(args: &[String]) -> GitAsk {
 /// command, whose files the line names itself; an error when git cannot
 /// say, as for `pull`, which fetches first: a change the guard cannot rule
 /// out.
-pub fn git_would_change(dir: &Path, args: &[String]) -> Option<Result<Vec<PathBuf>>> {
+pub(super) fn git_would_change(dir: &Path, args: &[String]) -> Option<Result<Vec<PathBuf>>> {
     // The options that choose the repository and its working tree are
     // passed on; `-c` and the like are not, so a command line cannot
     // configure the git the guard runs.

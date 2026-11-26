@@ -7,9 +7,9 @@ use std::process::ExitCode;
 use anyhow::{Context, Result};
 use serde::Serialize;
 
-use crate::service::Workspace;
+use crate::service::{answer, judge, Call, Workspace};
 
-use super::hook::{cannot_judge, judge, unpanicked, Call, GUARDED_TOOLS};
+use super::hook::{tool_call, unpanicked, GUARDED_TOOLS};
 use super::render::print_json;
 use super::terminal_safe;
 
@@ -82,7 +82,7 @@ pub(super) fn replay_transcripts(paths: &[PathBuf], json: bool) -> Result<ExitCo
                 // secret, which is all it is judged for.
                 let cwd = entry["cwd"].as_str().unwrap_or_default();
                 let base = PathBuf::from(cwd);
-                let call = Call::of(&base, tool, &item["input"]);
+                let call = tool_call(&base, tool, &item["input"]);
                 let reads = call
                     .as_ref()
                     .is_ok_and(|call| call.is_empty() && !call.named.is_empty());
@@ -108,19 +108,10 @@ pub(super) fn replay_transcripts(paths: &[PathBuf], json: bool) -> Result<ExitCo
                 let workspace = Workspace::locate(&base, None)?;
                 // As the hook does, a call that cannot be judged is refused
                 // where a flow is.
-                let (in_a_flow, reasons) = match unpanicked(|| judge(&workspace, true, call?)) {
-                    Ok(judged) => (!judged.flows.is_empty(), judged.reasons()),
-                    Err(error) => {
-                        let mut guard = crate::service::Guard::new(&workspace);
-                        guard.consult(&base);
-                        let reasons = if guard.active() {
-                            vec![cannot_judge(&error)]
-                        } else {
-                            Vec::new()
-                        };
-                        (guard.active(), reasons)
-                    }
-                };
+                let judged = unpanicked(|| judge(&workspace, true, call?));
+                let answer = answer(&workspace, &[&base], judged);
+                let in_a_flow = !answer.flows.is_empty();
+                let reasons = answer.reasons;
                 if reads && reasons.is_empty() {
                     continue;
                 }

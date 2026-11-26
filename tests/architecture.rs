@@ -9,8 +9,10 @@
 //! ```
 //!
 //! Dependencies only point down. Adapters never import each other; the binary
-//! (`src/main.rs`) is the composition root that chooses between them. A rule
-//! that is only written down drifts, so these are checked on every test run.
+//! (`src/main.rs`) is the composition root that chooses between them.
+//! Adapters never read a command line: they hand the guard a call, and the
+//! service reads it with `core::shell` and `core::powershell`. A rule that is
+//! only written down drifts, so these are checked on every test run.
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -27,6 +29,9 @@ fn allowed(from: &str) -> &'static [&'static str] {
         other => panic!("unknown layer `{other}`"),
     }
 }
+
+/// The `core` modules that read a command line, which no adapter may name.
+const READERS: [&str; 2] = ["shell", "powershell"];
 
 /// Standard-library paths that perform IO. `core` must stay pure so identity
 /// derivation can never depend on the machine it runs on.
@@ -179,6 +184,66 @@ fn adapters_do_not_know_about_each_other() {
     assert!(violations.is_empty(), "\n{}", violations.join("\n"));
 }
 
+/// The `core` modules a source names: as `core::name`, and each entry of a
+/// `core::{..}` group, nested groups included.
+fn core_modules(text: &str) -> BTreeSet<String> {
+    let name = |text: &str| -> String {
+        text.trim_start()
+            .chars()
+            .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
+            .collect()
+    };
+    let mut found = BTreeSet::new();
+    for (index, _) in text.match_indices("core::") {
+        let rest = &text[index + "core::".len()..];
+        let Some(group) = rest.strip_prefix('{') else {
+            found.insert(name(rest));
+            continue;
+        };
+        let mut depth = 0;
+        let mut start = 0;
+        for (at, c) in group.char_indices() {
+            match c {
+                '{' => depth += 1,
+                '}' if depth == 0 => {
+                    found.insert(name(&group[start..at]));
+                    break;
+                }
+                '}' => depth -= 1,
+                ',' if depth == 0 => {
+                    found.insert(name(&group[start..at]));
+                    start = at + 1;
+                }
+                _ => {}
+            }
+        }
+    }
+    found.remove("");
+    found
+}
+
+/// Every adapter file that names a command-line reader.
+fn reader_violations(sources: &[Source]) -> Vec<String> {
+    let mut violations = Vec::new();
+    for source in sources.iter().filter(|source| source.layer == "adapters") {
+        for module in core_modules(&source.text) {
+            if READERS.contains(&module.as_str()) {
+                violations.push(format!(
+                    "{} names core::{module}; an adapter hands the guard a call instead",
+                    source.path.display()
+                ));
+            }
+        }
+    }
+    violations
+}
+
+#[test]
+fn adapters_do_not_read_command_lines() {
+    let violations = reader_violations(&sources());
+    assert!(violations.is_empty(), "\n{}", violations.join("\n"));
+}
+
 #[test]
 fn core_performs_no_io() {
     let mut violations = Vec::new();
@@ -204,6 +269,47 @@ fn the_guard_itself_detects_upward_and_unknown_references() {
     assert!(!allowed("engine").contains(&"service"));
     assert!(!allowed("adapters").contains(&"engine"));
     assert!(!allowed("core").contains(&"store"));
+}
+
+#[test]
+fn the_guard_itself_finds_a_reader_named_by_an_adapter() {
+    let source = |path: &str, text: &str| Source {
+        path: PathBuf::from(path),
+        layer: path.split('/').next().unwrap().to_string(),
+        unit: String::new(),
+        text: text.to_string(),
+    };
+    let found = reader_violations(&[
+        source("adapters/cli.rs", "use crate::core::{powershell, shell};\n"),
+        source(
+            "adapters/cli/hook.rs",
+            "let read = crate::core::shell::read(line);\n",
+        ),
+        source(
+            "adapters/mcp.rs",
+            "use crate::core::{receipt::{Receipt, Verdict}, shell::Origin};\n",
+        ),
+        source(
+            "adapters/cli/render.rs",
+            "use crate::core::digest;\nuse crate::service::{judge, Shell};\n",
+        ),
+        source(
+            "service/guard/judge.rs",
+            "use crate::core::{powershell, shell};\n",
+        ),
+    ]);
+    let said = |path: &str, module: &str| {
+        format!("{path} names core::{module}; an adapter hands the guard a call instead")
+    };
+    assert_eq!(
+        found,
+        [
+            said("adapters/cli.rs", "powershell"),
+            said("adapters/cli.rs", "shell"),
+            said("adapters/cli/hook.rs", "shell"),
+            said("adapters/mcp.rs", "shell"),
+        ]
+    );
 }
 
 #[test]

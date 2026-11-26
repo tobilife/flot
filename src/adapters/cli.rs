@@ -15,10 +15,12 @@ use clap::Parser;
 use crate::service::audit::Outcome;
 use crate::service::bundle::ImportPolicy;
 use crate::service::doctor::Status;
-use crate::service::{fault_kind, FaultKind, Guarded, RunOptions, Sharing, Workspace};
+use crate::service::{
+    fault_kind, judge, Call, FaultKind, Guarded, RunOptions, Sharing, Shell, Workspace,
+};
 
 use args::{Cli, Command, KeyAction, TrustAction};
-use hook::{answer_hook, judge, Call, Shell};
+use hook::answer_hook;
 use render::{
     emit, markdown_report, needs_escape, print_json, render_audit, render_bundle, render_detail,
     render_diff, render_doctor, render_flaky, render_guard, render_import, render_init, render_key,

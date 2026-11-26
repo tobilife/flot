@@ -11,7 +11,7 @@ pub mod keys;
 pub mod search;
 pub mod share;
 
-pub use guard::{git_would_change, Guard, Guarded};
+pub use guard::{answer, judge, tilde, Answer, Call, Guarded, Judged, Refused, Shell};
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};

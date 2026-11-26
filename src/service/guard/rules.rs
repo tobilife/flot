@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 
 use crate::service::{keys, Workspace, DEFAULT_FLOW_FILE};
 
+use super::expand::home_dir;
 #[cfg(unix)]
 use super::paths::files_below;
 use super::paths::{
@@ -61,7 +62,7 @@ impl Guarding {
 /// What one call is judged against: every flow that could own a file it
 /// changes, each read once, and what outside them decides whether proofs
 /// are checked: the user's Claude Code settings and plugins, and flot.
-pub struct Guard {
+pub(super) struct Guard {
     /// Nearest first: a file is named, and guarded, by the deepest flow
     /// that holds it.
     flows: Vec<Guarding>,
@@ -77,10 +78,8 @@ pub struct Guard {
 impl Guard {
     /// A guard of `workspace`'s flow, if it has one; [`Guard::consult`] adds
     /// the others.
-    pub fn new(workspace: &Workspace) -> Self {
-        let home = std::env::var_os("HOME")
-            .or_else(|| std::env::var_os("USERPROFILE"))
-            .map(PathBuf::from);
+    pub(super) fn new(workspace: &Workspace) -> Self {
+        let home = home_dir();
         let mut guard = Guard {
             flows: Vec::new(),
             looked: std::collections::HashSet::new(),
@@ -147,7 +146,7 @@ impl Guard {
 
     /// Add every flow file from `dir` up to the top of its repository: one
     /// that can be created below a flow does not hide the flow above it.
-    pub fn consult(&mut self, dir: &Path) {
+    pub(super) fn consult(&mut self, dir: &Path) {
         for spelling in spellings(dir) {
             for ancestor in spelling.ancestors() {
                 if !self.looked.insert(ancestor.to_path_buf()) {
@@ -166,12 +165,12 @@ impl Guard {
 
     /// Whether any flow guards the call. Where none does, nothing is flot's
     /// to refuse.
-    pub fn active(&self) -> bool {
+    pub(super) fn active(&self) -> bool {
         !self.flows.is_empty()
     }
 
     /// The flows found, for a refusal to be noted in.
-    pub fn workspaces(&self) -> impl Iterator<Item = &Workspace> {
+    pub(super) fn workspaces(&self) -> impl Iterator<Item = &Workspace> {
         self.flows.iter().map(|flow| &flow.workspace)
     }
 
@@ -180,7 +179,7 @@ impl Guard {
     /// path is judged as named, then where it leads through links, then as
     /// another name of a guarded file, then, for a directory, by what it
     /// holds.
-    pub fn judge(&self, path: &Path) -> Option<Guarded> {
+    pub(super) fn judge(&self, path: &Path) -> Option<Guarded> {
         if self.flows.is_empty() {
             return None;
         }
@@ -212,7 +211,7 @@ impl Guard {
     /// the key: a link of another name to the key itself is made by a
     /// command that names the key. Unlike what [`Guard::judge`] finds, a
     /// secret is one with or without a flow.
-    pub fn secret(&self, path: &Path) -> Option<Guarded> {
+    pub(super) fn secret(&self, path: &Path) -> Option<Guarded> {
         let named = normalize(path);
         let reason = self.secret_reason(&named).or_else(|| {
             let name = folded(&named.file_name()?.to_string_lossy());
@@ -286,7 +285,7 @@ impl Guard {
     /// The secrets as they are on disk, for a wildcard to be matched
     /// against: the signing key, the host secret, what else in their
     /// directory is one, and the directory.
-    pub fn secrets(&self) -> Vec<PathBuf> {
+    pub(super) fn secrets(&self) -> Vec<PathBuf> {
         let mut found = Vec::new();
         for key in &self.key {
             let Some(dir) = key.parent() else {
@@ -340,7 +339,7 @@ impl Guard {
     /// `pattern` matches: what a command that changes a path built when it
     /// runs may change. A `*` in it spans directories. A place in a
     /// directory that matches too is left to that directory's reason.
-    pub fn matching(&self, pattern: &str) -> Vec<PathBuf> {
+    pub(super) fn matching(&self, pattern: &str) -> Vec<PathBuf> {
         if self.flows.is_empty() {
             return Vec::new();
         }
@@ -390,7 +389,7 @@ impl Guard {
     /// guarded file or a secret counts wherever it is named. Code is not
     /// read for what it does: what it names is all that can be told, and a
     /// name it builds from parts is not seen.
-    pub fn named_in(&self, text: &str, dir: &Path) -> Vec<PathBuf> {
+    pub(super) fn named_in(&self, text: &str, dir: &Path) -> Vec<PathBuf> {
         let changes = changes_files(text);
         let mut exact: BTreeMap<String, PathBuf> = BTreeMap::new();
         let mut inside: BTreeMap<String, PathBuf> = BTreeMap::new();

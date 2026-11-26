@@ -4,7 +4,7 @@
 |---|---|
 | `flot init` | write a starter `flot.toml` in the current directory; in a clone whose `origin` names a default branch it sets `proofs_from` to it |
 | `flot plan [--only STEP] [--force] [--proofs-from REV]` | predicted execution, reuse and evidence gaps; runs nothing |
-| `flot run [--only STEP] [--force] [--jobs N] [--max-cost USD] [--sign] [--proofs-from REV]` | execute and record receipts; `--only` runs a step and what it needs, a [partial](flows.md#verdict) run; `--sign` then signs the run; `--proofs-from` holds each proof to a git revision ([proofs from a revision](flows.md#proofs-from-a-revision)) |
+| `flot run [--only STEP] [--force] [--jobs N] [--max-cost USD] [--sign] [--proofs-from REV] [--progress WHEN]` | execute and record receipts; `--only` runs a step and what it needs, a [partial](flows.md#verdict) run; `--sign` then signs the run; `--proofs-from` holds each proof to a git revision ([proofs from a revision](flows.md#proofs-from-a-revision)); `--progress` (`auto`, `live`, `plain`, `off`) chooses how the steps are shown on stderr as they run ([progress](#progress)) |
 | `flot sign [RUN]` | sign a run executed here with the host key |
 | `flot show [RUN]` | steps, claims and limitations of a run |
 | `flot verify [RUN] [--proofs-from REV] [--markdown]` | re-authenticate a run from the store alone; with a revision (or the flow's `proofs_from`), also check its proofs are as they are there; `--markdown` prints the check as a report ([in CI](ci.md)) |
@@ -46,6 +46,75 @@ step. Otherwise the signer's key is followed by `(not trusted here)`, once
 the trust list no longer holds it, or `(not confirmed here)`, when no such
 run is here. `flot show` and `flot verify` name signers the same way.
 `flot show` points each failed step at its `flot log`.
+
+## Progress
+
+While it runs, `flot run` shows its steps on stderr: each as it starts, the
+lines it prints, and how it ended. What it prints on stdout, its `--json`
+and its exit code are the same whatever `--progress` asks for, and so is
+every byte the run records.
+
+- `live` keeps a row for each step running, with its time so far, below
+  what the steps print. Each line is tagged with its step: `[build]` for
+  its stdout, `[build:stderr]`, and `[build:proof]` for what its proof
+  prints. A step that ends leaves one line: `✓` when it passed and `✗`
+  otherwise, then what it came to (`passed`; `unverified` or `refuted`
+  when it succeeded but a claim is unproven or disproven; `failed`,
+  `timeout` or `cancelled`), its time, and how many of its claims held. A
+  reused step's line starts with `cached`. The rows are taken back with
+  cursor-up and clear-line alone (the cursor is never hidden and the screen
+  never switched), so a run stopped at any point leaves the terminal as it
+  was, and they are gone before the summary is printed. Colour unless `NO_COLOR` is set. On Windows the
+  console must take escape sequences; one that does not gets `plain`.
+- `plain` prints one line per event, with no escape sequences, for logs.
+- `off` prints nothing.
+- `auto`, the default, is `live` when stderr is a terminal and `TERM` is
+  not `dumb`, and `plain` otherwise, as in CI.
+
+A line a step prints is shown once it ends, or once its stream does, and
+whole: lines of steps that run at once (`--jobs`) never mix. What a step
+prints past its `max_output_bytes` is not shown, as it is not kept. Over MCP
+nothing is shown while a run goes.
+
+For a flow whose `build` and `test` print as they go, each proving its
+claim, and whose `ship` needs both, `flot run --progress plain` printed on
+stderr:
+
+```
+run 3 steps, 1 job
+start build
+[build] compiling part 1
+[build] compiling part 2
+[build] compiling part 3
+[build] compiling part 4
+[build:stderr] warning: one thing
+[build:proof] proof ok
+done build passed 1.6s claims 1/1
+start test
+[test] test 1 ok
+[test] test 2 ok
+[test] test 3 ok
+done test passed 1.5s claims 1/1
+start ship
+[ship] shipping
+done ship passed 0.0s
+run finished 3.2s
+```
+
+Run again with nothing changed, every step is reused:
+
+```
+run 3 steps, 1 job
+cached build passed claims 1/1
+cached test passed claims 1/1
+cached ship passed
+run finished 0.0s
+```
+
+A step that may take more attempts says which one each line is
+(`start flaky attempt 2/2`), a step with candidates which candidate
+(`start pick candidate fast`), and a step that was not run ends `done ship
+cancelled`, with no time.
 
 ## Selecting a flow
 

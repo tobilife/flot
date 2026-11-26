@@ -21,7 +21,7 @@ use crate::engine::exec;
 use crate::engine::keying::{self, Facts};
 use crate::engine::sandbox;
 
-use super::{Keyed, Runner, METRICS_SEQUENCE};
+use super::{Keyed, RunOptions, Runner, METRICS_SEQUENCE};
 
 impl Runner<'_> {
     fn step_env(&self, step: &Step) -> BTreeMap<String, String> {
@@ -114,7 +114,7 @@ impl Runner<'_> {
         &self,
         keyed: Keyed<'_>,
         extra: &BTreeMap<String, String>,
-        stop: &exec::StopSignal,
+        options: &RunOptions,
         since: &mut Option<Vec<FileDigest>>,
     ) -> Result<Receipt> {
         let step = keyed.step;
@@ -123,7 +123,7 @@ impl Runner<'_> {
             Ok(setup) => setup,
             Err(refused) => return self.unconfined(keyed, refused),
         };
-        let mut ran = match self.run_step(step, &setup, budget, stop, since)? {
+        let mut ran = match self.run_step(step, &setup, budget, options, since)? {
             Ok(ran) => ran,
             Err(refused) => return self.unconfined(keyed, refused),
         };
@@ -135,7 +135,7 @@ impl Runner<'_> {
         found.strayed(step, ran.strayed.as_deref());
         let after = self.facts(step);
         self.bind_changes(&keyed, &after, &mut ran.changed, &mut found.limitations);
-        self.settle_claims(&keyed, &after, &produced.files, budget, stop, &mut found);
+        self.settle_claims(&keyed, &after, &produced.files, budget, options, &mut found);
         Ok(self.seal(keyed, setup, ran, produced, found))
     }
 
@@ -198,13 +198,14 @@ impl Runner<'_> {
 
     /// Run the step's command: alone when it declares `may_change`, so the
     /// files that changed while it ran are its own doing, and between two
-    /// snapshots of the workspace when what it changes matters.
+    /// snapshots of the workspace when what it changes matters. Each line it
+    /// prints is reported as it prints it.
     fn run_step(
         &self,
         step: &Step,
         setup: &Setup<'_>,
         budget: ResolvedBudget,
-        stop: &exec::StopSignal,
+        options: &RunOptions,
         since: &mut Option<Vec<FileDigest>>,
     ) -> Result<Result<Ran, Unenforceable>> {
         let scoped = !step.may_change.is_empty();
@@ -224,14 +225,16 @@ impl Runner<'_> {
         };
         let binds = self.binds();
         let before = (scoped || binds).then(|| keying::snapshot(&self.root, &self.origin));
+        let lines = options.progress.lines(&step.id, false);
         let outcome = match exec::run_confined(
             &step.run,
             &self.root,
             &setup.env,
             Duration::from_secs(budget.timeout_secs),
             budget.max_output_bytes,
-            stop,
+            &options.stop,
             setup.confined.as_ref().map(|(_, prepared)| prepared),
+            lines.as_ref(),
         ) {
             Ok(outcome) => outcome,
             // Confinement is applied as the step starts, so a kernel that
@@ -364,11 +367,11 @@ impl Runner<'_> {
         after: &Facts,
         files: &[FileDigest],
         budget: ResolvedBudget,
-        stop: &exec::StopSignal,
+        options: &RunOptions,
         found: &mut Findings,
     ) {
         let step = keyed.step;
-        let proof = self.proof(keyed, after, files, budget, stop, found);
+        let proof = self.proof(keyed, after, files, budget, options, found);
         let mut claims = claims::settle(
             step,
             found.status,
@@ -381,7 +384,7 @@ impl Runner<'_> {
                 .iter()
                 .any(|claim| claim.status == ClaimStatus::Verified)
         {
-            let (red, red_metrics, red_notes) = self.red(step, budget, stop, &mut found.escaped);
+            let (red, red_metrics, red_notes) = self.red(step, budget, options, &mut found.escaped);
             found.spent(red_metrics, red_notes);
             claims = claims::hold_before(claims, red, &mut found.limitations);
         }
@@ -399,7 +402,7 @@ impl Runner<'_> {
         after: &Facts,
         files: &[FileDigest],
         budget: ResolvedBudget,
-        stop: &exec::StopSignal,
+        options: &RunOptions,
         found: &mut Findings,
     ) -> ProofOutcome {
         let (step, facts) = (keyed.step, &keyed.facts);
@@ -416,7 +419,14 @@ impl Runner<'_> {
         if !changed.is_empty() {
             return ProofOutcome::Compromised { changed };
         }
-        match self.prove(step, command, &self.root, budget, stop, &mut found.escaped) {
+        match self.prove(
+            step,
+            command,
+            &self.root,
+            budget,
+            options,
+            &mut found.escaped,
+        ) {
             Err(error) => ProofOutcome::Failed(format!("{error:#}")),
             Ok((proof, proof_metrics, proof_notes)) => {
                 found.spent(proof_metrics, proof_notes);
@@ -536,7 +546,7 @@ impl Runner<'_> {
         &self,
         step: &Step,
         budget: ResolvedBudget,
-        stop: &exec::StopSignal,
+        options: &RunOptions,
         escaped: &mut Vec<exec::Escaped>,
     ) -> (Red, Option<Metrics>, Vec<String>) {
         let Some(baseline) = self.baseline else {
@@ -550,7 +560,7 @@ impl Runner<'_> {
         let mut notes = Vec::new();
         let mut prove = |place: &Path| -> Result<Proof> {
             let (proof, metrics, proof_notes) =
-                self.prove(step, command, place, budget, stop, escaped)?;
+                self.prove(step, command, place, budget, options, escaped)?;
             spent = match (spent.take(), metrics) {
                 (Some(spent), Some(more)) => Some(spent.plus(more)),
                 (spent, more) => spent.or(more),
@@ -590,14 +600,15 @@ impl Runner<'_> {
     /// keep its combined output as evidence. A proof can spend too, an agent
     /// asked to review for instance, so it reports through its own
     /// `$FLOT_METRICS`, counted as the step's spend. Processes it started
-    /// that left its process group are added to `escaped`.
+    /// that left its process group are added to `escaped`. Each line it
+    /// prints is reported as the step's proof's.
     fn prove(
         &self,
         step: &Step,
         command: &str,
         place: &Path,
         budget: ResolvedBudget,
-        stop: &exec::StopSignal,
+        options: &RunOptions,
         escaped: &mut Vec<exec::Escaped>,
     ) -> Result<(Proof, Option<Metrics>, Vec<String>)> {
         let (mut env, metrics_path) = self.metered_env(step)?;
@@ -611,13 +622,16 @@ impl Runner<'_> {
                 );
             }
         }
-        let verification = exec::run_command(
+        let lines = options.progress.lines(&step.id, true);
+        let verification = exec::run_confined(
             command,
             place,
             &env,
             Duration::from_secs(budget.timeout_secs),
             budget.max_output_bytes,
-            stop,
+            &options.stop,
+            None,
+            lines.as_ref(),
         )
         .with_context(|| format!("verify command for step `{}` could not start", step.id))?;
         escaped.extend(verification.escaped.iter().cloned());

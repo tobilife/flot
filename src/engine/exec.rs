@@ -63,6 +63,19 @@ pub struct Escaped {
 /// pipes past that point, and waiting for it could mean waiting forever.
 const DETACHED_GRACE: Duration = Duration::from_secs(2);
 
+/// Which of a command's output streams a line came from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Stream {
+    Stdout,
+    Stderr,
+}
+
+/// Told each line a command prints as it is read: without its `\n` or
+/// `\r\n`, and a last one that has neither once its stream ends. Only what
+/// is kept for the record is told, so a stream past its budget stops where
+/// its record is cut.
+pub type Lines = Arc<dyn Fn(Stream, &[u8]) + Send + Sync>;
+
 impl Outcome {
     pub fn succeeded(&self) -> bool {
         !self.timed_out && !self.interrupted && !self.output_overflow && self.exit_code == Some(0)
@@ -204,10 +217,21 @@ pub fn run_command(
     max_output_bytes: usize,
     stop: &StopSignal,
 ) -> Result<Outcome> {
-    run_confined(command, cwd, env, timeout, max_output_bytes, stop, None)
+    run_confined(
+        command,
+        cwd,
+        env,
+        timeout,
+        max_output_bytes,
+        stop,
+        None,
+        None,
+    )
 }
 
-/// [`run_command`], confined by `sandbox` when there is one.
+/// [`run_command`], confined by `sandbox` when there is one, telling `lines`
+/// what it prints as it prints it when they are given.
+#[allow(clippy::too_many_arguments)]
 pub fn run_confined(
     command: &str,
     cwd: &Path,
@@ -216,6 +240,7 @@ pub fn run_confined(
     max_output_bytes: usize,
     stop: &StopSignal,
     sandbox: Option<&crate::engine::sandbox::Prepared>,
+    lines: Option<&Lines>,
 ) -> Result<Outcome> {
     let started_at_ms = now_ms();
     let started = Instant::now();
@@ -267,8 +292,19 @@ pub fn run_confined(
     };
 
     let overflow = Arc::new(AtomicBool::new(false));
-    let stdout_reader = drain(child.stdout.take(), max_output_bytes, Arc::clone(&overflow));
-    let stderr_reader = drain(child.stderr.take(), max_output_bytes, Arc::clone(&overflow));
+    let told = |stream| lines.map(|lines| (stream, Arc::clone(lines)));
+    let stdout_reader = drain(
+        child.stdout.take(),
+        max_output_bytes,
+        Arc::clone(&overflow),
+        told(Stream::Stdout),
+    );
+    let stderr_reader = drain(
+        child.stderr.take(),
+        max_output_bytes,
+        Arc::clone(&overflow),
+        told(Stream::Stderr),
+    );
 
     let mut timed_out = false;
     let mut was_interrupted = false;
@@ -380,6 +416,9 @@ fn signal_of(status: std::process::ExitStatus) -> Option<i32> {
 struct Drain {
     buffer: Arc<Mutex<Vec<u8>>>,
     done: mpsc::Receiver<()>,
+    /// Set once the command's output is collected: a line read after that
+    /// is told to no one.
+    collected: Arc<AtomicBool>,
 }
 
 impl Drain {
@@ -390,22 +429,66 @@ impl Drain {
                 .recv_timeout(deadline.saturating_duration_since(Instant::now())),
             Err(mpsc::RecvTimeoutError::Timeout)
         );
+        self.collected.store(true, Ordering::SeqCst);
         let data = std::mem::take(&mut *self.buffer.lock().unwrap_or_else(|e| e.into_inner()));
         (data, complete)
     }
 }
 
+/// A stream cut into lines for [`Lines`] as it is read.
+struct Splitter {
+    stream: Stream,
+    lines: Lines,
+    /// The line read so far, which has not ended yet.
+    partial: Vec<u8>,
+    collected: Arc<AtomicBool>,
+}
+
+impl Splitter {
+    fn feed(&mut self, mut bytes: &[u8]) {
+        while let Some(end) = bytes.iter().position(|&byte| byte == b'\n') {
+            self.partial.extend_from_slice(&bytes[..end]);
+            self.tell();
+            bytes = &bytes[end + 1..];
+        }
+        self.partial.extend_from_slice(bytes);
+    }
+
+    /// The stream ended: a last line without a line ending is a line too.
+    fn finish(&mut self) {
+        if !self.partial.is_empty() {
+            self.tell();
+        }
+    }
+
+    fn tell(&mut self) {
+        let line = std::mem::take(&mut self.partial);
+        if !self.collected.load(Ordering::SeqCst) {
+            (self.lines)(self.stream, line.strip_suffix(b"\r").unwrap_or(&line));
+        }
+    }
+}
+
 /// Read `source` on its own thread, keeping at most `cap` bytes. Reaching the
 /// cap raises `overflow`, which stops the command; reading continues, and
-/// discards, so the command is never blocked on a full pipe meanwhile.
+/// discards, so the command is never blocked on a full pipe meanwhile. The
+/// bytes kept are also told to `lines`, line by line, when it is given.
 fn drain<R: Read + Send + 'static>(
     source: Option<R>,
     cap: usize,
     overflow: Arc<AtomicBool>,
+    lines: Option<(Stream, Lines)>,
 ) -> Drain {
     let buffer = Arc::new(Mutex::new(Vec::new()));
     let (sender, done) = mpsc::channel();
+    let collected = Arc::new(AtomicBool::new(false));
     let shared = Arc::clone(&buffer);
+    let mut splitter = lines.map(|(stream, lines)| Splitter {
+        stream,
+        lines,
+        partial: Vec::new(),
+        collected: Arc::clone(&collected),
+    });
     std::thread::spawn(move || {
         if let Some(mut source) = source {
             let mut chunk = vec![0u8; 64 * 1024];
@@ -413,11 +496,17 @@ fn drain<R: Read + Send + 'static>(
                 match source.read(&mut chunk) {
                     Ok(0) => break,
                     Ok(read) => {
-                        let mut kept = shared.lock().unwrap_or_else(|e| e.into_inner());
-                        let room = cap.saturating_sub(kept.len());
-                        kept.extend_from_slice(&chunk[..read.min(room)]);
-                        if read > room {
-                            overflow.store(true, Ordering::SeqCst);
+                        let taken = {
+                            let mut kept = shared.lock().unwrap_or_else(|e| e.into_inner());
+                            let room = cap.saturating_sub(kept.len());
+                            kept.extend_from_slice(&chunk[..read.min(room)]);
+                            if read > room {
+                                overflow.store(true, Ordering::SeqCst);
+                            }
+                            read.min(room)
+                        };
+                        if let Some(splitter) = &mut splitter {
+                            splitter.feed(&chunk[..taken]);
                         }
                     }
                     Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
@@ -425,9 +514,16 @@ fn drain<R: Read + Send + 'static>(
                 }
             }
         }
+        if let Some(splitter) = &mut splitter {
+            splitter.finish();
+        }
         let _ = sender.send(());
     });
-    Drain { buffer, done }
+    Drain {
+        buffer,
+        done,
+        collected,
+    }
 }
 
 /// Stop every process in the group the step led. Returns whether anything
@@ -731,6 +827,47 @@ mod tests {
         assert!(!outcome.succeeded());
         assert_eq!(outcome.stdout.len(), 4096);
         assert!(started.elapsed() < Duration::from_secs(10));
+    }
+
+    #[test]
+    fn lines_are_told_as_they_are_kept_and_stop_where_the_record_is_cut() {
+        let told = Arc::new(Mutex::new(Vec::new()));
+        let seen = Arc::clone(&told);
+        let lines: Lines = Arc::new(move |stream, line: &[u8]| {
+            let line = String::from_utf8_lossy(line).into_owned();
+            seen.lock().unwrap().push((stream, line));
+        });
+        // 14 bytes on stdout against a budget of 9.
+        let run = |lines: Option<&Lines>| {
+            run_confined(
+                "printf 'ab\\ncd\\r\\n' >&2; printf 'one\\ntwo\\nthree\\n'",
+                Path::new("."),
+                &env(),
+                Duration::from_secs(10),
+                9,
+                &StopSignal::default(),
+                None,
+                lines,
+            )
+            .unwrap()
+        };
+        let quiet = run(None);
+        let outcome = run(Some(&lines));
+        assert_eq!(outcome.stdout, b"one\ntwo\nt");
+        assert_eq!(outcome.stderr, b"ab\ncd\r\n");
+        assert_eq!(
+            (&outcome.stdout, &outcome.stderr),
+            (&quiet.stdout, &quiet.stderr)
+        );
+        let told = told.lock().unwrap();
+        let of = |stream| {
+            told.iter()
+                .filter(|(from, _)| *from == stream)
+                .map(|(_, line)| line.as_str())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(of(Stream::Stdout), ["one", "two", "t"]);
+        assert_eq!(of(Stream::Stderr), ["ab", "cd"]);
     }
 
     // Windows has no signals: a killed process exits with whatever code its

@@ -51,6 +51,7 @@ macro_rules! say {
 
 mod args;
 mod hook;
+mod progress;
 mod render;
 mod replay;
 
@@ -212,19 +213,25 @@ fn dispatch(
             max_cost,
             sign,
             proofs_from,
+            progress: shown,
         } => {
             if *sign {
                 // A missing key must stop the run before it spends anything.
                 Workspace::key_show()?;
             }
+            let view = progress::View::start(*shown);
             let report = workspace.run(&RunOptions {
                 only: only.clone(),
                 force: *force,
                 jobs: jobs.map(|jobs| jobs as usize),
                 max_cost_usd: *max_cost,
                 proofs_from: proofs_from.clone(),
+                progress: view.as_ref().map(progress::View::sink).unwrap_or_default(),
                 ..RunOptions::default()
-            })?;
+            });
+            // The live view is gone before anything else is printed.
+            drop(view);
+            let report = report?;
             let signed = if *sign {
                 Some(workspace.sign(&report.manifest.run_id)?)
             } else {

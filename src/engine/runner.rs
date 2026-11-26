@@ -20,6 +20,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicU64;
 use std::sync::{OnceLock, RwLock};
+use std::time::Duration;
 
 use anyhow::{bail, Context, Result};
 use serde::Serialize;
@@ -34,6 +35,7 @@ use crate::engine::baseline::Baseline;
 use crate::engine::claims::ProofOutcome;
 use crate::engine::exec;
 use crate::engine::keying::{self, Facts};
+use crate::engine::progress::{self, Event};
 use crate::engine::scheduler;
 use crate::store::Store;
 
@@ -52,6 +54,8 @@ pub struct RunOptions {
     /// Withdraws the run: running steps stop, the rest are cancelled, and the
     /// run is still recorded.
     pub stop: exec::StopSignal,
+    /// Told what happens as the run goes; by default no one is.
+    pub progress: progress::Sink,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -397,6 +401,10 @@ impl<'a> Runner<'a> {
         let _lock = self.store.lock(false)?;
         let started_at_ms = exec::now_ms();
         let started = std::time::Instant::now();
+        options.progress.emit(|| Event::RunStarted {
+            steps: order.len(),
+            jobs,
+        });
 
         let needs: BTreeMap<String, Vec<String>> = order
             .iter()
@@ -414,6 +422,9 @@ impl<'a> Runner<'a> {
             },
             |work| self.settle(work, options),
         )?;
+        options.progress.emit(|| Event::RunFinished {
+            duration_ms: exec::millis(started.elapsed()),
+        });
 
         let assembly = self.assemble(&order, &settled, jobs, ceiling_micro_usd)?;
         let report = self.report(assembly, started_at_ms, started)?;
@@ -492,10 +503,10 @@ impl<'a> Runner<'a> {
 
         let (receipt, cached) = if options.stop.is_set() {
             let why = "not run: flot was asked to stop".to_string();
-            (self.unrun_receipt(Unrun::Cancelled, keyed, why)?, false)
+            (self.not_run(keyed, why, options)?, false)
         } else if !blocked.is_empty() {
             let why = format!("not run: dependency {} did not hold", blocked.join(", "));
-            (self.unrun_receipt(Unrun::Cancelled, keyed, why)?, false)
+            (self.not_run(keyed, why, options)?, false)
         } else if let Some((known, restored)) = if force || step.always {
             None
         } else if self.drift(step, &keyed.facts.verify_inputs).is_some() {
@@ -509,6 +520,11 @@ impl<'a> Runner<'a> {
             // Reuse costs nothing, so the ceiling never blocks a cache hit.
             notes.extend(restored);
             vouched_by = known.vouched_by;
+            options.progress.emit(|| Event::StepCached {
+                step: step.id.clone(),
+                candidate: known.receipt.identity.candidate.clone(),
+                claims: known.receipt.claim_counts(),
+            });
             (known.receipt, true)
         } else if let Some(gate) =
             gate.filter(|gate| gate.spent_micro_usd >= gate.ceiling_micro_usd)
@@ -518,16 +534,16 @@ impl<'a> Runner<'a> {
                 metrics::format_usd(gate.ceiling_micro_usd),
                 metrics::format_usd(gate.spent_micro_usd)
             );
-            (self.unrun_receipt(Unrun::Cancelled, keyed, why)?, false)
+            (self.not_run(keyed, why, options)?, false)
         } else if step.candidates.is_empty() {
-            let (receipt, earlier) = self.attempt(keyed, gate, &options.stop, &mut notes)?;
+            let (receipt, earlier) = self.attempt(keyed, gate, options, &mut notes)?;
             attempts = earlier;
             (receipt, false)
         } else {
-            let mut ran = self.compete(step, &keyed.deps, gate, &options.stop, &mut notes)?;
+            let mut ran = self.compete(step, &keyed.deps, gate, options, &mut notes)?;
             if ran.is_empty() {
                 let why = "not run: no candidate started".to_string();
-                (self.unrun_receipt(Unrun::Cancelled, keyed, why)?, false)
+                (self.not_run(keyed, why, options)?, false)
             } else {
                 let kept = (0..ran.len())
                     .min_by_key(|&index| {
@@ -562,6 +578,16 @@ impl<'a> Runner<'a> {
             attempts,
             candidates,
         })
+    }
+
+    /// The receipt of a step the run did not start, for `why`, reported as
+    /// finished without executing.
+    fn not_run(&self, keyed: Keyed<'_>, why: String, options: &RunOptions) -> Result<Receipt> {
+        let receipt = self.unrun_receipt(Unrun::Cancelled, keyed, why)?;
+        options
+            .progress
+            .emit(|| Event::finished(&receipt, 0, Duration::ZERO));
+        Ok(receipt)
     }
 }
 
@@ -687,6 +713,85 @@ verify = "test -s pick.txt"
                 assert_eq!(actual, expected, "line {}", line + 1);
             }
             assert_eq!(record, SCENARIO_RECORD);
+        }
+
+        /// A run that reports its progress leaves the same bytes, and tells
+        /// each attempt and candidate it executes as started, then finished.
+        #[test]
+        fn a_run_told_to_a_sink_leaves_the_same_bytes() {
+            use std::sync::{Arc, Mutex};
+
+            let dir = tempfile::tempdir().unwrap();
+            let root = dir.path();
+            let write = |path: &str, text: &str| std::fs::write(root.join(path), text).unwrap();
+            write("src.txt", "fn main() {}\n");
+            write("check.sh", "grep -q built out.txt\n");
+            write("lint_check.sh", "exit 0\n");
+            let flow = Flow::parse(SCENARIO).unwrap();
+            let store = Store::open(root, HostSecret::from_bytes([7; 32])).unwrap();
+            let told = Arc::new(Mutex::new(Vec::new()));
+            let kept = Arc::clone(&told);
+            let options = RunOptions {
+                progress: progress::Sink::new(move |event| {
+                    kept.lock().unwrap().push(event.clone())
+                }),
+                ..RunOptions::default()
+            };
+            let run = || Runner::new(&flow, root, &store).run(&options).unwrap();
+            let first = run();
+            std::fs::remove_file(root.join("out.txt")).unwrap();
+            write("lint_check.sh", "exit 1\n");
+            let second = run();
+            assert_eq!(
+                scenario_record(&flow, &store, &[first, second]),
+                SCENARIO_RECORD
+            );
+
+            // One step at a time, so each start is followed by its finish.
+            let told = told.lock().unwrap();
+            let mut executions = Vec::new();
+            let mut open = None;
+            for event in told.iter() {
+                match event {
+                    Event::StepStarted {
+                        step,
+                        attempt,
+                        candidate,
+                        ..
+                    } => {
+                        assert_eq!(open, None, "{event:?}");
+                        open = Some((step.clone(), *attempt, candidate.clone()));
+                    }
+                    Event::StepFinished {
+                        step,
+                        attempt: 1..,
+                        candidate,
+                        ..
+                    } => {
+                        let started = open.take().expect("a finish follows a start");
+                        assert_eq!((&started.0, &started.2), (step, candidate));
+                        executions.push(started);
+                    }
+                    _ => {}
+                }
+            }
+            let pick = |name: &str| ("pick".to_string(), 1, Some(name.to_string()));
+            let plain = |step: &str, attempt| (step.to_string(), attempt, None);
+            assert_eq!(
+                executions,
+                [
+                    plain("build", 1),
+                    plain("flaky", 1),
+                    plain("flaky", 2),
+                    plain("lint", 1),
+                    pick("slow"),
+                    pick("fast"),
+                    plain("tolerant", 1),
+                    // The second run executes only what did not hold.
+                    plain("lint", 1),
+                    plain("tolerant", 1),
+                ]
+            );
         }
 
         /// What `runs` left in `store`, one canonical JSON value per line.

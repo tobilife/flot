@@ -29,6 +29,18 @@ transcripts: no real script or recorded call changes its verdict.
   … flot gc … EOF`, `git commit -F- <<EOF …` and `iex 'flot gc'` in a POSIX
   shell are allowed.
 
+`flot run` shows its steps on stderr as they run: each as it starts, every
+line it and its proof print, tagged with the step, and how it ended, with
+its time and how many of its claims held. On a terminal a row per running
+step, with its time so far, stays below that output and is redrawn with
+cursor-up and clear-line alone; elsewhere, as in CI, each event is one plain
+line. `--progress auto|live|plain|off` chooses (`auto`: live on a terminal
+whose `TERM` is not `dumb`). Lines of steps run at once never mix. Stdout,
+`--json`, exit codes and every recorded byte are unchanged; the receipt
+goldens and the runner's scenario golden pass as they were, and a run told
+to a sink leaves the same bytes as one that is not. Over MCP nothing is
+shown while a run goes.
+
 ## 0.2.8
 
 The guard's remaining known holes, measured with the probes that found them

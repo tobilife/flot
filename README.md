@@ -158,7 +158,7 @@ every tool and its contract.
 ```bash
 flot init        # write a starter flot.toml
 flot plan        # what would run, what would be reused, which claims lack proof
-flot run         # execute and record receipts
+flot run         # execute and record receipts; each step shows on stderr as it runs
 flot show        # steps, claims and limitations of the latest run
 ```
 
@@ -197,6 +197,12 @@ receipt stays the same while `rustc -vV` and `cargo -V` print the same, and it
 is what lets a different toolchain run the other steps again. Under each step that ran, flot also
 prints the first and last lines of its output, left out here; `flot log test`
 prints all of it.
+
+While it runs, `flot run` also shows on stderr each running step with its
+time so far and the lines it prints, tagged with its step: a live view on a
+terminal, one plain line per event in CI (`--progress auto|live|plain|off`,
+see [progress](docs/cli.md#progress)). The output above, on stdout, does not
+change.
 
 `1v/0u/0r` counts verified, unverified and refuted claims. See the
 [CLI reference](docs/cli.md) for every command, run selectors, `--json` and

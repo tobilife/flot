@@ -3,7 +3,7 @@
 
 use std::path::PathBuf;
 
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 
 #[derive(Parser, Debug)]
 #[command(
@@ -66,6 +66,11 @@ pub(super) enum Command {
         /// flow's `proofs_from`.
         #[arg(long, value_name = "REV")]
         proofs_from: Option<String>,
+        /// Show the steps on stderr as they run: `live` redraws the running
+        /// steps below their output, `plain` prints one line per event, `off`
+        /// prints nothing. `auto` is live on a terminal, plain elsewhere.
+        #[arg(long, value_enum, value_name = "WHEN", default_value_t = Progress::Auto)]
+        progress: Progress,
     },
     /// Check what this setup relies on: the flow, proofs held to a
     /// revision, the store kept out of git, keys, trust, the sandbox, and
@@ -238,6 +243,15 @@ pub(super) enum Command {
         #[arg(long, default_value_t = 50)]
         runs: usize,
     },
+}
+
+/// How `flot run` shows its steps as they run.
+#[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Progress {
+    Auto,
+    Live,
+    Plain,
+    Off,
 }
 
 #[derive(Subcommand, Debug)]

@@ -31,6 +31,8 @@ use crate::engine::runner::Runner;
 pub use crate::core::fault::FaultKind;
 use crate::core::{attest, fault};
 pub use crate::engine::exec::{install_interrupt_handlers, interrupted, StopSignal};
+/// What a run reports while it happens, for an adapter to show.
+pub use crate::engine::progress;
 
 /// What kind of failure `error` is. An error that names its kind is taken at
 /// its word; otherwise an IO failure underneath is the environment's (a

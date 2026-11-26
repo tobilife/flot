@@ -233,6 +233,8 @@ impl Server {
                     // Not an argument: the agent calling the tool must not choose
                     // the revision its own proofs are checked against.
                     proofs_from: None,
+                    // A tool call answers once, with the run; nothing streams.
+                    progress: Default::default(),
                 })?;
                 let mut value = serde_json::to_value(&report)?;
                 value["result"] = serde_json::to_value(Outcome::of_run(&report.manifest))?;

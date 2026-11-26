@@ -3,18 +3,19 @@
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{OnceLock, RwLock};
+use std::time::Duration;
 
 use anyhow::Result;
 
 use crate::core::flow::Step;
 use crate::core::metrics;
 use crate::core::receipt::{candidate_rank, DepRef, FileDigest};
-use crate::engine::exec;
 use crate::engine::keying;
+use crate::engine::progress::Event;
 use crate::store::Recalled;
 
 use super::execute::Unrun;
-use super::{Contender, CostGate, Runner};
+use super::{Contender, CostGate, RunOptions, Runner};
 
 /// Unique scratch workspaces for candidates.
 static WORKSPACE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -89,12 +90,12 @@ impl Runner<'_> {
         step: &Step,
         deps: &[DepRef],
         gate: Option<CostGate>,
-        stop: &exec::StopSignal,
+        options: &RunOptions,
         notes: &mut Vec<String>,
     ) -> Result<Vec<Contender>> {
         let mut ran: Vec<Contender> = Vec::new();
         for name in &step.candidates {
-            if stop.is_set() {
+            if options.stop.is_set() {
                 notes.push(format!("candidate {name} not run: flot was asked to stop"));
                 continue;
             }
@@ -134,7 +135,7 @@ impl Runner<'_> {
             let (receipt, attempts) = match keying::copy_workspace(&self.root, &place, &candidate) {
                 Ok(()) => {
                     let keyed = runner.keyed(&candidate, runner.facts(&candidate), deps.to_vec());
-                    runner.attempt(keyed, gate, stop, &mut said)?
+                    runner.attempt(keyed, gate, options, &mut said)?
                 }
                 Err(error) => {
                     let facts = keying::facts_of(&self.root, &candidate);
@@ -142,6 +143,9 @@ impl Runner<'_> {
                     let why =
                         format!("could not run: its workspace could not be prepared: {error:#}");
                     let receipt = runner.unrun_receipt(Unrun::Failed, keyed, why)?;
+                    options
+                        .progress
+                        .emit(|| Event::finished(&receipt, 0, Duration::ZERO));
                     (receipt, Vec::new())
                 }
             };

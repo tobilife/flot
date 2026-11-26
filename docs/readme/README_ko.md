@@ -143,7 +143,7 @@ when the work is done."만으로, 플러그인을 설치한 Claude Code 2.1.330�
 ```bash
 flot init        # 시작용 flot.toml 작성
 flot plan        # 무엇이 실행되고, 무엇이 재사용되며, 어떤 주장에 증명이 없는지
-flot run         # 실행하고 영수증 기록
+flot run         # 실행하고 영수증 기록; 실행 중인 단계를 stderr에 실시간으로 표시
 flot show        # 최근 실행의 단계, 주장, 한계(limitation)
 ```
 
@@ -180,6 +180,11 @@ limitations:
 `rustc -vV`와 `cargo -V`의 출력이 같으면 영수증도 같고, 툴체인이 바뀌면 나머지 단계가 다시 실행됩니다.
 실행된 단계 아래에는 출력의 앞과 끝 몇 줄도 찍히는데 여기서는 생략했고, 전체는
 `flot log test`로 볼 수 있습니다.
+
+실행하는 동안 `flot run`은 stderr에 실행 중인 단계와 지금까지 걸린 시간, 그리고 단계가 찍는
+줄을 단계 이름을 붙여 보여 줍니다. 터미널에서는 실시간 화면으로, CI에서는 이벤트마다 한 줄로
+나옵니다(`--progress auto|live|plain|off`, [진행 표시](../cli.md#progress) 참고). stdout에 찍히는
+위의 출력은 바뀌지 않습니다.
 
 `1v/0u/0r`은 검증됨(verified), 미검증(unverified), 반박됨(refuted) 주장의 개수입니다.
 모든 명령, 실행 지정 방법, `--json`, 종료 코드는 [CLI 레퍼런스](../cli.md)에 있습니다.

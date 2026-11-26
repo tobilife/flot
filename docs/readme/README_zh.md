@@ -132,7 +132,7 @@ and any claim that is not verified.
 ```bash
 flot init        # 生成起步用的 flot.toml
 flot plan        # 将运行什么、复用什么、哪些声明缺少证明
-flot run         # 执行并记录收据
+flot run         # 执行并记录收据；运行中的步骤实时显示在 stderr 上
 flot show        # 最近一次运行的步骤、声明和局限
 ```
 
@@ -167,6 +167,10 @@ limitations:
 有证明的四个步骤，用时 1.4 秒而不是 25 秒；被复用的步骤只显示记录时的耗时，不再打印其他内容。
 `toolchain` 每次都会运行：只要 `rustc -vV` 和 `cargo -V` 的输出不变，它的收据就不变；工具链一变，其余步骤就会重新运行。对于实际运行的步骤，flot 还会在那一行
 下面打印输出的开头和结尾几行，这里省略了；`flot log test` 可以打印完整输出。
+
+运行期间，`flot run` 还会在 stderr 上显示每个正在运行的步骤、已用时间以及它打印的行，并标上步骤名：
+在终端上是实时视图，在 CI 中每个事件一行（`--progress auto|live|plain|off`，见[进度显示](../cli.md#progress)）。
+上面 stdout 上的输出不会改变。
 
 `1v/0u/0r` 分别统计已验证、未验证和被驳回的声明。所有命令、运行选择方式、`--json` 和
 退出码见 [CLI 参考](../cli.md)。

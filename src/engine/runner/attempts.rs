@@ -4,16 +4,17 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
+use std::time::Instant;
 
 use anyhow::{Context, Result};
 
 use crate::core::metrics;
 use crate::core::preview::stream_preview;
 use crate::core::receipt::Receipt;
-use crate::engine::exec;
+use crate::engine::progress::Event;
 
 use super::execute::Unrun;
-use super::{CostGate, Keyed, Runner, METRICS_SEQUENCE};
+use super::{CostGate, Keyed, RunOptions, Runner, METRICS_SEQUENCE};
 
 impl Runner<'_> {
     /// Execute a step until it holds or its attempts run out. An attempt that
@@ -24,11 +25,13 @@ impl Runner<'_> {
     /// No further attempt starts once flot is asked to stop, once the run's
     /// cost ceiling is reached, or after a command that could not start at
     /// all, which another attempt would not change.
+    ///
+    /// Each attempt is reported as it starts and as it finishes.
     pub(super) fn attempt(
         &self,
         mut keyed: Keyed<'_>,
         gate: Option<CostGate>,
-        stop: &exec::StopSignal,
+        options: &RunOptions,
         notes: &mut Vec<String>,
     ) -> Result<(Receipt, Vec<Receipt>)> {
         let step = keyed.step;
@@ -54,19 +57,33 @@ impl Runner<'_> {
                     path.to_string_lossy().to_string(),
                 );
             }
-            let executed = self.execute(keyed.clone(), &extra, stop, &mut since);
+            options.progress.emit(|| Event::StepStarted {
+                step: step.id.clone(),
+                attempt: number,
+                attempts: allowed,
+                candidate: self.candidate.clone(),
+            });
+            let began = Instant::now();
+            let executed = self.execute(keyed.clone(), &extra, options, &mut since);
             if let Some(path) = &feedback {
                 let _ = std::fs::remove_file(path);
             }
+            let finished = |receipt: &Receipt| {
+                options
+                    .progress
+                    .emit(|| Event::finished(receipt, number, began.elapsed()));
+            };
             let receipt = match executed {
                 Ok(receipt) => receipt,
                 Err(error) => {
                     let why = format!("could not run: {error:#}");
                     let receipt = self.unrun_receipt(Unrun::Failed, keyed, why)?;
+                    finished(&receipt);
                     return Ok((receipt, earlier));
                 }
             };
-            if receipt.is_reusable() || number >= allowed || stop.is_set() {
+            finished(&receipt);
+            if receipt.is_reusable() || number >= allowed || options.stop.is_set() {
                 return Ok((receipt, earlier));
             }
             if let Some(gate) = gate {

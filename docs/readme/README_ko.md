@@ -56,8 +56,8 @@
   플로우를 받아, 기록된 출력에서 실패한 테스트를 찾고 잘못된 숫자 하나를 고쳐 `flot_run`에서
   `passed`를 받았습니다. 비용은 $0.42였습니다.
 - **에이전트가 고치고, 확인하고, 다시 고치는 반복을 할 때.** 입력이 바뀌지 않은 단계는
-  재사용되므로 확인을 반복해도 비용이 거의 없습니다. 이 저장소의 검증은 처음에는 22초, 바뀐
-  것이 없으면 0.45초 걸립니다. `attempts = N`인 단계는 증명이 남긴 실패 내용을 받아 통과할
+  재사용되므로 확인을 반복해도 비용이 거의 없습니다. 이 저장소의 검증은 강제로 전부 돌리면 25초, 바뀐
+  것이 없으면 1.4초 걸립니다. `attempts = N`인 단계는 증명이 남긴 실패 내용을 받아 통과할
   때까지 다시 실행됩니다. 실제 실행에서 Claude Code는 검사의 실패 출력만 보고 명세에 없던
   규칙을 찾아 두 번째 시도에서 통과했고, 비용은 $0.25였습니다.
 - **에이전트 여러 개가 한 변경을 맡을 때.** 리뷰어들이 비용 상한 아래에서 동시에 실행되고,
@@ -110,8 +110,8 @@ codex mcp add flot -- flot mcp      # Codex CLI
 
 Claude Code에서는 대신 플러그인을 설치할 수 있습니다. 같은 서버를 등록하고, Claude가
 변경이 동작한다고 말하기 전에 플로우를 실행하게 하는 스킬과, 플로우 파일, 증명이 읽는
-파일, CI 워크플로, git 훅, Claude Code 자신의 설정을 편집하거나 셸 명령으로 건드리는 것과
-`curl … | sh`를 거부하는 훅을 더합니다. `flot doctor`는 훅을 끄는 설정이 있는지까지
+파일, CI 워크플로, git 훅, Claude Code 자신의 설정을 편집하거나 셸 명령이나 다른 도구로
+건드리는 것과 `curl … | sh`를 거부하는 훅을 더합니다. `flot doctor`는 훅을 끄는 설정이 있는지까지
 포함해 설정을 점검합니다. `flot`은 `PATH`에 있어야 합니다.
 
 ```text
@@ -151,29 +151,33 @@ flot show        # 최근 실행의 단계, 주장, 한계(limitation)
 
 ```
 $ flot run --force
-ran      format               ok        232ms  claims 1v/0u/0r  receipt d3932015a6a2
-ran      build                ok        4659ms  claims 1v/0u/0r  receipt 53b2255d9a34
-ran      lint                 ok        2325ms  claims 1v/0u/0r  receipt cd0187f4dcd0
-ran      test                 ok        5713ms  claims 2v/0u/0r  receipt cf91a5820103
-    complete output: flot log test 1795573222591-9db980a7b19e
+ran      toolchain            ok        21ms  claims 0v/0u/0r  receipt 1fca18195c20
+ran      format               ok        312ms  claims 1v/0u/0r  receipt 4fb7511bf9b4
+ran      build                ok        896ms  claims 1v/0u/0r  receipt 967d03d654d0
+ran      lint                 ok        1086ms  claims 1v/0u/0r  receipt 8d49c8580516
+ran      test                 ok        7626ms  claims 2v/0u/0r  receipt d9d9645a73d9
+    complete output: flot log test 1795656258113-9733c6907cd0
 
-PASSED 1795573222591-9db980a7b19e  root 9db980a7b19e  21568ms
+PASSED 1795656258113-9733c6907cd0  root 9733c6907cd0  24805ms
 limitations:
-  - proofs checked against origin/main (919b6dcb3a11)
+  - proofs checked against origin/main (a921a812ccc7)
 
 $ flot run     # 바뀐 것이 없음: 영수증이 재사용되고 루트 다이제스트도 같음
-cached   format               ok        232ms  claims 1v/0u/0r  receipt d3932015a6a2
-cached   build                ok        4659ms  claims 1v/0u/0r  receipt 53b2255d9a34
-cached   lint                 ok        2325ms  claims 1v/0u/0r  receipt cd0187f4dcd0
-cached   test                 ok        5713ms  claims 2v/0u/0r  receipt cf91a5820103
+ran      toolchain            ok        21ms  claims 0v/0u/0r  receipt 1fca18195c20
+cached   format               ok        312ms  claims 1v/0u/0r  receipt 4fb7511bf9b4
+cached   build                ok        896ms  claims 1v/0u/0r  receipt 967d03d654d0
+cached   lint                 ok        1086ms  claims 1v/0u/0r  receipt 8d49c8580516
+cached   test                 ok        7626ms  claims 2v/0u/0r  receipt d9d9645a73d9
 
-PASSED 1795573247834-9db980a7b19e  root 9db980a7b19e  454ms
+PASSED 1795656285704-9733c6907cd0  root 9733c6907cd0  1398ms
 limitations:
-  - proofs checked against origin/main (919b6dcb3a11)
+  - proofs checked against origin/main (a921a812ccc7)
 ```
 
-0.2.4 이후 main 빌드로 기록한 출력입니다. 두 번째 실행은 영수증 네 개를 모두 재사용해 22초가
-아니라 0.45초 걸렸고, 재사용된 단계는 기록될 때의 소요 시간만 보여 주고 다른 출력은 없습니다.
+0.2.6 이후 `hardening` 브랜치 빌드로, 저장소를 Windows 드라이브에 둔 WSL2에서 기록한 출력입니다.
+두 번째 실행은 증명이 있는 네 단계를 재사용해 25초가 아니라 1.4초 걸렸고, 재사용된 단계는
+기록될 때의 소요 시간만 보여 주고 다른 출력은 없습니다. `toolchain`은 매번 실행됩니다.
+`rustc -vV`와 `cargo -V`의 출력이 같으면 영수증도 같고, 툴체인이 바뀌면 나머지 단계가 다시 실행됩니다.
 실행된 단계 아래에는 출력의 앞과 끝 몇 줄도 찍히는데 여기서는 생략했고, 전체는
 `flot log test`로 볼 수 있습니다.
 
@@ -228,7 +232,7 @@ key)**를 만듭니다. 키가 같으면 이전 영수증을 재사용하고 그
 - **에이전트가 고칠 수 없는 증명.** `proofs_from = "origin/main"`이면 그 리비전과
   다른 증명(명령, 주장, 증명이 읽는 파일)의 주장은 unverified로 남고,
   `flot verify --proofs-from`은 기록된 실행을 같은 리비전에 비춰 봅니다. Claude Code
-  플러그인은 그 파일들의 편집을, 직접 하든 Bash나 PowerShell 명령으로 하든, 일어나기 전에 거부하고, 그것들이 검사되는지를 정하는
+  플러그인은 그 파일들의 편집을, 직접 하든 Bash나 PowerShell 명령이나 다른 도구로 하든, 일어나기 전에 거부하고, 그것들이 검사되는지를 정하는
   CI 워크플로, git 훅, Claude Code 설정의 편집도 거부합니다. `flot verify`는 그 리비전
   이후 바뀌었지만 어느 단계도 읽지 않은 파일, 곧 어떤 주장도 보증하지 않는 변경도
   알려 줍니다. `fails_before = true`를 둔 단계는 그 리비전 이후의 변경을 모두 되돌린
@@ -263,7 +267,7 @@ key)**를 만듭니다. 키가 같으면 이전 영수증을 재사용하고 그
 | [`examples/slugify/compare.toml`](../../examples/slugify/compare.toml) | Claude Code와 Codex가 같은 명세를 두 후보로 구현합니다. 같은 검사가 각각을 증명하고, 통과한 것 중 가장 싼 것이 남습니다. [실제 실행 한 번](../agents.md#two-agents-on-the-same-spec)과 그 과정에서 찾은 버그 두 개. |
 | [`examples/agent-review.toml`](../../examples/agent-review.toml) | 명세, 구현, 리뷰를 세 개의 에이전트 단계로 나누고, 프로젝트의 테스트가 구현을 증명합니다. |
 | [`examples/parallel-review.toml`](../../examples/parallel-review.toml) | 현재 diff를 독립된 에이전트 리뷰어 세 명(보안, 성능, 계약)이 동시에 검토한 뒤 테스트 게이트를 통과합니다. [실제 실행 한 번](../agents.md#three-reviewers-in-parallel)에서 문서화되지 않은 기본값을 찾아냈습니다. 에이전트 단계를 격리하자 한 번 실행 비용이 $3.25에서 $0.42로 줄었습니다. |
-| [`flot.toml`](../../flot.toml) | 이 저장소 자체의 게이트: 포맷, 빌드, 린트, 테스트를 각각 증명과 함께 실행합니다. |
+| [`flot.toml`](../../flot.toml) | 이 저장소 자체의 게이트: 도구 체인을 확인한 뒤 포맷, 빌드, 린트, 테스트를 각각 증명과 함께 실행합니다. |
 
 예제는 실행하기 전에 프로젝트 루트로 복사하세요. 경로와 `.flot` 저장소는 플로우
 파일 기준입니다. 에이전트 단계와 비용 집계는 [코딩 에이전트 실행](../agents.md)
@@ -306,7 +310,8 @@ CLI가 있는 모든 에이전트입니다. Claude Code와 Codex 등록 방법�
 
 적어도 하나의 주장이 증명으로 결론나지 않았다는 뜻입니다. 단계에 `verify` 명령이
 없거나, 단계가 실패했거나 `allow_failure`로 허용됐거나, 증명이 시간 초과·강제
-종료되었거나 판단 대상 파일이 바뀐 경우입니다. `flot show`는 검증되지 않은 주장을
+종료되었거나 판단 대상 파일이 바뀐 경우, 또는 Linux에서 단계나 증명이 시작한
+프로세스(데몬, `setsid`)가 그보다 오래 살아남아 중지된 경우입니다. `flot show`는 검증되지 않은 주장을
 하나씩 보여 주고, `flot plan`은 실행 전에 증명이 없는 주장을 알려 줍니다.
 
 </details>

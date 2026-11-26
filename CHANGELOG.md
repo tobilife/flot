@@ -38,6 +38,107 @@ tree as it is:
   refused with `candidates`. This repository's flow starts with such a
   `toolchain` step (`rustc -vV && cargo -V`), which the other steps need.
 
+The guard, which refuses an agent's change to what proves its work, let
+most ways of making one through. Of 75 probes (command lines, paths and
+hook payloads), 61 got through before, 2 of them by failing open; 2 get
+through now: `python3 -c`, which no reading of a command line can see, and
+`git stash` before the first commit, which git refuses.
+
+- `flot guard --command` reads control flow (`if`, `for`, `while`, `{ }`,
+  `!`), wrappers (`sudo -u x`, `timeout`, `env`, `nice`, `busybox`), code
+  run from a string (`eval`, `bash -c`, `su -c`, `$(…)`, a here-document or
+  `echo … |` fed to a shell, `xargs`), `cd`, `pushd` and `git -C`, and more
+  programs that write (`ln`, `install`, `yq -i`, `gawk -i inplace`,
+  `sort -o`, `patch`, `rsync`, `tar`, `unzip`, compressors, `curl -o`,
+  `wget`, `find -delete`/`-exec`, `git config`). Before,
+  `if true; then rm check.sh; fi` and `cd tests && rm accept.sh` were
+  allowed.
+- `flot guard --powershell --command` reads past common parameters
+  (`Remove-Item -ErrorAction SilentlyContinue check.sh` named
+  `SilentlyContinue`), paths piped in, `FileSystem::` paths, every
+  `[System.IO]` method that writes, `cmd /c` (`del`, `rd`, `copy`, `xcopy`,
+  `robocopy`, `move`, `ren`, `>`), and code run by `iex`,
+  `powershell -Command` and `pwsh -c`.
+- Words are expanded as the shell would (`{a,b}`, `~`, `$HOME`, `$PWD`,
+  `*`, `?`, `[…]`); a path is followed through symbolic links and matched as
+  a hard link; a directory is refused when it holds a protected file
+  (`rm -rf tests`, `cmd /c rd /s /q tests`). Before, `sed -i 's/1/0/' *.sh`,
+  `mv check.sh{,.bak}`, `rm "$PWD/check.sh"`, a write to a link to a proof
+  and `rm -rf tests` were allowed.
+- A git command that changes the whole tree (`stash`, `reset --hard`,
+  `checkout` or `switch` to a revision, `apply`, `am`, `merge`, `rebase`,
+  `cherry-pick`, `revert`, `clean`) is put to git, and refused when git says
+  it would change a protected file or cannot say (`git pull`, a patch on
+  standard input, an interactive rebase). Before, `git reset --hard HEAD~1`
+  and `git apply` were allowed.
+- The `flot` commands that change whose evidence counts are refused, for
+  the user to run: `init --force`, `trust add`/`remove`/`rotate`,
+  `key init`/`rotate`, `sign`, `import`, `pull`, `gc` (not `--dry-run`),
+  and `run`, `verify` or `diff` with `--proofs-from` or `-f`.
+- The plugin's hook runs before every tool call (matcher `.*`, was the six
+  edit and shell tools). Another tool is judged by the paths its input
+  names, unless it is named like a read: `mcp__filesystem__write_file` on a
+  proof was let through. Where a flow is, a call the guard cannot judge is
+  denied: a payload that was not JSON made `flot guard --hook` exit 3, and
+  the hook's `|| true` let the call through.
+- Every flow from the current directory and from the path up to the
+  repository's top is consulted, so a `flot.toml` created below a flow no
+  longer hides it, and a new one inside a flow's project is protected; so
+  are `.claude/settings*.json` at any depth, `~/.claude/plugins` and the flot
+  binary.
+- The plugin's skill tells Claude to run the whole flow, act on `result`,
+  and stop and tell the user when the hook refuses a call.
+
+A run's result:
+
+- A run of some of a flow's steps is not a pass. `flot run --only lint` on a
+  flow whose `test` step fails printed `PASSED` and exited 0, and so did
+  `flot verify`. Now the run records its selection (`partial`: `selected`,
+  `of`; a signature covers it, and a run of every step records none, so its
+  bytes are as before), reads `PARTIAL`, and `flot run`, `flot show` and
+  `flot verify` exit 2. A selected step that fails is still `FAILED`.
+- `flot run --json`, `flot verify --json` and MCP `flot_run` and
+  `flot_verify` carry `result` (`passed`, `partial`, `unverified`, `failed`,
+  `broken`), the judgment the exit code gives. MCP `flot_verify` on a store
+  whose objects were altered replied `"verdict": "passed"` with
+  `isError: false` while `flot verify` exited 1; it now replies
+  `"result": "broken"` with `isError: true`.
+- MCP `flot_run`'s `max_cost_usd` can only lower the flow's
+  `max_cost_usd`. A call passing `100000` ran past a flow ceiling of $0.50;
+  now the run keeps the $0.50 ceiling.
+
+Proofs and processes:
+
+- A run without `proofs_from` says that its proofs are held to no revision,
+  and names a step whose proof (its files, its `verify` command or its
+  claims) changed since the step's last run here. Before, a run after
+  `check.sh` was weakened to `exit 0` read `PASSED` with nothing to say so.
+- `flot init` in a clone whose `origin` names a default branch sets
+  `proofs_from` to it; elsewhere it writes the setting commented out.
+- On Linux, a process a step or proof starts that leaves its process group
+  is stopped once that command ends, and the step's verified claims stay
+  unverified. Before, a step that left behind
+  `setsid sh -c 'sleep 1; echo 0 > out.txt'` read `PASSED` with `out.txt`
+  holding 1, and the file held 0 a second later.
+- A sandbox with `write` is not run on Landlock below ABI 3 (Linux 6.2),
+  and `flot doctor` fails there. Before, such a step ran without truncation
+  denied, so it could empty any file it could open.
+- `flot doctor` warns of a proof that declares no `verify_inputs`.
+
+Sharing:
+
+- `flot bundle` and `flot push` also refuse Slack `xoxs-` and `xapp-`,
+  Stripe `sk_live_` and `rk_live_`, Hugging Face `hf_` and PyPI `pypi-`
+  tokens, and a password in a URL (`scheme://user:password@`, shown as
+  `://user:…@`; one that starts with `$`, `<`, `{` or `*` is taken for a
+  placeholder).
+
+This repository:
+
+- The flow's `format` step runs `cargo fmt --check` rather than
+  `cargo fmt`, so it checks the files its proof judges instead of rewriting
+  them.
+
 ## 0.2.6
 
 - `flot verify` names a run signed by this host's own key, while that key is

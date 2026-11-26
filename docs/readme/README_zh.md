@@ -53,7 +53,7 @@
   中，Claude Code 在新克隆的 `itoa` 仓库里拿到一个失败的流程，从记录的输出中找到失败的测试，
   修正了那个写错的数字，并从 `flot_run` 得到 `passed`，花费 $0.42。
 - **智能体在循环：修改、检查、再修改。** 输入没有变化的步骤会被复用，所以反复检查几乎没有
-  成本：本仓库的把关首次运行需要 22 秒，没有变化时只需 0.45 秒。设置了 `attempts = N` 的步骤
+  成本：本仓库的把关强制全部运行需要 25 秒，没有变化时只需 1.4 秒。设置了 `attempts = N` 的步骤
   会带着证明给出的失败信息重新运行，直到成立：在一次真实运行中，Claude Code 仅凭检查的失败输出
   找到了规格里没有写明的规则，第二次尝试通过，花费 $0.25。
 - **多个智能体处理同一个变更。** 审阅者在成本上限之下并发运行，并记录每一个的花费：在
@@ -101,7 +101,7 @@ codex mcp add flot -- flot mcp      # Codex CLI
 ```
 
 在 Claude Code 中也可以改为安装插件：它注册同一个服务器，并加入一个技能，让 Claude 在说
-改动可用之前先运行流程，并加入一个钩子，拒绝通过编辑或点名该文件的 shell 命令修改流程
+改动可用之前先运行流程，并加入一个钩子，拒绝通过编辑、点名该文件的 shell 命令或其他工具修改流程
 文件、证明读取的文件、CI 工作流、git 钩子以及 Claude Code 自身的设置，也拒绝 `curl … | sh`。
 `flot doctor` 会检查配置，包括会关掉钩子的设置。`flot` 需要在
 `PATH` 中。
@@ -140,29 +140,32 @@ flot show        # 最近一次运行的步骤、声明和局限
 
 ```
 $ flot run --force
-ran      format               ok        232ms  claims 1v/0u/0r  receipt d3932015a6a2
-ran      build                ok        4659ms  claims 1v/0u/0r  receipt 53b2255d9a34
-ran      lint                 ok        2325ms  claims 1v/0u/0r  receipt cd0187f4dcd0
-ran      test                 ok        5713ms  claims 2v/0u/0r  receipt cf91a5820103
-    complete output: flot log test 1795573222591-9db980a7b19e
+ran      toolchain            ok        21ms  claims 0v/0u/0r  receipt 1fca18195c20
+ran      format               ok        312ms  claims 1v/0u/0r  receipt 4fb7511bf9b4
+ran      build                ok        896ms  claims 1v/0u/0r  receipt 967d03d654d0
+ran      lint                 ok        1086ms  claims 1v/0u/0r  receipt 8d49c8580516
+ran      test                 ok        7626ms  claims 2v/0u/0r  receipt d9d9645a73d9
+    complete output: flot log test 1795656258113-9733c6907cd0
 
-PASSED 1795573222591-9db980a7b19e  root 9db980a7b19e  21568ms
+PASSED 1795656258113-9733c6907cd0  root 9733c6907cd0  24805ms
 limitations:
-  - proofs checked against origin/main (919b6dcb3a11)
+  - proofs checked against origin/main (a921a812ccc7)
 
 $ flot run     # 没有任何变化：收据被复用，根摘要完全相同
-cached   format               ok        232ms  claims 1v/0u/0r  receipt d3932015a6a2
-cached   build                ok        4659ms  claims 1v/0u/0r  receipt 53b2255d9a34
-cached   lint                 ok        2325ms  claims 1v/0u/0r  receipt cd0187f4dcd0
-cached   test                 ok        5713ms  claims 2v/0u/0r  receipt cf91a5820103
+ran      toolchain            ok        21ms  claims 0v/0u/0r  receipt 1fca18195c20
+cached   format               ok        312ms  claims 1v/0u/0r  receipt 4fb7511bf9b4
+cached   build                ok        896ms  claims 1v/0u/0r  receipt 967d03d654d0
+cached   lint                 ok        1086ms  claims 1v/0u/0r  receipt 8d49c8580516
+cached   test                 ok        7626ms  claims 2v/0u/0r  receipt d9d9645a73d9
 
-PASSED 1795573247834-9db980a7b19e  root 9db980a7b19e  454ms
+PASSED 1795656285704-9733c6907cd0  root 9733c6907cd0  1398ms
 limitations:
-  - proofs checked against origin/main (919b6dcb3a11)
+  - proofs checked against origin/main (a921a812ccc7)
 ```
 
-以上输出由 0.2.4 之后的 main 构建记录。第二次运行复用了全部四份收据，用时 0.45 秒而不是 22 秒；
-被复用的步骤只显示记录时的耗时，不再打印其他内容。对于实际运行的步骤，flot 还会在那一行
+以上输出由 0.2.6 之后的 `hardening` 分支构建记录，环境是 WSL2，仓库位于 Windows 驱动器上。第二次运行复用了
+有证明的四个步骤，用时 1.4 秒而不是 25 秒；被复用的步骤只显示记录时的耗时，不再打印其他内容。
+`toolchain` 每次都会运行：只要 `rustc -vV` 和 `cargo -V` 的输出不变，它的收据就不变；工具链一变，其余步骤就会重新运行。对于实际运行的步骤，flot 还会在那一行
 下面打印输出的开头和结尾几行，这里省略了；`flot log test` 可以打印完整输出。
 
 `1v/0u/0r` 分别统计已验证、未验证和被驳回的声明。所有命令、运行选择方式、`--json` 和
@@ -210,7 +213,7 @@ flot 根据命令、每个输入的内容、证明命令以及上游步骤的收
   证明也不算数。`flot flaky` 会指出在相同输入下各次运行结果不同的步骤或证明，而证明不该如此。
 - **智能体改不了的证明。** 设置 `proofs_from = "origin/main"` 后，与该修订不同的证明
   （其命令、声明或它读取的文件）的声明保持 unverified；`flot verify --proofs-from`
-  也会用同一修订检查已记录的运行。Claude Code 插件还会在编辑发生之前拒绝修改这些文件（无论是直接编辑，还是通过 Bash 或 PowerShell 命令），
+  也会用同一修订检查已记录的运行。Claude Code 插件还会在编辑发生之前拒绝修改这些文件（无论是直接编辑，还是通过 Bash 或 PowerShell 命令或其他工具），
   以及决定它们是否被检查的文件：CI 工作流、git 钩子、Claude Code 的设置。`flot verify`
   还会列出自该修订以来改动过、却没有任何步骤读取的文件，也就是没有任何声明担保的改动。
   设置了 `fails_before = true` 的步骤，只有在撤销自该修订以来的全部改动后证明会失败时
@@ -242,7 +245,7 @@ flot 根据命令、每个输入的内容、证明命令以及上游步骤的收
 | [`examples/slugify/compare.toml`](../../examples/slugify/compare.toml) | Claude Code 和 Codex 作为两个候选实现同一份规格；同一个检查分别证明它们，保留成立者中最便宜的一个。[一次真实运行](../agents.md#two-agents-on-the-same-spec)以及它发现的两个缺陷。 |
 | [`examples/agent-review.toml`](../../examples/agent-review.toml) | 规格、实现和审阅三个智能体步骤；由项目自身的测试证明实现。 |
 | [`examples/parallel-review.toml`](../../examples/parallel-review.toml) | 三个独立的智能体审阅者（安全、性能、约定）并发审阅当前 diff，然后经过测试把关。[一次真实运行](../agents.md#three-reviewers-in-parallel)发现了一个未写入文档的默认值；隔离智能体步骤后，一次运行的花费从 $3.25 降到 $0.42。 |
-| [`flot.toml`](../../flot.toml) | 本仓库自身的把关：格式、构建、lint 和测试，每一项都有证明。 |
+| [`flot.toml`](../../flot.toml) | 本仓库自身的把关：先检查工具链，再是格式、构建、lint 和测试，每一项都有证明。 |
 
 运行示例前请把它复制到项目根目录：路径和 `.flot` 存储都相对于流程文件。
 [运行编码智能体](../agents.md)介绍了智能体步骤和花费统计。
@@ -281,7 +284,8 @@ macOS 用 Seatbelt 配置）；无法强制的地方，
 <summary><strong>为什么我的运行是 <code>unverified</code>？</strong></summary>
 
 至少有一项声明没有得到确定的证明：步骤没有 `verify` 命令，步骤失败或通过 `allow_failure`
-被容忍，或者证明超时、被终止、运行期间其文件发生了变化。`flot show` 会列出每一项未验证的
+被容忍，证明超时、被终止、运行期间其文件发生了变化，或者在 Linux 上，步骤或其证明启动的
+进程（守护进程、`setsid`）比它活得更久而被停止。`flot show` 会列出每一项未验证的
 声明，`flot plan` 在运行任何东西之前就会列出缺少证明的声明。
 
 </details>

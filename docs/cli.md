@@ -2,14 +2,14 @@
 
 | Command | Purpose |
 |---|---|
-| `flot init` | write a starter `flot.toml` in the current directory |
+| `flot init` | write a starter `flot.toml` in the current directory; in a clone whose `origin` names a default branch it sets `proofs_from` to it |
 | `flot plan [--only STEP] [--force] [--proofs-from REV]` | predicted execution, reuse and evidence gaps; runs nothing |
-| `flot run [--only STEP] [--force] [--jobs N] [--max-cost USD] [--sign] [--proofs-from REV]` | execute and record receipts; `--sign` then signs the run; `--proofs-from` holds each proof to a git revision ([proofs from a revision](flows.md#proofs-from-a-revision)) |
+| `flot run [--only STEP] [--force] [--jobs N] [--max-cost USD] [--sign] [--proofs-from REV]` | execute and record receipts; `--only` runs a step and what it needs, a [partial](flows.md#verdict) run; `--sign` then signs the run; `--proofs-from` holds each proof to a git revision ([proofs from a revision](flows.md#proofs-from-a-revision)) |
 | `flot sign [RUN]` | sign a run executed here with the host key |
 | `flot show [RUN]` | steps, claims and limitations of a run |
 | `flot verify [RUN] [--proofs-from REV] [--markdown]` | re-authenticate a run from the store alone; with a revision (or the flow's `proofs_from`), also check its proofs are as they are there; `--markdown` prints the check as a report ([in CI](ci.md)) |
-| `flot doctor` | check what the evidence relies on here: the flow parses, `proofs_from` is set and resolves, git ignores the store, the signing key and trust list, no flaky step or proof in recent runs, that a requested sandbox can be enforced, and that no Claude Code settings switch hooks off; changes nothing and exits 1 if a check fails |
-| `flot guard [PATH...] [--command CMD [--powershell]] [--hook] [--replay]` | name the paths whose change would touch the proofs or decide whether they are checked (CI workflows, git hooks, Claude Code settings) and exit 2 if any; `--command` reads a shell command line (a PowerShell one with `--powershell`) for the files it writes and for downloaded code piped into an interpreter; `--hook` answers a Claude Code `PreToolUse` payload and notes a denial in the store for the next run to record; `--replay` judges every edit and command in Claude Code transcripts (the PATHS, by default `~/.claude/projects`) as the hook would now and lists what it would refuse |
+| `flot doctor` | check what the evidence relies on here: the flow parses, `proofs_from` is set and resolves, every proof declares the files it reads, git ignores the store, the signing key and trust list, no flaky step or proof in recent runs, that a requested sandbox can be enforced (on Linux, a `write` policy needs Landlock ABI 3), and that no Claude Code settings switch hooks off; exits 1 if a check fails. It changes nothing, except that where a store exists it creates this host's secret (`host.secret`, beside the signing key) if there is none |
+| `flot guard [PATH...] [--command CMD [--powershell]] [--hook] [--replay]` | name the paths whose change would touch the proofs or decide whether they are checked (CI workflows, git hooks, Claude Code settings and plugins, the flot binary), or a directory holding one, and exit 2 if any; `--command` reads a shell command line (a PowerShell one with `--powershell`) for the files it writes, the whole-tree git commands git says would change one, downloaded code piped into an interpreter and the `flot` commands that change whose evidence counts; `--hook` answers a Claude Code `PreToolUse` payload for any tool, denies a call it cannot judge where a flow is, and notes a denial in the store for the next run to record; `--replay` judges every call in Claude Code transcripts (the PATHS, by default `~/.claude/projects`) as the hook would now and lists what it would refuse ([refusing the edit](flows.md#refusing-the-edit)) |
 | `flot diff [LEFT] [RIGHT]` | step-by-step comparison by receipt identity; by default `latest~1` against `latest` |
 | `flot receipt ID` | one receipt as JSON (id prefix accepted) |
 | `flot log STEP [RUN] [--stderr] [--candidate NAME] [--attempt N]` | complete output one step of a run printed; by default the receipt the run kept, else another candidate it ran or an earlier attempt |
@@ -61,13 +61,16 @@ flow always has one store, however it is named.
 always prints JSON. Human output shows control characters and bidirectional
 overrides as visible escapes, since step output and claims can come from an
 imported bundle. JSON output escapes the same characters as `\uXXXX`, which a
-JSON reader decodes to the same text; `flot cat` is byte-exact.
+JSON reader decodes to the same text; `flot cat` is byte-exact. `run` and
+`verify` carry `result`, the judgment their exit code gives
+([verdict](flows.md#verdict)).
 
 ## Exit codes
 
 `0` passed; `1` failed, a `flot doctor` check that fails, or evidence that does not authenticate (a
 broken run, a tampered receipt or object, a bundle that fails its checks, a
-store record that cannot be read); `2` unverified claims, a flaky step or proof, a non-identical
+store record that cannot be read); `2` unverified claims, a run of some of
+the flow's steps that passed (`--only`, a [partial](flows.md#verdict) run), a flaky step or proof, a non-identical
 diff, a run whose proofs differ from the revision `verify` holds it to, or a
 path `flot guard` protects; `3` invalid request, including usage errors and policy refusals such as
 `--require-trusted`; `4` the environment failed (IO, permissions, a store busy

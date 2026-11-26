@@ -22,17 +22,20 @@ Any other client that speaks MCP over stdio can run `flot mcp` the same way.
 The plugin in [`plugins/claude-code`](../plugins/claude-code) registers the
 same server (its tools are named `mcp__plugin_flot_flot__…`) and adds one
 skill, [`flot`](../plugins/claude-code/skills/flot/SKILL.md), which tells
-Claude to call `flot_run` before it says a change works, to report `failed`
-and `unverified` as they are, and not to edit a proof to make it pass. Its
-`PreToolUse` hook runs `flot guard --hook` before `Edit`, `Write`, `MultiEdit`,
-`NotebookEdit`, `Bash` and `PowerShell`, and denies an edit or a command line that names
-the flow file, a file a step's `verify_inputs` matches, the store, a CI
-workflow, a git hook or Claude Code's settings, and downloaded code piped
-into an interpreter ([refusing the edit](flows.md#refusing-the-edit)).
+Claude to call `flot_run`, on the whole flow, before it says a change works,
+to report its `result` as it is, to stop and tell the user when the hook
+refuses a call, and not to edit a proof to make it pass. Its `PreToolUse`
+hook runs `flot guard --hook` before every tool call, and denies an edit, a
+command line or another tool's input that names the flow file, a file a
+step's `verify_inputs` matches, the store, a CI workflow, a git hook,
+Claude Code's settings or plugins or the flot binary, or a directory
+holding one; downloaded code piped into an interpreter; and the `flot`
+commands that change whose evidence counts. Where a flow is, a call it
+cannot judge is denied too ([refusing the edit](flows.md#refusing-the-edit)).
 Each denial is noted in the store and recorded by the next run
 ([what the guard refused](flows.md#what-the-guard-refused)).
 The hook is `flot guard --hook || true`: when flot is missing or older than
-`guard`, edits go through rather than all being blocked. `flot doctor` fails
+`guard`, calls go through rather than all being blocked. `flot doctor` fails
 when a Claude Code settings file sets `disableAllHooks`, which would stop it. This repository is
 its marketplace:
 
@@ -115,9 +118,9 @@ from the shell.
 | Tool | Purpose |
 |---|---|
 | `flot_plan` | predicted execution, reuse and evidence gaps; runs nothing |
-| `flot_run` | execute and record receipts (`only`, `force`, `jobs`, `max_cost_usd`) |
+| `flot_run` | execute and record receipts (`only`, `force`, `jobs`, `max_cost_usd`, which can only [lower the flow's own](agents.md#spend-and-the-cost-ceiling)); `result` says what to act on |
 | `flot_show` | steps, claim verdicts and limitations of a run |
-| `flot_verify` | re-authenticate a run from the store |
+| `flot_verify` | re-authenticate a run from the store; `result` is what `flot verify` exits with |
 | `flot_diff` | compare two runs by receipt identity; `left` defaults to `latest~1`, `right` to `latest` |
 | `flot_receipt` | one receipt, by id or hex prefix |
 | `flot_step_output` | complete output of one step of a run, by step id (`step`, `run`, `candidate`, `attempt`, `stderr`, `max_bytes`) |
@@ -132,6 +135,12 @@ comes back as `isError` with the reason and its `kind` (`invalid`, `integrity`
 or `environment`, the same split as the CLI's exit codes) instead of a dropped
 connection, and an unproven run comes back as `unverified` rather than as an
 error: an agent must not be able to read a missing proof as a tool problem.
+
+`flot_run` and `flot_verify` replies carry `result`, the one word to act on
+([verdict](flows.md#verdict)): `passed`, `partial` (`only` left steps out),
+`unverified`, `failed`, and, from `flot_verify`, `broken` when the evidence
+does not authenticate. `broken` is also `isError`, as `flot verify` exits 1
+for it; the reply's `verdict` is then only what the altered record says.
 
 ## Arguments, ping and cancellation
 

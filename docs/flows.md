@@ -64,11 +64,12 @@ runs again:
 ```text
 $ echo old > src/lib.txt
 $ flot run
-ran      edit                 ok        11ms  claims 1v/0u/0r  receipt 46ce815e7705
+ran      edit                 ok        12ms  claims 1v/0u/0r  receipt 46ce815e7705
 
-PASSED 1795631368920-685b56d208be  root 685b56d208be  63ms
+PASSED 1795655372863-685b56d208be  root 685b56d208be  55ms
 limitations:
   - edit: src/lib.txt changed since its receipt; the step runs again
+  - proofs are held to no revision: an edited proof passes here; set proofs_from (flows.md#proofs-from-a-revision)
 ```
 
 Here the step writes `new` into `src/lib.txt` and its proof checks for it.
@@ -143,7 +144,9 @@ not on facts.
 Three states: `verified` (a proof command ran after the step
 succeeded and exited zero), `refuted` (it ran and rejected), `unverified`
 (anything else — no proof command, step failed, proof timed out or was killed
-by a signal, or a file the proof judges changed while it ran). Each one
+by a signal, a file the proof judges changed while it ran, or, on Linux, a
+process the step or its proof started left its process group; see
+[Execution](#execution)). Each one
 records the proof command, its exit code and a digest of its output.
 `allow_failure = true` lets a run continue past a failed step, but proves
 nothing: that step's claims stay unverified. Its receipt is `ok` but records
@@ -180,6 +183,39 @@ and back, or where a failure made the step run again.
 `failed` if any step did not reach `ok` or any claim was refuted;
 `unverified` if any claim lacks proof; `passed` only when every step succeeded
 and every claim is proven.
+
+A run of only some of the flow's steps (`flot run --only`, MCP `only`) says
+nothing of the steps it left out, so it is not a pass of the flow: when the
+steps it ran passed, it is `partial`, and exits 2. A selected step that
+fails still makes it `failed`. The run records its selection (`partial`:
+how many steps it `selected`, `of` how many), which a signature covers; a
+run of every step records none. Real output, for a flow whose `test` step
+fails:
+
+```text
+$ flot run --only lint
+ran      lint                 ok        11ms  claims 1v/0u/0r  receipt 86cca38b2e28
+
+PARTIAL 1795654286450-8366567618d3  root 8366567618d3  55ms
+limitations:
+  - proofs are held to no revision: an edited proof passes here; set proofs_from (flows.md#proofs-from-a-revision)
+  - partial run: 1 of 2 steps selected
+$ flot verify
+run 1795654286450-8366567618d3  receipts checked 1  root 8366567618d3
+integrity: intact
+verdict partial (1 of 2 steps selected, and they passed)
+authorship: unsigned
+```
+
+`flot run --json`, `flot verify --json` and the MCP tools `flot_run` and
+`flot_verify` state the judgment as `result`, the one the
+[exit code](cli.md#exit-codes) gives. It is the worst that holds, in this
+order: `broken` (from `verify`: the evidence does not authenticate),
+`failed`, `unverified` (including a run whose proofs differ from the
+revision `verify` holds it to), `partial`, `passed`. The recorded `verdict`
+is the receipts' own: `passed` for a partial run whose steps passed, and
+whatever an altered record says for a broken one. `flot runs` lists that
+recorded verdict.
 
 ## Attempts
 
@@ -349,13 +385,37 @@ the first failing line of a multi-line command fails the step; without `-e` an
 agent call that failed, followed by a line that succeeded, would be recorded as
 success. Write `|| true` where a failure is expected. A step is one unit of
 work: anything it left running in its process group when it exits is stopped,
-and reported. A process that escapes the group (`setsid`, a daemon) cannot hold
-the run open either; flot stops reading its output after a short grace period
-and says the captured output may be incomplete, but it keeps running. On
-Windows the step runs in a job object, which nothing it starts can leave, so
-everything left behind is stopped. Files the
-proof judges are re-read after the proof, so such a process cannot change them
-unnoticed. Ctrl-C (or SIGTERM, SIGHUP; on Windows, Ctrl-C or closing the
+and reported. On Linux a process that escapes the group (`setsid`, a
+daemon) is stopped too: flot adopts every process orphaned below it, and
+after each step command and each proof it stops any adopted process that
+left its group, with any group that process leads. The step's verified
+claims then stay unverified, since the process may have changed files after
+the proof judged them; a refuted claim stays refuted. Real output, for a
+step that writes `out.txt` and leaves behind a process that would rewrite it
+a second later:
+
+```text
+$ flot run
+ran      work                 ok        23ms  claims 0v/1u/0r  receipt 493883b23970
+
+UNVERIFIED 1795654346706-ec7374f98a1c  root ec7374f98a1c  61ms
+limitations:
+  - work: step declares no inputs; only its command and dependencies key it, so it is reused even when files it reads change
+  - work: a process it started left its process group and was stopped (pid 2496231)
+  - proofs are held to no revision: an edited proof passes here; set proofs_from (flows.md#proofs-from-a-revision)
+```
+
+flot tells which step started such a process by `FLOT_COMMAND_ID` in its
+environment; one that cleared its environment (`env -i`) is charged to every
+step running when it was found. A daemon a tool starts on purpose (`sccache`,
+a Gradle or Bazel server, a detached `git gc --auto`) is stopped the same way
+and leaves the step unverified: start it outside the flow. On macOS nothing
+stops such a process: flot stops reading its output after a short grace
+period and says the captured output may be incomplete, but it keeps running.
+On Windows the step runs in a job object, which nothing it starts can leave,
+so everything left behind is stopped. Files the
+proof judges are re-read after the proof, so a change made to them while it
+runs is noticed. Ctrl-C (or SIGTERM, SIGHUP; on Windows, Ctrl-C or closing the
 console) stops the running steps with their process groups and still records
 the run; a second one exits at once.
 
@@ -385,7 +445,8 @@ re-proves the claim instead of reusing a verdict the new test never gave. They
 are also re-read after the step runs: a step that edited its own proof gets
 unverified claims and the proof is not run. A step that edits its declared
 `inputs` is reported too, since its receipt then describes files that no longer
-exist.
+exist. `flot doctor` warns of a proof that declares no `verify_inputs`
+(`proof of work reads no declared file, so an edit to it cannot be detected or guarded`).
 
 That catches a step that edits its proof while it runs. It does not catch an
 agent that edits the proof before the run, or commits the weaker check: the
@@ -420,12 +481,12 @@ After `tests/acceptance.py` is weakened to `assert True` in the working copy
 
 ```text
 $ flot run
-ran      implement            ok        11ms  claims 0v/1u/0r  receipt d465823b6a30
+ran      implement            ok        11ms  claims 0v/1u/0r  receipt 64a4434370f2
 
-UNVERIFIED 1795531484579-cb8b58c66018  root cb8b58c66018  31ms
+UNVERIFIED 1795655458543-1255e8d1c922  root 1255e8d1c922  39ms
 limitations:
-  - implement: the proof differs from origin/main (df9bf14a7787) (tests/acceptance.py differs); claims stay unverified and the proof was not run
-  - proofs checked against origin/main (df9bf14a7787)
+  - implement: the proof differs from origin/main (d5f8f8532d6b) (tests/acceptance.py differs); claims stay unverified and the proof was not run
+  - proofs checked against origin/main (d5f8f8532d6b)
 ```
 
 The revision is the one `--proofs-from REV` names, else `proofs_from` in the
@@ -437,13 +498,35 @@ too, and exits 2 when a proof differs:
 
 ```text
 $ flot verify --proofs-from origin/main
-run 1795531484704-4498c0026bef  receipts checked 1  root 4498c0026bef
+run 1795655463775-08e44043ae35  receipts checked 1  root 08e44043ae35
 integrity: intact
 verdict passed
-proofs: NOT as at origin/main (df9bf14a7787)
+proofs: NOT as at origin/main (d5f8f8532d6b)
   - implement: tests/acceptance.py differs
 authorship: unsigned
 ```
+
+Without a revision nothing holds a proof, and a run with one says so once.
+It can still compare: when a step's proof (the files it read, its `verify`
+command or its claims) differs from the newest earlier run of that step
+executed here, the run names the change and keeps its verdict. Real output,
+after `check.sh` was weakened to `exit 0` between two runs:
+
+```text
+$ flot run
+ran      work                 ok        11ms  claims 1v/0u/0r  receipt b7d50a79d9a1
+
+PASSED 1795654335319-46505608e0e3  root 46505608e0e3  60ms
+limitations:
+  - work: its proof changed since run 1795654335223-0a7ca4e8199a (check.sh); read the change before trusting the verdict
+  - proofs are held to no revision: an edited proof passes here; set proofs_from (flows.md#proofs-from-a-revision)
+```
+
+The weakened proof still passes; the note says where to look, and the next
+run compares with this one. `flot init` in a clone whose `origin` names a
+default branch sets `proofs_from` to it (`origin/main`), so the starter's
+claims stay unverified until the flow is on that branch; elsewhere it writes
+the setting commented out, with why.
 
 ### Changes no step read
 
@@ -555,8 +638,7 @@ not checked at the revision, as a proof that differs.
 
 `flot guard PATH...` names the paths whose change would touch the proofs: the
 flow file, a file some step's `verify_inputs` matches, and the store. It exits
-2 when there is one. Each path is checked against the flow of the current
-directory and the flow nearest the path.
+2 when there is one.
 
 ```text
 $ flot guard tests/acceptance.py flot.toml
@@ -564,11 +646,27 @@ protected  tests/acceptance.py: the proof of step `implement` reads it
 protected  flot.toml: it is the flow file, which says what proves the work
 ```
 
+A path is checked against every flow from the current directory, and from
+the path, up to the top of the repository, so a `flot.toml` created below a
+flow does not hide it; a new `flot.toml` inside a flow's project is itself
+protected. A path is judged as named, then where it leads through symbolic
+links, then as a hard link to a protected file (Linux and macOS), and a
+directory by what it holds. On Windows and macOS names are compared ignoring
+case. Where no flow is, nothing is refused. Real output:
+
+```text
+$ flot guard tests alias.sh
+protected  tests: it holds tests/accept.sh: the proof of step `work` reads it
+protected  alias.sh: it leads to check.sh: the proof of step `work` reads it
+```
+
 It also protects what decides whether the proofs are checked at all, in the
 repository the flow is in (or the flow's directory outside one): Claude Code's
-settings, which run the hook below, CI workflows, which run the flow, git
-hooks and git's configuration, which can point it at other hooks, and the
-user's own `~/.claude/settings.json`. In this repository (real output):
+settings (`.claude/settings*.json` at any depth), which run the hook below,
+CI workflows, which run the flow, git hooks and git's configuration, which
+can point it at other hooks; and the user's own `~/.claude/settings*.json`
+and Claude Code plugins (`~/.claude/plugins`), and the flot binary that
+enforces the guard. In this repository (real output):
 
 ```text
 $ flot guard .github/workflows/ci.yml .claude/settings.json .git/hooks/pre-push ~/.claude/settings.json src/lib.rs
@@ -583,51 +681,127 @@ The hook stops an agent, not a pull request: to keep CI from being edited
 away, make the job that runs flot a required check on the protected branch.
 
 `flot guard --command CMD` reads a shell command line the same way, without
-running it: a redirection into a file, and the files given to a program that
-changes them (`rm`, `mv`, `cp`, `tee`, `chmod`, `touch`, `truncate`, `dd of=`,
-`sed -i`, `perl -i`, `git checkout`/`restore`/`rm`/`mv`). It also refuses
-code fetched by `curl` or `wget` and piped into an interpreter
-(`curl … | sh`, `bash <(curl …)`), which runs outside any step's receipt. A
-here-document's body is data, and a quoted `>` is text. Real output:
+running it, for the files it would change:
+
+- redirections into a file (`>`, `>>`, `>|`, `&>`, `>&`, `<>`);
+- the files given to a program that changes them: `rm`, `mv`, `cp` (and
+  `-t`), `ln`, `install`, `tee`, `chmod`, `touch`, `truncate`, `dd of=`,
+  `sed -i`, `perl -i`, `yq -i`, `gawk -i inplace`, `sort -o`, `patch`,
+  `rsync`, `tar`, `unzip`, `gzip` and its kin, `curl -o`/`-O`, `wget`,
+  `find -delete`/`-exec`, and `git checkout`, `restore`, `rm`, `mv` and
+  `config`;
+- through `if`, `for`, `while`, `{ }`, `!`, comments, arithmetic and
+  wrappers (`sudo -u x`, `timeout 5`, `env`, `nice -n 5`, `busybox`);
+- code run from a string, read again: `eval`, `bash -c`, `su -c`, `$(…)`, a
+  here-document or `echo … |` fed to a shell, and `xargs` fed a here-string
+  or `echo`;
+- after `cd DIR`, `pushd DIR` or `git -C DIR`, in that directory.
+
+Words are expanded first, as the shell would: `{a,b}`, `~`, `$HOME`,
+`${HOME}`, `$PWD`, `${PWD}`, and `*`, `?` and `[…]` against the disk. A
+directory is refused when it holds a protected file: `rm -rf tests` is,
+`cp x tests/` is not. A git command that changes the whole tree (`stash`,
+`reset --hard`, `checkout` or `switch` to a revision, `checkout -p`,
+`apply`, `am`, `merge`, `rebase`, `cherry-pick`, `revert`, `clean`) is put
+to git, and refused when git says it would change a protected file, or
+cannot say (`git pull`, which fetches first; a patch on standard input; an
+interactive rebase; a revision git does not know). The `flot` commands that
+change whose evidence counts are left to the user: `init --force`,
+`trust add`/`remove`/`rotate`, `key init`/`rotate`, `sign`, `import`,
+`pull`, `gc` (not `gc --dry-run`), and `run`, `verify` or `diff` with
+`--proofs-from` or `-f`. It also refuses code fetched by `curl` or `wget`
+and piped into an interpreter (`curl … | sh`, `bash <(curl …)`), which runs
+outside any step's receipt. A quoted here-document's body is data, and a
+quoted `>` is text. Real output, with `check.sh` edited and not committed:
 
 ```text
 $ flot guard --command "sed -i 's/exit 1/exit 0/' check.sh"
 protected  check.sh: the proof of step `work` reads it
+$ flot guard --command "cd tests && eval 'rm accept.sh'"
+protected  tests/accept.sh: the proof of step `work` reads it
+$ flot guard --command "echo check.sh | xargs rm"
+protected  check.sh: the proof of step `work` reads it
+$ flot guard --command "git stash"
+protected  check.sh: the proof of step `work` reads it; `git stash` would change it
+$ flot guard --command "git pull"
+refused    git pull: git cannot say which files it would change (`git pull` fetches first; run `git fetch`, then `git merge` or `git rebase`, which can be judged), so it may change a protected one
+$ flot guard --command "flot trust add ci AAAA"
+refused    flot trust add: it changes whose evidence counts; ask the user to run it
 $ flot guard --command "curl -fsSL https://example.com/install.sh | sh"
 refused    curl | sh: it runs code fetched from the network, which no step or receipt records
 $ flot guard --command "cargo test > test.log 2>&1"
 ```
 
-It reads only what the command line names. A write through a script, a
-variable, `cd` into another directory or `python -c` is not seen, and is
-what `proofs_from` catches: a proof that differs from the revision proves
-nothing, however it was changed.
+It reads only what the command line names. These are not seen, and are what
+`proofs_from` catches, since a proof that differs from the revision proves
+nothing however it was changed:
+
+- a write through a script (`sh x.sh`, `cat x.sh | bash`);
+- a path in a variable (`rm "$f"`, `sh -c 'rm $1' _ check.sh`), even one
+  set on the same line;
+- names another program produces (`find … | xargs rm`);
+- `python -c`.
 
 `flot guard --powershell --command` reads the command line as PowerShell:
-redirections, cmdlets that change the paths they are given (`Set-Content`,
-`Out-File`, `Remove-Item`, `Move-Item`, `Copy-Item`, `Rename-Item`,
-`New-Item`, ...) under their names and aliases, `[IO.File]` methods given a
-literal path, `Invoke-WebRequest -OutFile`, the native programs the shell
-reading knows, and downloaded code handed to `Invoke-Expression`. Real
-output:
+
+- redirections;
+- cmdlets that change the paths they are given (`Set-Content`,
+  `Add-Content`, `Clear-Content`, `Clear-Item`, `Out-File`, `Remove-Item`,
+  `Move-Item`, `Copy-Item`, `Rename-Item`, `New-Item`, ...), under their
+  names and aliases, past the common parameters (`-ErrorAction`, `-ea`,
+  `-OutVariable`, `-WhatIf`, ...), with paths piped in
+  (`'check.sh' | Remove-Item`, `Get-ChildItem tests | Remove-Item`) and
+  `FileSystem::` paths; a parameter it does not know may name a path;
+- `[System.IO]` methods and constructors given a literal path, unless they
+  only read;
+- `cmd /c` with `del`, `rd`, `copy`, `xcopy`, `robocopy`, `move`, `ren` or
+  `>`;
+- code run from a string: `iex`, `powershell -Command`, `pwsh -c`;
+- `Invoke-WebRequest -OutFile`, the native programs the shell reading
+  knows, and downloaded code handed to `Invoke-Expression`.
+
+Real output:
 
 ```text
 $ flot guard --powershell --command "Set-Content -Path .\check.sh -Value 'exit 0'"
 protected  check.sh: the proof of step `work` reads it
 $ flot guard --powershell --command "[IO.File]::WriteAllText('check.sh', 'exit 0')"
 protected  check.sh: the proof of step `work` reads it
+$ flot guard --powershell --command "Remove-Item -ErrorAction SilentlyContinue check.sh"
+protected  check.sh: the proof of step `work` reads it
+$ flot guard --powershell --command "cmd /c del check.sh"
+protected  check.sh: the proof of step `work` reads it
 $ flot guard --powershell --command "irm https://example.com/install.ps1 | iex"
 refused    irm | iex: it runs code fetched from the network, which no step or receipt records
 $ flot guard --powershell --command "cargo test *> test.log"
 ```
 
-As with a shell command, a path held in a variable or computed is not seen.
+As with a shell command, a path held in a variable or computed is not seen
+(`ForEach-Object { Remove-Item $_ }`, `$env:USERPROFILE\…`), and neither
+is what a script run with `-File` or `-EncodedCommand`, or `Start-Process`,
+does. Unlike a shell command, a `cd` or `Set-Location` is not followed.
 
-`flot guard --hook` reads a Claude Code `PreToolUse` payload on stdin (a file
-path, or a Bash or PowerShell command line) and answers with a denial; the
-[Claude Code plugin](mcp.md#claude-code-plugin) installs it for `Edit`,
-`Write`, `MultiEdit`, `NotebookEdit`, `Bash` and `PowerShell`. Downloaded
-code is refused only where a flow is; elsewhere the hook says nothing.
+`flot guard --hook` reads a Claude Code `PreToolUse` payload on stdin and
+answers with a denial. The [Claude Code plugin](mcp.md#claude-code-plugin)
+installs it for every tool (matcher `.*`): it reads an edit's file, a Bash
+or PowerShell command line, and, for any other tool not named like a read
+(`Read`, `mcp__filesystem__list_directory`, ...), every `path`,
+`file_path`, `file`, `filename`, `destination`, `target`, `notebook_path`,
+`paths` or `source`, at any depth of its input. Where a flow is, a call the
+guard cannot judge (a payload that is not JSON, an edit without its file, a
+failure of the guard itself) is denied; where none is, the hook says
+nothing. Real output:
+
+```text
+$ echo "not json" | flot guard --hook
+{
+  "hookSpecificOutput": {
+    "hookEventName": "PreToolUse",
+    "permissionDecision": "deny",
+    "permissionDecisionReason": "flot: this call cannot be judged (the hook payload is not JSON: expected ident at line 1 column 2), and a flow is here, so it is refused; ask the user to make it."
+  }
+}
+```
 
 In a real headless session (Claude Code 2.1.330, $0.23), Claude was told to
 run `sed -i … check.sh` on a proof's file and `rm .github/workflows/ci.yml`.
@@ -661,29 +835,29 @@ refused by the guard since the previous run:
 
 `flot guard --replay [PATHS]` reads Claude Code transcripts (`.jsonl` files,
 or directories holding them; by default `~/.claude/projects`) and judges
-every `Edit`, `Write`, `MultiEdit`, `NotebookEdit`, `Bash` and `PowerShell`
-call in them as
-the hook would now, against the flows as they are now, listing what it would
-refuse. It notes nothing. A call whose directory is gone is counted, not
+every call in them the hook would see (edits, shell commands, and other
+tools that name a path) as it would now, against the flows as they are now,
+listing what it would refuse. It notes nothing. A call whose directory is gone is counted, not
 judged. Over this machine's transcripts (real output):
 
 ```text
 $ flot guard --replay
-refused  2026-11-24T16:20:49.931Z  Bash  /tmp/hooktest: check.sh is protected: the proof of step `work` reads it
-refused  2026-11-24T16:20:50.473Z  Bash  /tmp/hooktest: .github/workflows/ci.yml is protected: it is a CI workflow, which decides what CI checks
 refused  2026-11-24T14:43:39.614Z  Write  /tmp/tmp.NYNgCBazmQ: check.sh is protected: the proof of step `work` reads it
-114 transcripts, 4707 edits and commands: 36 where a flow is, 3 refused, 64 not judged because their directory is gone
+117 transcripts, 4725 edits and commands: 33 where a flow is, 1 refused, 85 not judged because their directory is gone
 ```
 
-The three are the sessions that told Claude to tamper with a proof; the 33
-other calls where a flow is (edits to the code under test, test runs,
-reviews) were let through. That is a sample of one developer's sessions,
-not a false-positive rate. Over the same developer's Windows transcripts,
-755 transcripts and 6960 calls (231 of them `PowerShell`), 14 where a flow
-is, none was refused. Of the 231 PowerShell command lines, 9 named files
-they write (a `Set-Content` of a doc, `New-Item` junctions, a `Move-Item`
-and `Rename-Item` of a credentials file); one more name, `main` from
-`git checkout main`, is a branch read as a path, as the shell reading does.
+The one refused is a session that told Claude to tamper with a proof; two
+calls of another such session were refused too while its directory
+(`/tmp/hooktest`) existed, and are now among those not judged. The 32 other
+calls where a flow is were let through. That is a sample of one developer's
+sessions, not a false-positive rate. With flot 0.2.5, over the same
+developer's Windows transcripts, 755 transcripts and 6960 calls (231 of
+them `PowerShell`), 14 where a flow is, none was refused. Of the 231
+PowerShell command lines, 9 named files they write (a `Set-Content` of a
+doc, `New-Item` junctions, a `Move-Item` and `Rename-Item` of a credentials
+file); one more name, `main` from `git checkout main`, was a branch read as
+a path. That command is now read as changing the whole tree, and put to
+git.
 
 ## Scope
 
@@ -709,12 +883,13 @@ output):
 
 ```text
 $ flot run
-ran      fix                  failed    12ms  claims 0v/1u/0r  receipt 67a4796ebf56
+ran      fix                  failed    11ms  claims 0v/1u/0r  receipt a3e38ae62af5
 
-FAILED 1795531811505-1a507846ea6c  root 1a507846ea6c  29ms
+FAILED 1795655385832-8f0f0b8fcf25  root 8f0f0b8fcf25  39ms
 limitations:
   - fix: changed files outside may_change: check.sh
   - fix: claims are unverified because the step did not succeed
+  - proofs are held to no revision: an edited proof passes here; set proofs_from (flows.md#proofs-from-a-revision)
 ```
 
 Every file the scan reaches is hashed before and after each step outside a
@@ -770,18 +945,19 @@ Here `agent.sh` fixes `src/slug.txt` and then tries to rewrite `check.sh`
 
 ```text
 $ flot run
-ran      fix                  failed    12ms  claims 0v/1u/0r  receipt b2b222b1555a
+ran      fix                  failed    12ms  claims 0v/1u/0r  receipt c6cdaf4de3e8
     ! agent.sh: 2: cannot create check.sh: Permission denied
 
-FAILED 1795532641102-7555f70816cc  root 7555f70816cc  25ms
+FAILED 1795655385932-a06efe1cad1c  root a06efe1cad1c  40ms
 limitations:
   - fix: claims are unverified because the step did not succeed
+  - proofs are held to no revision: an edited proof passes here; set proofs_from (flows.md#proofs-from-a-revision)
 ```
 
-and the same step fetching a page instead:
+and the same step fetching a page instead (its first two lines):
 
 ```text
-ran      fix                  failed    12ms  claims 0v/1u/0r  receipt 4655b66d9eab
+ran      fix                  failed    12ms  claims 0v/1u/0r  receipt e19b772cf460
     ! curl: (6) Could not resolve host: example.com
 ```
 
@@ -789,17 +965,21 @@ The receipt records the policy and how it was enforced, so a reader can see
 the step was confined:
 
 ```text
-$ flot receipt b2b222b1555a | jq -c .identity.sandbox
+$ flot receipt c6cdaf4de3e8 | jq -c .identity.sandbox
 {"network":false,"write":["src"],"mechanism":"landlock abi 7, network namespace"}
 ```
 
 On macOS the mechanism reads `seatbelt file writes, seatbelt network`.
 
 A step that asks for a sandbox runs in it or not at all. Where it cannot be
-enforced (neither Linux nor macOS, a kernel without Landlock, a host that
+enforced (neither Linux nor macOS, a kernel without Landlock, a `write`
+policy on Landlock below ABI 3 (Linux 6.2), which cannot deny truncating a
+file, a host that
 does not let an unprivileged process have a user namespace, a macOS without
 `sandbox-exec`, a `write` path that does not exist) the step is not run: it fails with "could not run: its sandbox cannot
-be enforced here" and the reason. The policy is part of the step key. The
+be enforced here" and the reason, such as "cannot deny truncation on
+Landlock ABI 2; ABI 3 (Linux 6.2) is required". `flot doctor` fails its
+`sandbox` check there too. The policy is part of the step key. The
 proof runs unconfined, like any proof, and so does the rest of the flow.
 
 Tested where both are enforced: WSL2 with kernel 6.18 (Landlock ABI 7),

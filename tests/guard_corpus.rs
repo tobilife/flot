@@ -231,14 +231,36 @@ fn the_guard_corpus_holds() {
     std::fs::create_dir_all(&home).unwrap();
     fixture(&dir, &home);
 
+    // Each row only asks the guard; none changes the fixture, so the rows are
+    // judged at once, as an agent's parallel tool calls would be.
+    let threads = std::thread::available_parallelism().map_or(4, |n| n.get());
+    let per_thread = corpus.row.len().div_ceil(threads).max(1);
+    let judged: Vec<Judged> = std::thread::scope(|scope| {
+        let workers: Vec<_> = corpus
+            .row
+            .chunks(per_thread)
+            .map(|rows| {
+                let (dir, home) = (&dir, &home);
+                scope.spawn(move || {
+                    rows.iter()
+                        .map(|row| judge(dir, home, row))
+                        .collect::<Vec<_>>()
+                })
+            })
+            .collect();
+        workers
+            .into_iter()
+            .flat_map(|worker| worker.join().unwrap())
+            .collect()
+    });
+
     let mut wrong = Vec::new();
-    for row in &corpus.row {
+    for (row, judged) in corpus.row.iter().zip(judged) {
         assert!(
             !row.note.is_empty(),
             "{:?} says why it is here",
             row.command
         );
-        let judged = judge(&dir, &home, row);
         let covered = row.protects.iter().all(|what| judged.names(what));
         let holds = match row.status.as_str() {
             "closed" => {

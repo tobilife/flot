@@ -60,7 +60,7 @@ It pays off when:
   `flot_run`, for $0.42.
 - **An agent loops: change, check, change again.** Steps whose inputs did not
   change are reused, so the check is cheap to repeat: this repository's gate
-  takes 22 s cold and 0.45 s when nothing changed. A step with `attempts = N`
+  takes 25 s forced and 1.4 s when nothing changed. A step with `attempts = N`
   runs again with what its proof said, until it holds: in a real run the
   check's failure output led Claude Code to a rule the spec never stated, on
   the second attempt, for $0.25.
@@ -121,9 +121,10 @@ codex mcp add flot -- flot mcp      # Codex CLI
 
 In Claude Code you can install the plugin instead: it registers the same
 server, adds a skill that runs the flow before Claude says a change works, and
-adds a hook that refuses edits, and shell commands that name the file, to the
-flow file, the files its proofs read, CI workflows, git hooks and Claude
-Code's own settings, as well as `curl … | sh`. flot must be on your `PATH`.
+adds a hook that refuses edits, shell commands and other tool calls that name
+the file, to the flow file, the files its proofs read, CI workflows, git hooks
+and Claude Code's own settings, as well as `curl … | sh`. flot must be on
+your `PATH`.
 `flot doctor` checks the setup, including settings that would switch the hook
 off.
 
@@ -165,30 +166,35 @@ This repository gates itself with flot ([`flot.toml`](flot.toml)):
 
 ```
 $ flot run --force
-ran      format               ok        232ms  claims 1v/0u/0r  receipt d3932015a6a2
-ran      build                ok        4659ms  claims 1v/0u/0r  receipt 53b2255d9a34
-ran      lint                 ok        2325ms  claims 1v/0u/0r  receipt cd0187f4dcd0
-ran      test                 ok        5713ms  claims 2v/0u/0r  receipt cf91a5820103
-    complete output: flot log test 1795573222591-9db980a7b19e
+ran      toolchain            ok        21ms  claims 0v/0u/0r  receipt 1fca18195c20
+ran      format               ok        312ms  claims 1v/0u/0r  receipt 4fb7511bf9b4
+ran      build                ok        896ms  claims 1v/0u/0r  receipt 967d03d654d0
+ran      lint                 ok        1086ms  claims 1v/0u/0r  receipt 8d49c8580516
+ran      test                 ok        7626ms  claims 2v/0u/0r  receipt d9d9645a73d9
+    complete output: flot log test 1795656258113-9733c6907cd0
 
-PASSED 1795573222591-9db980a7b19e  root 9db980a7b19e  21568ms
+PASSED 1795656258113-9733c6907cd0  root 9733c6907cd0  24805ms
 limitations:
-  - proofs checked against origin/main (919b6dcb3a11)
+  - proofs checked against origin/main (a921a812ccc7)
 
 $ flot run     # nothing changed: receipts are reused and the root is identical
-cached   format               ok        232ms  claims 1v/0u/0r  receipt d3932015a6a2
-cached   build                ok        4659ms  claims 1v/0u/0r  receipt 53b2255d9a34
-cached   lint                 ok        2325ms  claims 1v/0u/0r  receipt cd0187f4dcd0
-cached   test                 ok        5713ms  claims 2v/0u/0r  receipt cf91a5820103
+ran      toolchain            ok        21ms  claims 0v/0u/0r  receipt 1fca18195c20
+cached   format               ok        312ms  claims 1v/0u/0r  receipt 4fb7511bf9b4
+cached   build                ok        896ms  claims 1v/0u/0r  receipt 967d03d654d0
+cached   lint                 ok        1086ms  claims 1v/0u/0r  receipt 8d49c8580516
+cached   test                 ok        7626ms  claims 2v/0u/0r  receipt d9d9645a73d9
 
-PASSED 1795573247834-9db980a7b19e  root 9db980a7b19e  454ms
+PASSED 1795656285704-9733c6907cd0  root 9733c6907cd0  1398ms
 limitations:
-  - proofs checked against origin/main (919b6dcb3a11)
+  - proofs checked against origin/main (a921a812ccc7)
 ```
 
-Recorded with a build of main after 0.2.4. The second run took 0.45 s
-instead of 22 s because all four receipts were reused; a reused step reports
-the duration it was recorded with and prints nothing else. Under each step that ran, flot also
+Recorded with a build of the `hardening` branch after 0.2.6, on WSL2 with the
+repository on a Windows drive. The second run took 1.4 s instead of 25 s
+because the four proven steps were reused; a reused step reports the duration
+it was recorded with and prints nothing else. `toolchain` runs every time: its
+receipt stays the same while `rustc -vV` and `cargo -V` print the same, and it
+is what lets a different toolchain run the other steps again. Under each step that ran, flot also
 prints the first and last lines of its output, left out here; `flot log test`
 prints all of it.
 
@@ -246,8 +252,8 @@ budgets, concurrency, outputs, guarded proofs, scope and sandbox.
   proof that differs from that revision (its command, its claims or the files
   it reads) leaves its claims unverified, and `flot verify --proofs-from`
   holds a recorded run to the same revision. The Claude Code plugin also
-  refuses edits to those files before they happen, made directly or through
-  a Bash or PowerShell command, and to what decides
+  refuses edits to those files before they happen, made directly, through
+  a Bash or PowerShell command or through another tool, and to what decides
   whether they are checked: CI workflows, git hooks, Claude Code's settings.
   `flot verify` also names the files that changed since that revision but
   that no step read, the changes no claim speaks for. A step with
@@ -288,7 +294,7 @@ list and the `.flot` store.
 | [`examples/slugify/compare.toml`](examples/slugify/compare.toml) | Claude Code and Codex implement the same spec as two candidates; the same check proves each, and the cheapest that held is kept. [One real run](docs/agents.md#two-agents-on-the-same-spec) and the two bugs it found. |
 | [`examples/agent-review.toml`](examples/agent-review.toml) | A spec, an implementation and a review as three agent steps; the project's tests prove the implementation. |
 | [`examples/parallel-review.toml`](examples/parallel-review.toml) | Three independent agent reviewers (security, performance, contracts) of the current diff, run concurrently, then a test gate. [One real run](docs/agents.md#three-reviewers-in-parallel) found an undocumented default; isolating the agent steps cut a run from $3.25 to $0.42. |
-| [`flot.toml`](flot.toml) | This repository's own gate: format, build, lint and test, each with a proof. |
+| [`flot.toml`](flot.toml) | This repository's own gate: a toolchain check, then format, build, lint and test, each with a proof. |
 
 Copy an example to your project root before running it: paths and the `.flot`
 store are relative to the flow file. [Running coding agents](docs/agents.md)
@@ -332,8 +338,10 @@ agent with the permissions you would give it anyway.
 <summary><strong>Why is my run <code>unverified</code>?</strong></summary>
 
 At least one claim has no proof that settled it: the step has no `verify`
-command, the step failed or was tolerated with `allow_failure`, or the proof
-timed out, was killed, or saw its files change. `flot show` names each
+command, the step failed or was tolerated with `allow_failure`, the proof
+timed out, was killed, or saw its files change, or, on Linux, a process the
+step or its proof started outlived it (a daemon, `setsid`) and was stopped.
+`flot show` names each
 unverified claim, and `flot plan` lists claims that lack a proof before you
 run anything.
 

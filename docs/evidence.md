@@ -15,7 +15,10 @@ read: its run id, each step's status and claim counts, the totals, the verdict
 and the root. A bundle whose manifest says `passed` over a refuted claim is
 refused, and the same check makes `flot verify` report a run edited in place as
 broken. Run ids name files, so one that is not exactly what flot derives is
-refused before it can reach a path.
+refused before it can reach a path. Whether a run selected every step of its
+flow ([partial runs](flows.md#verdict)) is the run's own word: no receipt
+records how many steps the flow had, so a signature covers the selection,
+and the receipts cannot.
 
 A reviewer can audit a claimed result from the bundle alone, without trusting
 the agent or the host that produced it.
@@ -54,20 +57,27 @@ Refused bundles are named, and the command then exits non-zero.
 A bundle carries every byte of its run: complete output, produced files,
 proof output. Before `flot bundle` or `flot push` writes or signs anything,
 it looks for credential-shaped tokens in all of it, and refuses the run if
-it finds one (exit 3). Only fixed shapes count: GitHub, GitLab, npm and
-Slack tokens, Anthropic, OpenAI, AWS and Google keys, and PEM private keys.
-Nothing is guessed from entropy, so a clean scan is not a promise that a
-run holds no secret. The token is never printed, only its prefix (real
-output; the token was `ghp_` and 36 characters):
+it finds one (exit 3). Only fixed shapes count: GitHub, GitLab, npm, Slack
+(`xoxb-`, `xoxp-`, `xoxa-`, `xoxs-`, `xapp-`), Hugging Face (`hf_`) and PyPI
+(`pypi-`) tokens; Anthropic, OpenAI, AWS, Google and Stripe (`sk_live_`,
+`rk_live_`) keys; PEM private keys; and a password in a URL
+(`scheme://user:password@`, unless it starts like a placeholder: `$`, `<`,
+`{` or `*`). Nothing is guessed from entropy, so a clean scan is not a
+promise that a run holds no secret. The token is never printed, only its
+prefix, or for a password the user it belongs to (real output; the token was
+`ghp_` and 36 characters):
 
 ```text
 $ flot bundle
-flot: refusing to share run 1795536384599-0beca5965629: it carries what looks like credentials, and nothing left this host:
+flot: refusing to share run 1795654376930-e974150d894e: it carries what looks like credentials, and nothing left this host:
   - step `login` receipt: GitHub token (ghp_…)
-  - step `login` observation: GitHub token (ghp_…)
   - step `login` stdout: GitHub token (ghp_…)
+  - step `login` observation: GitHub token (ghp_…)
 keep them out of the step's output and run it again, or pass --allow-secrets if they are not credentials
 ```
+
+A step that printed `postgres://app:hunter2@db/app` is refused the same way,
+as `password in a URL (://app:…@)`.
 
 A receipt is addressed by its content, so a token cannot be masked out of
 the evidence; keep it out of the step's output and run the step again.

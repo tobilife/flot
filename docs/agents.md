@@ -88,6 +88,10 @@ limitations:
   - partial run: 1 of 2 steps selected
 ```
 
+Up to 0.2.6, flot printed `PASSED` here. A run of some of a flow's steps
+now reads `PARTIAL` and exits 2: it says nothing of the steps it left out
+([verdict](flows.md#verdict)).
+
 The first attempt's receipt holds the check's verdict on it:
 
 ```
@@ -270,6 +274,16 @@ spent $1.200000 (in 200 / out 20 tokens, 2 reporting step(s))  ceiling $1.000000
   - c: not run: run cost ceiling of $1.000000 reached ($1.200000 spent by executed steps)
   - spent $1.200000 against a $1.000000 ceiling: the ceiling is checked before each step starts, so steps already running when it was crossed finished
 ```
+
+`flot run --max-cost` is the user's own and replaces the flow's ceiling.
+Over MCP, `flot_run`'s `max_cost_usd` can only lower it: when the flow sets
+`max_cost_usd`, the lower of the two applies, so an agent cannot raise a
+ceiling the user wrote in a file the guard keeps it from editing; when the
+flow sets none, the call's applies. With `max_cost_usd = 0.5` in the flow, a
+first step that reported $0.60, and `"max_cost_usd": 100000` in the call,
+the run recorded a $0.500000 ceiling and did not start the second step
+(`run cost ceiling of $0.500000 reached ($0.600000 spent by executed steps)`).
+Up to 0.2.6 the call's value replaced the flow's.
 
 A malformed metrics file is reported and treated as unknown spend; it never
 reads as zero.

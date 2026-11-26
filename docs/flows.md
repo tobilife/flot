@@ -12,13 +12,17 @@ budget = { timeout_secs = 900, max_inline_bytes = 4096 }
 
 [[step]]
 id = "implement"
-run = "gjc -p 'implement .flot-work/spec.md'"
+run = "claude -p 'implement .flot-work/spec.md'"
 needs = ["spec"]
 inputs = [".flot-work/spec.md"]
 outputs = ["src/**/*.rs"]
 claims = ["the workspace still compiles after the agent's edits"]
 verify = "cargo build --all-targets --quiet"
 ```
+
+`run` is a shell command, so the agent is whichever command-line agent you
+run headless: `claude -p`, `codex exec`, or any other. flot judges what the
+step leaves behind through `verify`, not which agent or harness made it.
 
 ## Step keys
 

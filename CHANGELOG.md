@@ -19,6 +19,11 @@ The guard's remaining known holes, measured with the probes that found them
   `Start-Process` and `$_` in `ForEach-Object` are followed.
 - Any call that names the signing key, a retired copy or `host.secret`
   is refused, reads included, with or without a flow.
+- In double quotes, a backslash before anything but `$`, a backquote, `"`, a
+  backslash or a newline is kept, as sh keeps it: `rm "C:\Users\me\check.sh"`
+  was read as `C:Usersmecheck.sh`.
+- A guarded path named through a link to the project (macOS's `/var` is one
+  to `/private/var`) is named from the project, not as an absolute path.
 
 Replaying this host's transcripts (117 on WSL with 4,725 calls, 755 on
 Windows with 8,057) refused nothing new. The guard corpus has 231 rows.

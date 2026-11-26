@@ -342,10 +342,15 @@ fn tokens(command: &str) -> Vec<Token> {
                 at += 1;
                 while at < chars.len() && chars[at] != '"' {
                     match chars[at] {
-                        '\\' if at + 1 < chars.len() => {
+                        // In double quotes a backslash quotes only `$`, a
+                        // backquote, `"`, a backslash and a newline;
+                        // before anything else it is itself, as in a
+                        // Windows path `"C:\Users\me"`.
+                        '\\' if matches!(chars.get(at + 1), Some('$' | '`' | '"' | '\\')) => {
                             at += 1;
                             word.push(chars[at]);
                         }
+                        '\\' if chars.get(at + 1) == Some(&'\n') => at += 1,
                         // A command substituted in double quotes still runs.
                         '$' if chars.get(at + 1) == Some(&'(') => {
                             let close = closing(&chars, at + 2, 1, usize::MAX);
@@ -2780,6 +2785,19 @@ mod tests {
 
     fn writes(command: &str) -> Vec<String> {
         read(command).writes
+    }
+
+    #[test]
+    fn a_backslash_in_double_quotes_is_itself_before_most_characters() {
+        assert_eq!(
+            writes(r#"rm "C:\Users\me\check.sh""#),
+            [r"C:\Users\me\check.sh"]
+        );
+        assert_eq!(writes(r#"rm "say \"hi\".txt""#), [r#"say "hi".txt"#]);
+        assert_eq!(writes(r#"rm "a\\b""#), [r"a\b"]);
+        assert_eq!(writes("rm \"che\\\nck.sh\""), ["check.sh"]);
+        // Outside quotes it quotes whatever follows.
+        assert_eq!(writes(r"rm C:\Users\me"), ["C:Usersme"]);
     }
 
     #[test]

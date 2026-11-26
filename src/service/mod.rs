@@ -876,22 +876,32 @@ impl Guard {
         })
     }
 
-    /// `path` as the guard names it.
+    /// `path` as the guard names it: as written, or else as it resolves,
+    /// since a path can be named through a link the bases are not, as
+    /// macOS's `/var` is to `/private/var`.
     fn name(&self, path: &Path) -> String {
+        if let Some(named) = self.named_below(path) {
+            return named;
+        }
+        self.named_below(&resolve(path))
+            .unwrap_or_else(|| path.display().to_string())
+    }
+
+    /// `path` relative to the flow or home directory that holds it.
+    fn named_below(&self, path: &Path) -> Option<String> {
         let relative = self
             .flows
             .iter()
             .find_map(|flow| below(path, &flow.roots))
             .or_else(|| self.flows.iter().find_map(|flow| below(path, &flow.tops)));
-        match relative {
+        Some(match relative {
             Some(relative) if relative.is_empty() => ".".to_string(),
             Some(relative) => relative,
-            None => match below(path, &self.home) {
-                Some(relative) if relative.is_empty() => "~".to_string(),
-                Some(relative) => format!("~/{relative}"),
-                None => path.display().to_string(),
+            None => match below(path, &self.home)? {
+                relative if relative.is_empty() => "~".to_string(),
+                relative => format!("~/{relative}"),
             },
-        }
+        })
     }
 
     /// Where guarded files are known to be, as far as they exist: each

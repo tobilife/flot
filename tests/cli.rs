@@ -4650,7 +4650,8 @@ fn guard_refuses_whatever_reads_the_signing_key_flow_or_not() {
             "base64 < $FLOT_SIGNING_KEY".to_string(),
             ".test-keys/signing.key",
         ),
-        (format!("cp {key} /tmp/k"), ".test-keys/signing.key"),
+        // Quoted, as a Windows path must be for sh to keep its backslashes.
+        (format!("cp \"{key}\" /tmp/k"), ".test-keys/signing.key"),
         (
             "cp .test-keys/host.secret /tmp/s".to_string(),
             ".test-keys/host.secret",
@@ -4702,7 +4703,7 @@ fn guard_refuses_whatever_reads_the_signing_key_flow_or_not() {
         &project,
         elsewhere.path(),
         elsewhere.path(),
-        &["guard", "--command", &format!("cat {key}")],
+        &["guard", "--command", &format!("cat \"{key}\"")],
         "",
     );
     assert_eq!(outside.code, 2, "{}", outside.stdout);
@@ -6254,4 +6255,25 @@ fn verify_says_what_the_run_could_not_prove() {
         .has("verdict passed")
         .has("limitations:")
         .has("proofs are held to no revision");
+}
+
+/// A key named through a link to the project (macOS's `/var` is one to
+/// `/private/var`) is named from the project all the same.
+#[cfg(unix)]
+#[test]
+fn guard_names_a_secret_reached_through_a_link_from_the_project() {
+    let project = two_proofs_project();
+    project.flot(&["key", "init"]).ok();
+    project.flot(&["plan"]);
+    let link = tempfile::tempdir().unwrap();
+    let through = link.path().join("project");
+    std::os::unix::fs::symlink(project.path(), &through).unwrap();
+    let key = through.join(".test-keys/signing.key");
+    project
+        .flot(&[
+            "guard",
+            "--command",
+            &format!("cp {} /tmp/k", key.display()),
+        ])
+        .has("secret     .test-keys/signing.key: ");
 }

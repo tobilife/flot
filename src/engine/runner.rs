@@ -909,7 +909,6 @@ impl<'a> Runner<'a> {
     }
 }
 
-/// How one attempt ended, in a word or two: `held`, or why not.
 /// What differs between the proofs two receipts of a step record: the files
 /// it read, its command and its claims. A command neither receipt records is
 /// not compared.
@@ -937,6 +936,7 @@ fn proof_changes(earlier: &ReceiptIdentity, now: &ReceiptIdentity) -> Vec<String
     changed
 }
 
+/// How one attempt ended, in a word or two: `held`, or why not.
 fn outcome(receipt: &Receipt) -> String {
     let counts = receipt.claim_counts();
     if !receipt.identity.status.is_ok() {

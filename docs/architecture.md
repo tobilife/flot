@@ -1,7 +1,7 @@
 # Architecture
 
 ```
-core      digest · receipt · flow · metrics · compare
+core      digest · receipt · preview · flow · metrics · compare
           attest · fault · secrets · shell · powershell  pure model, no IO
 store     content-addressed objects, receipts, runs
 engine    keying · claims · scheduler · exec · runner   flow -> receipts

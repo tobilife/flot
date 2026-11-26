@@ -9,6 +9,7 @@ use anyhow::{Context, Result};
 
 use crate::core::flow::Step;
 use crate::core::metrics;
+use crate::core::preview::stream_preview;
 use crate::core::receipt::{DepRef, Receipt, StepStatus};
 use crate::engine::exec;
 use crate::engine::keying::Facts;
@@ -148,7 +149,7 @@ impl Runner<'_> {
             if bytes.is_empty() {
                 return Ok(());
             }
-            let (preview, _) = exec::stream_preview(&bytes, ROOM);
+            let (preview, _) = stream_preview(&bytes, ROOM);
             text.push_str(&format!("\n--- {title} ---\n{preview}"));
             if !preview.ends_with('\n') {
                 text.push('\n');

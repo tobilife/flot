@@ -11,6 +11,7 @@ use anyhow::{Context, Result};
 use crate::core::digest;
 use crate::core::flow::Step;
 use crate::core::metrics::{self, Metrics};
+use crate::core::preview::stream_preview;
 use crate::core::receipt::{
     ClaimStatus, DepRef, FileDigest, Observed, Receipt, ReceiptIdentity, SandboxRecord, StepStatus,
     ToolIdentity,
@@ -450,9 +451,9 @@ impl Runner<'_> {
         }
 
         let (stdout_inline, stdout_truncated) =
-            exec::stream_preview(&outcome.stdout, budget.max_inline_bytes);
+            stream_preview(&outcome.stdout, budget.max_inline_bytes);
         let (stderr_inline, stderr_truncated) =
-            exec::stream_preview(&outcome.stderr, budget.max_inline_bytes);
+            stream_preview(&outcome.stderr, budget.max_inline_bytes);
 
         Ok(Receipt::seal(
             ReceiptIdentity {

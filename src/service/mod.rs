@@ -21,9 +21,9 @@ use serde::Serialize;
 
 use crate::core::compare::{self, RunDiff};
 use crate::core::flow::Flow;
+use crate::core::preview::inline_preview;
 use crate::core::receipt::{ClaimCounts, ClaimRecord, Receipt, Refusal, RunManifest, Verdict};
 use crate::engine::baseline::Baseline;
-use crate::engine::exec;
 use crate::engine::git::Git;
 use crate::engine::runner::Runner;
 // The request and report types are part of this contract; adapters take them
@@ -576,7 +576,7 @@ impl Workspace {
 
     pub fn read_object(&self, digest: &str, max_bytes: usize) -> Result<ObjectView> {
         let bytes = self.object(digest)?;
-        let (text, truncated) = exec::inline_preview(&bytes, max_bytes);
+        let (text, truncated) = inline_preview(&bytes, max_bytes);
         Ok(ObjectView {
             digest: digest.to_string(),
             bytes: bytes.len(),

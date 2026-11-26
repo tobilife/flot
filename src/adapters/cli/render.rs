@@ -1,6 +1,8 @@
 //! What commands print: lines for a person, safe on a terminal; the
 //! Markdown report of `flot verify --markdown`; and pretty JSON.
 
+use std::path::Path;
+
 use anyhow::Result;
 use serde::Serialize;
 
@@ -9,7 +11,15 @@ use crate::core::compare::RunDiff;
 use crate::core::digest;
 use crate::core::receipt::{ClaimStatus, Partial, RunManifest, StepStatus, Verdict};
 use crate::service::audit::{Audit, Outcome};
-use crate::service::{Plan, RunDetail, RunReport, SignReport};
+use crate::service::bundle::{ExportReport, ImportReport};
+use crate::service::doctor::{Check, Status};
+use crate::service::flaky::FlakyReport;
+use crate::service::search::SearchReport;
+use crate::service::share::{PullReport, PushReport};
+use crate::service::{
+    Guarded, KeyInfo, KeyRotation, Plan, RunDetail, RunList, RunReport, SignReport, TrustEntry,
+    TrustRotation,
+};
 
 use super::terminal_safe;
 
@@ -44,6 +54,17 @@ fn json_text<T: Serialize>(value: &T) -> Result<String> {
 pub(super) fn needs_escape(c: char) -> bool {
     (c.is_control() && c != '\n' && c != '\t')
         || matches!(c, '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}')
+}
+
+/// `value` as JSON when the command line asks for `--json`, and otherwise
+/// as `human` prints it for a person.
+pub(super) fn emit<T: Serialize>(json: bool, value: &T, human: impl FnOnce(&T)) -> Result<()> {
+    if json {
+        print_json(value)
+    } else {
+        human(value);
+        Ok(())
+    }
 }
 
 pub(super) fn render_plan(plan: &Plan) {
@@ -614,7 +635,7 @@ pub(super) fn render_signed(signed: &SignReport) {
     );
 }
 
-pub(super) fn render_authorship(authorship: Authorship, signers: &[SignerCheck]) {
+fn render_authorship(authorship: Authorship, signers: &[SignerCheck]) {
     say!("authorship: {}", authorship.label());
     for signer in signers {
         match (&signer.problem, &signer.trusted_as, signer.this_host) {
@@ -653,5 +674,263 @@ pub(super) fn render_diff(diff: &RunDiff) {
             step.left.clone().unwrap_or_else(|| "-".into()),
             step.right.clone().unwrap_or_else(|| "-".into())
         );
+    }
+}
+
+pub(super) fn render_init(path: &Path) {
+    say!("wrote {}", path.display());
+    say!("next: flot plan");
+}
+
+pub(super) fn render_guard(guarded: &[Guarded], refused: &[Guarded], secrets: &[Guarded]) {
+    for found in guarded {
+        say!("protected  {}: {}", found.path, found.reason);
+    }
+    for found in refused {
+        say!("refused    {}: {}", found.path, found.reason);
+    }
+    for found in secrets {
+        say!("secret     {}: {}", found.path, found.reason);
+    }
+}
+
+pub(super) fn render_doctor(checks: &[Check]) {
+    for found in checks {
+        let status = match found.status {
+            Status::Ok => "ok",
+            Status::Note => "note",
+            Status::Warn => "warn",
+            Status::Fail => "FAIL",
+        };
+        say!("{status:<5} {:<15} {}", found.check, found.detail);
+    }
+}
+
+pub(super) fn render_bundle(report: &ExportReport) {
+    say!(
+        "wrote {} ({} receipts, {} objects, {} bytes)  root {}",
+        report.path.display(),
+        report.receipts,
+        report.objects,
+        report.bytes,
+        digest::short(&report.root_digest)
+    );
+    if report.signed_by.is_empty() {
+        say!("unsigned: importers can check integrity but not who produced it");
+    }
+    for key in &report.signed_by {
+        say!("signed by {key}");
+    }
+}
+
+pub(super) fn render_push(report: &PushReport) {
+    if report.unchanged {
+        say!(
+            "run {} is already on {} as {}",
+            report.run_id,
+            report.remote,
+            report.path
+        );
+    } else {
+        say!(
+            "pushed run {} to {} {}  {}  commit {}",
+            report.run_id,
+            report.remote,
+            crate::service::share::RUNS_REF,
+            report.path,
+            &report.commit[..report.commit.len().min(12)]
+        );
+        if report.signed_by.is_empty() {
+            say!("unsigned: others can inspect it, but only a signed run can stand in for their work");
+        }
+    }
+}
+
+pub(super) fn render_pull(report: &PullReport) {
+    if report.empty {
+        say!(
+            "{} has no shared runs ({})",
+            report.remote,
+            crate::service::share::RUNS_REF
+        );
+    } else {
+        for imported in &report.imported {
+            say!(
+                "imported run {}  root {}  {}{}",
+                imported.run_id,
+                digest::short(&imported.root_digest),
+                imported.authorship.label(),
+                if imported.reusable { "  reusable" } else { "" }
+            );
+        }
+        for refused in &report.refused {
+            say!("refused  {}: {}", refused.path, refused.reason);
+        }
+        say!(
+            "{} of flow {}: {} imported, {} already here, {} refused",
+            report.remote,
+            report.flow,
+            report.imported.len(),
+            report.present.len(),
+            report.refused.len()
+        );
+    }
+}
+
+pub(super) fn render_import(report: &ImportReport) {
+    say!(
+        "imported run {}  root {}  {} receipts, {} objects; {} of them already present",
+        report.run_id,
+        digest::short(&report.root_digest),
+        report.receipts,
+        report.objects,
+        report.already_present
+    );
+    render_authorship(report.authorship, &report.signers);
+    if report.reusable {
+        say!("reusable: local runs may reuse these receipts and their outputs");
+    } else {
+        say!("not reusable: only a trusted signer's receipts can stand in for local work");
+    }
+    say!("next: flot verify {}", report.run_id);
+}
+
+pub(super) fn render_key_rotate(rotation: &KeyRotation) {
+    say!("rotated signing key {}", rotation.path.display());
+    say!("new  {}", rotation.new_key);
+    say!("old  {}", rotation.old_key);
+    say!("     kept as {}", rotation.retired.display());
+    say!("handover {}", rotation.handover.display());
+    say!("next: send it to everyone who trusts the old key; they run `flot trust rotate <file>`");
+}
+
+pub(super) fn render_key(info: &KeyInfo) {
+    let state = if info.created { "created" } else { "using" };
+    say!("{state} signing key {}", info.path.display());
+    say!("{}", info.public_key);
+}
+
+pub(super) fn render_trust_add(entry: &TrustEntry) {
+    say!("trusting {} as {}", entry.key, entry.name);
+}
+
+pub(super) fn render_trust_remove(entry: &TrustEntry) {
+    say!("no longer trusting {} ({})", entry.name, entry.key);
+}
+
+pub(super) fn render_trust_rotate(rotation: &TrustRotation) {
+    let state = if rotation.added {
+        "trusting"
+    } else {
+        "already trusting"
+    };
+    say!("{state} {} as {}", rotation.to, rotation.name);
+    if rotation.revoked {
+        say!("no longer trusting {}", rotation.from);
+    } else {
+        say!(
+            "still trusting {} as {}; `flot trust remove {}` once its runs no longer matter",
+            rotation.from,
+            rotation.name,
+            rotation.from
+        );
+    }
+}
+
+pub(super) fn render_trust_list(entries: &[TrustEntry]) {
+    if entries.is_empty() {
+        say!("no trusted signers");
+    } else {
+        for entry in entries {
+            say!("{:<16} {}", entry.name, entry.key);
+        }
+    }
+}
+
+pub(super) fn render_flaky(report: &FlakyReport) {
+    for found in report.steps.iter().chain(&report.claims) {
+        match &found.claim {
+            None => say!(
+                "step `{}` (key {}) on the same inputs:",
+                found.step_id,
+                found.key
+            ),
+            Some(claim) => say!(
+                "proof of \"{}\" (step `{}`, key {}) over the same files:",
+                claim,
+                found.step_id,
+                found.key
+            ),
+        }
+        for outcome in &found.outcomes {
+            let count = outcome.runs.len();
+            say!(
+                "  {:<9} in {count} run{}, newest {}",
+                outcome.outcome,
+                if count == 1 { "" } else { "s" },
+                outcome.runs[0]
+            );
+        }
+    }
+    for unreadable in &report.unreadable {
+        say!("unreadable  {unreadable}");
+    }
+    say!(
+        "{} step(s) and {} proof(s) gave different results on the same inputs in {} run(s) read",
+        report.steps.len(),
+        report.claims.len(),
+        report.runs_read
+    );
+}
+
+pub(super) fn render_search(report: &SearchReport) {
+    for hit in &report.hits {
+        let mut place = hit.step_id.clone().unwrap_or_else(|| "(run)".into());
+        if let Some(candidate) = &hit.candidate {
+            place.push_str(&format!(" candidate {candidate}"));
+        }
+        if let Some(attempt) = hit.attempt {
+            place.push_str(&format!(" attempt {attempt}"));
+        }
+        let source = match hit.line {
+            Some(line) => format!("{}:{line}", hit.source),
+            None => hit.source.to_string(),
+        };
+        say!("{}  {place}  {source}  {}", hit.run_id, hit.text);
+    }
+    say!(
+        "{} hit(s) in {} run(s) searched{}",
+        report.hits.len(),
+        report.runs_searched,
+        if report.truncated {
+            "; more hits exist, raise --limit"
+        } else {
+            ""
+        }
+    );
+    for unreadable in &report.unreadable {
+        say!("unreadable  {unreadable}");
+    }
+}
+
+pub(super) fn render_runs(list: &RunList) {
+    if list.runs.is_empty() && list.unreadable.is_empty() {
+        say!("no runs recorded");
+    } else {
+        for run in &list.runs {
+            say!(
+                "{}  {:<10} {} steps  claims {}v/{}u/{}r{}",
+                run.run_id,
+                run.verdict.label(),
+                run.steps,
+                run.claims.verified,
+                run.claims.unverified,
+                run.claims.refuted,
+                if run.imported { "  (imported)" } else { "" }
+            );
+        }
+        for unreadable in &list.unreadable {
+            say!("unreadable  {unreadable}");
+        }
     }
 }

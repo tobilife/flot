@@ -13,7 +13,6 @@ use anyhow::{Context, Result};
 use clap::Parser;
 use serde::Serialize;
 
-use crate::core::digest;
 use crate::core::{powershell, shell};
 use crate::service::audit::Outcome;
 use crate::service::bundle::ImportPolicy;
@@ -22,8 +21,11 @@ use crate::service::{fault_kind, FaultKind, Guarded, RunOptions, Sharing, Worksp
 
 use args::{Cli, Command, KeyAction, TrustAction};
 use render::{
-    markdown_report, needs_escape, print_json, render_audit, render_authorship, render_detail,
-    render_diff, render_limitations, render_plan, render_run, render_signed,
+    emit, markdown_report, needs_escape, print_json, render_audit, render_bundle, render_detail,
+    render_diff, render_doctor, render_flaky, render_guard, render_import, render_init, render_key,
+    render_key_rotate, render_limitations, render_plan, render_pull, render_push, render_run,
+    render_runs, render_search, render_signed, render_trust_add, render_trust_list,
+    render_trust_remove, render_trust_rotate,
 };
 
 const INVALID_REQUEST: u8 = 3;
@@ -1689,25 +1691,12 @@ fn dispatch(
     match &cli.command {
         Command::Init { force } => {
             let path = workspace.init(*force)?;
-            say!("wrote {}", path.display());
-            say!("next: flot plan");
+            render_init(&path);
             Ok(ExitCode::SUCCESS)
         }
         Command::Doctor => {
             let checks = workspace.doctor();
-            if cli.json {
-                print_json(&checks)?;
-            } else {
-                for found in &checks {
-                    let status = match found.status {
-                        Status::Ok => "ok",
-                        Status::Note => "note",
-                        Status::Warn => "warn",
-                        Status::Fail => "FAIL",
-                    };
-                    say!("{status:<5} {:<15} {}", found.check, found.detail);
-                }
-            }
+            emit(cli.json, &checks, |checks| render_doctor(checks))?;
             Ok(if checks.iter().any(|found| found.status == Status::Fail) {
                 ExitCode::from(1)
             } else {
@@ -1759,15 +1748,7 @@ fn dispatch(
                     "secret": judged.secrets,
                 }))?;
             } else {
-                for found in &judged.guarded {
-                    say!("protected  {}: {}", found.path, found.reason);
-                }
-                for found in &refused {
-                    say!("refused    {}: {}", found.path, found.reason);
-                }
-                for found in &judged.secrets {
-                    say!("secret     {}: {}", found.path, found.reason);
-                }
+                render_guard(&judged.guarded, &refused, &judged.secrets);
             }
             Ok(
                 if judged.guarded.is_empty() && refused.is_empty() && judged.secrets.is_empty() {
@@ -1788,11 +1769,7 @@ fn dispatch(
                 proofs_from: proofs_from.clone(),
                 ..RunOptions::default()
             })?;
-            if cli.json {
-                print_json(&plan)?;
-            } else {
-                render_plan(&plan);
-            }
+            emit(cli.json, &plan, render_plan)?;
             Ok(ExitCode::SUCCESS)
         }
         Command::Run {
@@ -1837,20 +1814,12 @@ fn dispatch(
         }
         Command::Sign { run } => {
             let signed = workspace.sign(run)?;
-            if cli.json {
-                print_json(&signed)?;
-            } else {
-                render_signed(&signed);
-            }
+            emit(cli.json, &signed, render_signed)?;
             Ok(ExitCode::SUCCESS)
         }
         Command::Show { run } => {
             let detail = workspace.show(run)?;
-            if cli.json {
-                print_json(&detail)?;
-            } else {
-                render_detail(&detail);
-            }
+            emit(cli.json, &detail, render_detail)?;
             Ok(exit_for(Outcome::of_run(&detail.manifest)))
         }
         Command::Verify {
@@ -1881,11 +1850,7 @@ fn dispatch(
         }
         Command::Diff { left, right } => {
             let diff = workspace.diff(left, right)?;
-            if cli.json {
-                print_json(&diff)?;
-            } else {
-                render_diff(&diff);
-            }
+            emit(cli.json, &diff, render_diff)?;
             Ok(if diff.identical {
                 ExitCode::SUCCESS
             } else {
@@ -1928,24 +1893,7 @@ fn dispatch(
                 allow_secrets: *allow_secrets,
             };
             let report = workspace.bundle(run, out.as_deref(), share)?;
-            if cli.json {
-                print_json(&report)?;
-            } else {
-                say!(
-                    "wrote {} ({} receipts, {} objects, {} bytes)  root {}",
-                    report.path.display(),
-                    report.receipts,
-                    report.objects,
-                    report.bytes,
-                    digest::short(&report.root_digest)
-                );
-                if report.signed_by.is_empty() {
-                    say!("unsigned: importers can check integrity but not who produced it");
-                }
-                for key in &report.signed_by {
-                    say!("signed by {key}");
-                }
-            }
+            emit(cli.json, &report, render_bundle)?;
             Ok(ExitCode::SUCCESS)
         }
         Command::Push {
@@ -1959,28 +1907,7 @@ fn dispatch(
                 allow_secrets: *allow_secrets,
             };
             let report = workspace.push(run, remote, share)?;
-            if cli.json {
-                print_json(&report)?;
-            } else if report.unchanged {
-                say!(
-                    "run {} is already on {} as {}",
-                    report.run_id,
-                    report.remote,
-                    report.path
-                );
-            } else {
-                say!(
-                    "pushed run {} to {} {}  {}  commit {}",
-                    report.run_id,
-                    report.remote,
-                    crate::service::share::RUNS_REF,
-                    report.path,
-                    &report.commit[..report.commit.len().min(12)]
-                );
-                if report.signed_by.is_empty() {
-                    say!("unsigned: others can inspect it, but only a signed run can stand in for their work");
-                }
-            }
+            emit(cli.json, &report, render_push)?;
             Ok(ExitCode::SUCCESS)
         }
         Command::Pull {
@@ -1993,36 +1920,7 @@ fn dispatch(
                     require_trusted: *require_trusted,
                 },
             )?;
-            if cli.json {
-                print_json(&report)?;
-            } else if report.empty {
-                say!(
-                    "{} has no shared runs ({})",
-                    report.remote,
-                    crate::service::share::RUNS_REF
-                );
-            } else {
-                for imported in &report.imported {
-                    say!(
-                        "imported run {}  root {}  {}{}",
-                        imported.run_id,
-                        digest::short(&imported.root_digest),
-                        imported.authorship.label(),
-                        if imported.reusable { "  reusable" } else { "" }
-                    );
-                }
-                for refused in &report.refused {
-                    say!("refused  {}: {}", refused.path, refused.reason);
-                }
-                say!(
-                    "{} of flow {}: {} imported, {} already here, {} refused",
-                    report.remote,
-                    report.flow,
-                    report.imported.len(),
-                    report.present.len(),
-                    report.refused.len()
-                );
-            }
+            emit(cli.json, &report, render_pull)?;
             Ok(match report.refused.first() {
                 None => ExitCode::SUCCESS,
                 Some(refused) => exit_for_fault(refused.kind),
@@ -2038,43 +1936,14 @@ fn dispatch(
                     require_trusted: *require_trusted,
                 },
             )?;
-            if cli.json {
-                print_json(&report)?;
-            } else {
-                say!(
-                    "imported run {}  root {}  {} receipts, {} objects; {} of them already present",
-                    report.run_id,
-                    digest::short(&report.root_digest),
-                    report.receipts,
-                    report.objects,
-                    report.already_present
-                );
-                render_authorship(report.authorship, &report.signers);
-                if report.reusable {
-                    say!("reusable: local runs may reuse these receipts and their outputs");
-                } else {
-                    say!(
-                        "not reusable: only a trusted signer's receipts can stand in for local work"
-                    );
-                }
-                say!("next: flot verify {}", report.run_id);
-            }
+            emit(cli.json, &report, render_import)?;
             Ok(ExitCode::SUCCESS)
         }
         Command::Key {
             action: KeyAction::Rotate { out },
         } => {
             let rotation = Workspace::key_rotate(out.as_deref())?;
-            if cli.json {
-                print_json(&rotation)?;
-            } else {
-                say!("rotated signing key {}", rotation.path.display());
-                say!("new  {}", rotation.new_key);
-                say!("old  {}", rotation.old_key);
-                say!("     kept as {}", rotation.retired.display());
-                say!("handover {}", rotation.handover.display());
-                say!("next: send it to everyone who trusts the old key; they run `flot trust rotate <file>`");
-            }
+            emit(cli.json, &rotation, render_key_rotate)?;
             Ok(ExitCode::SUCCESS)
         }
         Command::Key {
@@ -2084,67 +1953,26 @@ fn dispatch(
                 KeyAction::Init => Workspace::key_init()?,
                 _ => Workspace::key_show()?,
             };
-            if cli.json {
-                print_json(&info)?;
-            } else {
-                let state = if info.created { "created" } else { "using" };
-                say!("{state} signing key {}", info.path.display());
-                say!("{}", info.public_key);
-            }
+            emit(cli.json, &info, render_key)?;
             Ok(ExitCode::SUCCESS)
         }
         Command::Trust { action } => {
             match action {
                 TrustAction::Add { name, key } => {
                     let entry = workspace.trust_add(name, key)?;
-                    if cli.json {
-                        print_json(&entry)?;
-                    } else {
-                        say!("trusting {} as {}", entry.key, entry.name);
-                    }
+                    emit(cli.json, &entry, render_trust_add)?;
                 }
                 TrustAction::Remove { name_or_key } => {
                     let entry = workspace.trust_remove(name_or_key)?;
-                    if cli.json {
-                        print_json(&entry)?;
-                    } else {
-                        say!("no longer trusting {} ({})", entry.name, entry.key);
-                    }
+                    emit(cli.json, &entry, render_trust_remove)?;
                 }
                 TrustAction::Rotate { handover, revoke } => {
                     let rotation = workspace.trust_rotate(handover, *revoke)?;
-                    if cli.json {
-                        print_json(&rotation)?;
-                    } else {
-                        let state = if rotation.added {
-                            "trusting"
-                        } else {
-                            "already trusting"
-                        };
-                        say!("{state} {} as {}", rotation.to, rotation.name);
-                        if rotation.revoked {
-                            say!("no longer trusting {}", rotation.from);
-                        } else {
-                            say!(
-                                "still trusting {} as {}; `flot trust remove {}` once its runs no longer matter",
-                                rotation.from,
-                                rotation.name,
-                                rotation.from
-                            );
-                        }
-                    }
+                    emit(cli.json, &rotation, render_trust_rotate)?;
                 }
                 TrustAction::List => {
                     let entries = workspace.trust_list()?;
-                    if cli.json {
-                        print_json(&entries)?;
-                    } else if entries.is_empty() {
-                        say!("no trusted signers");
-                    } else {
-                        for entry in &entries {
-                            say!("{:<16} {}", entry.name, entry.key);
-                        }
-                    }
+                    emit(cli.json, &entries, |entries| render_trust_list(entries))?;
                 }
             }
             Ok(ExitCode::SUCCESS)
@@ -2176,43 +2004,7 @@ fn dispatch(
         }
         Command::Flaky { runs } => {
             let report = workspace.flaky(*runs)?;
-            if cli.json {
-                print_json(&report)?;
-            } else {
-                for found in report.steps.iter().chain(&report.claims) {
-                    match &found.claim {
-                        None => say!(
-                            "step `{}` (key {}) on the same inputs:",
-                            found.step_id,
-                            found.key
-                        ),
-                        Some(claim) => say!(
-                            "proof of \"{}\" (step `{}`, key {}) over the same files:",
-                            claim,
-                            found.step_id,
-                            found.key
-                        ),
-                    }
-                    for outcome in &found.outcomes {
-                        let count = outcome.runs.len();
-                        say!(
-                            "  {:<9} in {count} run{}, newest {}",
-                            outcome.outcome,
-                            if count == 1 { "" } else { "s" },
-                            outcome.runs[0]
-                        );
-                    }
-                }
-                for unreadable in &report.unreadable {
-                    say!("unreadable  {unreadable}");
-                }
-                say!(
-                    "{} step(s) and {} proof(s) gave different results on the same inputs in {} run(s) read",
-                    report.steps.len(),
-                    report.claims.len(),
-                    report.runs_read
-                );
-            }
+            emit(cli.json, &report, render_flaky)?;
             Ok(if report.is_empty() {
                 ExitCode::SUCCESS
             } else {
@@ -2221,37 +2013,7 @@ fn dispatch(
         }
         Command::Search { query, runs, limit } => {
             let report = workspace.search(query, *runs, *limit)?;
-            if cli.json {
-                print_json(&report)?;
-            } else {
-                for hit in &report.hits {
-                    let mut place = hit.step_id.clone().unwrap_or_else(|| "(run)".into());
-                    if let Some(candidate) = &hit.candidate {
-                        place.push_str(&format!(" candidate {candidate}"));
-                    }
-                    if let Some(attempt) = hit.attempt {
-                        place.push_str(&format!(" attempt {attempt}"));
-                    }
-                    let source = match hit.line {
-                        Some(line) => format!("{}:{line}", hit.source),
-                        None => hit.source.to_string(),
-                    };
-                    say!("{}  {place}  {source}  {}", hit.run_id, hit.text);
-                }
-                say!(
-                    "{} hit(s) in {} run(s) searched{}",
-                    report.hits.len(),
-                    report.runs_searched,
-                    if report.truncated {
-                        "; more hits exist, raise --limit"
-                    } else {
-                        ""
-                    }
-                );
-                for unreadable in &report.unreadable {
-                    say!("unreadable  {unreadable}");
-                }
-            }
+            emit(cli.json, &report, render_search)?;
             Ok(if report.unreadable.is_empty() {
                 ExitCode::SUCCESS
             } else {
@@ -2260,27 +2022,7 @@ fn dispatch(
         }
         Command::Runs { limit } => {
             let list = workspace.runs(*limit)?;
-            if cli.json {
-                print_json(&list)?;
-            } else if list.runs.is_empty() && list.unreadable.is_empty() {
-                say!("no runs recorded");
-            } else {
-                for run in &list.runs {
-                    say!(
-                        "{}  {:<10} {} steps  claims {}v/{}u/{}r{}",
-                        run.run_id,
-                        run.verdict.label(),
-                        run.steps,
-                        run.claims.verified,
-                        run.claims.unverified,
-                        run.claims.refuted,
-                        if run.imported { "  (imported)" } else { "" }
-                    );
-                }
-                for unreadable in &list.unreadable {
-                    say!("unreadable  {unreadable}");
-                }
-            }
+            emit(cli.json, &list, render_runs)?;
             // A run that cannot be read is a store that no longer holds up.
             Ok(if list.unreadable.is_empty() {
                 ExitCode::SUCCESS

@@ -88,18 +88,27 @@ impl Workspace {
                 Err(error) => check("proofs", Status::Fail, format!("{error:#}")),
             });
             // What a proof reads and the flow does not name is outside the
-            // step key, the guard and the revision check alike.
-            for step in &flow.steps {
-                if step.verify.is_some() && step.verify_inputs.is_empty() {
-                    checks.push(check(
-                        "proof inputs",
-                        Status::Warn,
-                        format!(
-                            "proof of {} reads no declared file, so an edit to it cannot be detected or guarded",
-                            step.id
-                        ),
-                    ));
-                }
+            // step key, the guard and the revision check alike. One line
+            // names every such step: a flow of command-only proofs would
+            // otherwise repeat the warning for each.
+            let bare: Vec<&str> = flow
+                .steps
+                .iter()
+                .filter(|step| step.verify.is_some() && step.verify_inputs.is_empty())
+                .map(|step| step.id.as_str())
+                .collect();
+            if !bare.is_empty() {
+                let (whose, verb, it) = match bare.as_slice() {
+                    [one] => (format!("proof of {one}"), "reads", "it"),
+                    many => (format!("proofs of {}", many.join(", ")), "read", "them"),
+                };
+                checks.push(check(
+                    "proof inputs",
+                    Status::Warn,
+                    format!(
+                        "{whose} {verb} no declared file, so an edit to {it} cannot be detected or guarded"
+                    ),
+                ));
             }
         }
 

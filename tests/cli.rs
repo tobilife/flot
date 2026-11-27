@@ -4089,6 +4089,27 @@ fn doctor_warns_of_a_proof_that_reads_no_declared_file() {
     assert_eq!(stdout.matches("proof inputs").count(), 1, "{stdout}");
 }
 
+#[test]
+fn doctor_names_every_proof_that_reads_no_declared_file_on_one_line() {
+    let home = tempfile::tempdir().unwrap();
+    let project = Project::new(&format!(
+        "{PROVEN}\n[[step]]\nid = \"also\"\nrun = \"true\"\nclaims = [\"it holds\"]\nverify = \"true\"\n"
+    ));
+    let output = Command::new(flot_bin())
+        .args(["doctor"])
+        .current_dir(project.path())
+        .env("HOME", home.path())
+        .env("FLOT_SIGNING_KEY", project.key_path())
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("warn  proof inputs    proofs of write, also read no declared file, so an edit to them cannot be detected or guarded"),
+        "{stdout}"
+    );
+    assert_eq!(stdout.matches("proof inputs").count(), 1, "{stdout}");
+}
+
 /// `flow` with `setsid sh` as this system runs it: macOS ships no `setsid`
 /// command, so perl's POSIX::setsid stands in, by absolute paths because
 /// `env -i` clears PATH.

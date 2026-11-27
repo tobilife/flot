@@ -471,7 +471,14 @@ are also re-read after the step runs: a step that edited its own proof gets
 unverified claims and the proof is not run. A step that edits its declared
 `inputs` is reported too, since its receipt then describes files that no longer
 exist. `flot doctor` warns of a proof that declares no `verify_inputs`
-(`proof of work reads no declared file, so an edit to it cannot be detected or guarded`).
+(`proof of work reads no declared file, so an edit to it cannot be detected or guarded`),
+on one line that names every such step; for this repository's own flow,
+whose proofs are commands over the step's inputs:
+
+```text
+$ flot doctor
+warn  proof inputs    proofs of format, build, lint, unit, cli, rules read no declared file, so an edit to them cannot be detected or guarded
+```
 
 That catches a step that edits its proof while it runs. It does not catch an
 agent that edits the proof before the run, or commits the weaker check: the

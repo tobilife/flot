@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- `flot doctor` names every proof that declares no `verify_inputs` on one
+  `proof inputs` line instead of one line per step.
 - The plugin's skill tells Claude that a step still `cached` after it
   changed a file the step depends on does not name that file in its
   `inputs`, and that the reuse proves nothing about the change.

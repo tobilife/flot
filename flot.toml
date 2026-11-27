@@ -41,11 +41,13 @@ claims = ["clippy reports no warnings on any target"]
 verify = "cargo clippy --all-targets -- -D warnings"
 
 # One proof per claim, so a failing test refutes only the claim it shows.
+# Each step builds its tests and its proof runs them, once: a failing test
+# refutes the claim, and `flot log STEP --proof` prints why.
 # Each step is keyed on the files its tests read; tests/readme.rs checks that
 # every test target is run by one of them.
 [[step]]
 id = "unit"
-run = "cargo test --lib --bins"
+run = "cargo test --no-run --lib --bins"
 needs = ["toolchain", "build"]
 # The MCP server's tests read the plugin's skill.
 inputs = ["src/**/*.rs", "Cargo.toml", "plugins/claude-code/skills/flot/SKILL.md"]
@@ -55,7 +57,7 @@ verify = "cargo test --quiet --lib --bins && cargo test --quiet --doc"
 
 [[step]]
 id = "cli"
-run = "cargo test --test cli --test guard_corpus"
+run = "cargo test --no-run --test cli --test guard_corpus"
 needs = ["toolchain", "build"]
 inputs = [
   "src/**/*.rs", "Cargo.toml", "tests/cli.rs", "tests/guard_corpus.rs",
@@ -66,7 +68,7 @@ verify = "cargo test --quiet --test cli --test guard_corpus"
 
 [[step]]
 id = "rules"
-run = "cargo test --test architecture --test readme"
+run = "cargo test --no-run --test architecture --test readme"
 needs = ["toolchain", "build"]
 # The module rules read src/; the release checks read the files that name the
 # release or the toolchain, and this flow.

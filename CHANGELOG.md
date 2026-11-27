@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- `flot log` without a step names the steps of the latest run instead of
+  only saying a step is required.
 - `flot doctor` names every proof that declares no `verify_inputs` on one
   `proof inputs` line instead of one line per step.
 - The plugin's skill tells Claude that a step still `cached` after it

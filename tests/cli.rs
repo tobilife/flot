@@ -2652,6 +2652,12 @@ run = "for i in $(seq 1 3000); do echo line $i; done; echo oops >&2; exit 1"
     let missing = project.flot(&["log", "quiet"]);
     assert_eq!(missing.code, 3, "stderr:\n{}", missing.stderr);
     missing.has("its steps are noisy");
+    let unnamed = project.flot(&["log"]);
+    assert_eq!(unnamed.code, 3, "stderr:\n{}", unnamed.stderr);
+    assert!(unnamed.stdout.is_empty(), "{}", unnamed.stdout);
+    unnamed.has(&format!(
+        "name the step whose output to print; the steps of run {id} are noisy"
+    ));
 }
 
 #[test]

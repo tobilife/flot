@@ -495,25 +495,35 @@ impl Workspace {
     /// or stderr when `stderr`. Read it with [`Workspace::object`] or
     /// [`Workspace::read_object`]. By default that is the receipt the run
     /// kept; `which` can name another candidate the run executed, an earlier
-    /// attempt, or both.
+    /// attempt, or both. Without a step it names the run's steps.
     pub fn step_output(
         &self,
         run: &str,
-        step: &str,
+        step: Option<&str>,
         which: &OutputOf,
         stderr: bool,
     ) -> Result<String> {
         let manifest = self.store()?.resolve_run(run)?;
-        let Some(entry) = manifest.steps.iter().find(|entry| entry.step_id == step) else {
-            let steps: Vec<&str> = manifest
+        let steps = || {
+            manifest
                 .steps
                 .iter()
                 .map(|entry| entry.step_id.as_str())
-                .collect();
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+        let Some(step) = step else {
+            bail!(
+                "name the step whose output to print; the steps of run {} are {}",
+                manifest.run_id,
+                steps()
+            );
+        };
+        let Some(entry) = manifest.steps.iter().find(|entry| entry.step_id == step) else {
             bail!(
                 "run {} has no step `{step}`; its steps are {}",
                 manifest.run_id,
-                steps.join(", ")
+                steps()
             );
         };
         // The receipts one candidate's attempts left, oldest first.

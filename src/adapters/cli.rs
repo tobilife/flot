@@ -318,7 +318,7 @@ fn dispatch(
                 candidate: candidate.clone(),
                 attempt: attempt.map(|number| number as usize),
             };
-            let digest = workspace.step_output(run, step, &which, *stderr)?;
+            let digest = workspace.step_output(run, step.as_deref(), &which, *stderr)?;
             std::io::stdout().write_all(&workspace.object(&digest)?)?;
             Ok(ExitCode::SUCCESS)
         }

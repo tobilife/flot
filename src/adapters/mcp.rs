@@ -258,7 +258,7 @@ impl Server {
             "flot_step_output" => serde_json::to_value(workspace.read_object(
                 &workspace.step_output(
                     &run_selector(),
-                    &required("step")?,
+                    Some(&required("step")?),
                     &crate::service::OutputOf {
                         candidate: text("candidate"),
                         attempt: count("attempt"),

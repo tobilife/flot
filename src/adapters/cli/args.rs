@@ -139,9 +139,10 @@ pub(super) enum Command {
     Receipt { receipt_id: String },
     /// Write a stored object (complete step output) to stdout.
     Cat { object: String },
-    /// Write the complete output one step of a run printed to stdout.
+    /// Write the complete output one step of a run printed to stdout. Without
+    /// a step, name the steps of the latest run.
     Log {
-        step: String,
+        step: Option<String>,
         #[arg(default_value = "latest")]
         run: String,
         /// The step's stderr instead of its stdout.

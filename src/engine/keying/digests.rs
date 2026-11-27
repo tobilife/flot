@@ -14,11 +14,17 @@
 //!
 //! Only where the file system reports a change time: on Unix. Elsewhere every
 //! file is read each time it is asked for.
+//!
+//! Digests can also be kept on disk for the next run, which reuses them on
+//! the same terms: a kept digest stands only while its file's stat is the one
+//! recorded with it.
 
 use std::collections::HashMap;
 use std::fs::Metadata;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
+
+use serde::{Deserialize, Serialize};
 
 use crate::core::digest;
 
@@ -35,7 +41,7 @@ pub struct Digests {
     reads: std::sync::atomic::AtomicUsize,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct Known {
     stat: Stat,
     digest: String,
@@ -43,7 +49,7 @@ struct Known {
 }
 
 /// What the file system says of a file, without reading it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(not(unix), allow(dead_code))]
 struct Stat {
     device: u64,
@@ -90,6 +96,25 @@ impl Digests {
             fence_in: Some(dir),
             ..Digests::default()
         }
+    }
+
+    /// Digests fenced in `dir`, starting from those [`Digests::keep`] wrote
+    /// to `file`; none when it holds none this flot reads.
+    pub fn kept(file: &Path, dir: PathBuf) -> Self {
+        let known = std::fs::read(file)
+            .ok()
+            .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+            .unwrap_or_default();
+        Digests {
+            known: Mutex::new(known),
+            ..Digests::fenced_in(dir)
+        }
+    }
+
+    /// Write the digests that may be reused to `file`, for [`Digests::kept`].
+    pub fn keep(&self, file: &Path) -> anyhow::Result<()> {
+        let known = self.known.lock().expect("no reader panics");
+        crate::store::write_atomic(file, &serde_json::to_vec(&*known)?)
     }
 
     /// The digest of the file at `path` and whether anyone may execute it.
@@ -219,6 +244,33 @@ mod tests {
         digests.digest(&later).unwrap();
         digests.digest(&later).unwrap();
         assert_eq!(digests.reads(), reads + 2);
+    }
+
+    #[test]
+    fn kept_digests_are_reused_by_the_next_run_on_the_same_terms() {
+        let dir = tempfile::tempdir().unwrap();
+        let (file, other) = (dir.path().join("data.txt"), dir.path().join("other.txt"));
+        std::fs::write(&file, "old\n").unwrap();
+        std::fs::write(&other, "other\n").unwrap();
+        settle(dir.path(), &other);
+        let kept = dir.path().join("kept.json");
+        let first = Digests::kept(&kept, dir.path().join("store"));
+        first.digest(&file).unwrap();
+        first.digest(&other).unwrap();
+        first.keep(&kept).unwrap();
+
+        std::fs::write(&file, "new\n").unwrap();
+        let next = Digests::kept(&kept, dir.path().join("store"));
+        assert_eq!(next.digest(&other).unwrap().0, digest::bytes(b"other\n"));
+        assert_eq!(next.reads(), 0, "an unchanged file is not read again");
+        assert_eq!(next.digest(&file).unwrap().0, digest::bytes(b"new\n"));
+        assert_eq!(next.reads(), 1);
+
+        // What it cannot read is no digest at all.
+        std::fs::write(&kept, "not json").unwrap();
+        let unread = Digests::kept(&kept, dir.path().join("store"));
+        unread.digest(&other).unwrap();
+        assert_eq!(unread.reads(), 1);
     }
 
     #[test]

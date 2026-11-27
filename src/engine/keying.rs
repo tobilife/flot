@@ -594,11 +594,117 @@ fn digest_all(
         .collect()
 }
 
-/// Copy the project into `dest` for one candidate of `step`: every file a
-/// wildcard would reach (so not what git ignores, and never `.git` or the
-/// store), and every file the step names as an input, proof input or output,
-/// ignored or not. Files are copied with their modes; links are followed.
+/// Copy the project into `dest` for one candidate of `step`: the files of
+/// [`workspace_files`], with their modes; links are followed.
 pub fn copy_workspace(root: &Path, dest: &Path, step: &Step) -> Result<()> {
+    std::fs::create_dir_all(dest).with_context(|| format!("cannot create {}", dest.display()))?;
+    for relative in workspace_files(root, step)? {
+        let target = dest.join(&relative);
+        if let Some(parent) = target.parent() {
+            std::fs::create_dir_all(parent)
+                .with_context(|| format!("cannot create {}", parent.display()))?;
+        }
+        copy_new(&root.join(&relative), &target, None)
+            .with_context(|| format!("cannot copy {}", relative.display()))?;
+    }
+    Ok(())
+}
+
+/// Bring `dest`, a copy [`sync_workspace`] made for an earlier proof, to
+/// what [`copy_workspace`] would make of the work now. A file the work holds
+/// otherwise is written again, its modification time `stamp`, and anything
+/// else in the copy (a link included) is removed; the rest is left as it is,
+/// so a build that goes by times rebuilds only what changed. `work` and
+/// `copied` know what the work's and the copy's files held when last read.
+/// Returns how many files were written.
+pub fn sync_workspace(
+    root: &Path,
+    dest: &Path,
+    step: &Step,
+    work: &Digests,
+    copied: &Digests,
+    stamp: std::time::SystemTime,
+) -> Result<usize> {
+    let files = workspace_files(root, step)?;
+    let mut dirs: std::collections::BTreeSet<&Path> = std::collections::BTreeSet::new();
+    for file in &files {
+        dirs.extend(
+            file.ancestors()
+                .skip(1)
+                .filter(|dir| !dir.as_os_str().is_empty()),
+        );
+    }
+    std::fs::create_dir_all(dest).with_context(|| format!("cannot create {}", dest.display()))?;
+    prune_copy(dest, Path::new(""), &files, &dirs)?;
+
+    let pairs = |base: &Path| -> Vec<(String, PathBuf)> {
+        files
+            .iter()
+            .map(|file| (String::new(), base.join(file)))
+            .collect()
+    };
+    let wanted = digest_all(&pairs(root), work);
+    let present = digest_all(&pairs(dest), copied);
+    let mut written = 0;
+    for ((relative, wanted), present) in files.iter().zip(wanted).zip(present) {
+        let wanted = wanted.with_context(|| format!("cannot read {}", relative.display()))?;
+        if present.is_ok_and(|present| present == wanted) {
+            continue;
+        }
+        let target = dest.join(relative);
+        if let Some(parent) = target.parent() {
+            std::fs::create_dir_all(parent)
+                .with_context(|| format!("cannot create {}", parent.display()))?;
+        }
+        if target.symlink_metadata().is_ok() {
+            std::fs::remove_file(&target)
+                .with_context(|| format!("cannot replace {}", relative.display()))?;
+        }
+        copy_new(&root.join(relative), &target, Some(stamp))
+            .with_context(|| format!("cannot copy {}", relative.display()))?;
+        written += 1;
+    }
+    Ok(written)
+}
+
+/// Remove from the copy's directory `dest/at` what the work does not hold
+/// there: links, files not in `files`, directories not in `dirs`.
+fn prune_copy(
+    dest: &Path,
+    at: &Path,
+    files: &std::collections::BTreeSet<PathBuf>,
+    dirs: &std::collections::BTreeSet<&Path>,
+) -> Result<()> {
+    let dir = dest.join(at);
+    let entries =
+        std::fs::read_dir(&dir).with_context(|| format!("cannot list {}", dir.display()))?;
+    for entry in entries {
+        let entry = entry.with_context(|| format!("cannot list {}", dir.display()))?;
+        let relative = at.join(entry.file_name());
+        let kind = entry
+            .file_type()
+            .with_context(|| format!("cannot read {}", entry.path().display()))?;
+        let removed = if kind.is_dir() {
+            if dirs.contains(relative.as_path()) {
+                prune_copy(dest, &relative, files, dirs)?;
+                continue;
+            }
+            std::fs::remove_dir_all(entry.path())
+        } else if kind.is_file() && files.contains(&relative) {
+            continue;
+        } else {
+            std::fs::remove_file(entry.path())
+        };
+        removed.with_context(|| format!("cannot remove {} from the copy", relative.display()))?;
+    }
+    Ok(())
+}
+
+/// The files a copy of the work for `step` holds, relative to `root`: every
+/// file a wildcard would reach (so not what git ignores, and never `.git` or
+/// the store), and every file the step names as an input, proof input or
+/// output, ignored or not.
+fn workspace_files(root: &Path, step: &Step) -> Result<std::collections::BTreeSet<PathBuf>> {
     let mut files: std::collections::BTreeSet<PathBuf> =
         candidates(root, "**/*", Reach::Tracked, None)
             .map_err(|error| anyhow::anyhow!("cannot list the project's files: {error}"))?
@@ -616,30 +722,29 @@ pub fn copy_workspace(root: &Path, dest: &Path, step: &Step) -> Result<()> {
             }
         }
     }
-    std::fs::create_dir_all(dest).with_context(|| format!("cannot create {}", dest.display()))?;
-    for path in files {
-        let relative = path
-            .strip_prefix(root)
-            .with_context(|| format!("{} is outside the project", path.display()))?;
-        let target = dest.join(relative);
-        if let Some(parent) = target.parent() {
-            std::fs::create_dir_all(parent)
-                .with_context(|| format!("cannot create {}", parent.display()))?;
-        }
-        copy_new(&path, &target).with_context(|| format!("cannot copy {}", relative.display()))?;
-    }
-    Ok(())
+    files
+        .into_iter()
+        .map(|path| {
+            path.strip_prefix(root)
+                .map(Path::to_path_buf)
+                .with_context(|| format!("{} is outside the project", path.display()))
+        })
+        .collect()
 }
 
-/// Copy `from` to the new file `to`, written now, with `from`'s permissions.
-/// Not `std::fs::copy`, which on macOS clones the file and on Windows copies
-/// it whole, its modification time with it: a build that goes by times would
-/// take a copied file older than its last build for one it already built.
-fn copy_new(from: &Path, to: &Path) -> std::io::Result<()> {
+/// Copy `from` to the new file `to`, with `from`'s permissions, modified
+/// now or at `stamp`. Not `std::fs::copy`, which on macOS clones the file and
+/// on Windows copies it whole, its modification time with it: a build that
+/// goes by times would take a copied file older than its last build for one
+/// it already built.
+fn copy_new(from: &Path, to: &Path, stamp: Option<std::time::SystemTime>) -> std::io::Result<()> {
     let mut source = std::fs::File::open(from)?;
     let permissions = source.metadata()?.permissions();
     let mut target = std::fs::File::create(to)?;
     std::io::copy(&mut source, &mut target)?;
+    if let Some(stamp) = stamp {
+        target.set_modified(stamp)?;
+    }
     target.set_permissions(permissions)
 }
 
@@ -1242,6 +1347,95 @@ mod tests {
             copied.modified().unwrap() > before,
             "{:?}",
             copied.modified()
+        );
+    }
+
+    #[test]
+    fn the_kept_copy_is_brought_to_the_work_writing_only_what_changed() {
+        let dir = tempfile::tempdir().unwrap();
+        let (root, dest) = (dir.path().join("work"), dir.path().join("copy"));
+        let write = |path: &Path, text: &str| {
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, text).unwrap();
+        };
+        write(&root.join("src/lib.rs"), "lib\n");
+        write(&root.join("src/gone.rs"), "gone\n");
+        write(&root.join("tests/t.rs"), "test\n");
+        let kept = dir.path().join("copy.json");
+        let sync = |stamp: std::time::SystemTime| {
+            let copied = Digests::kept(&kept, dir.path().join("fence"));
+            let work = Digests::fenced_in(dir.path().join("fence"));
+            let written = sync_workspace(&root, &dest, &step(""), &work, &copied, stamp).unwrap();
+            copied.keep(&kept).unwrap();
+            written
+        };
+        let modified = |path: &str| {
+            std::fs::metadata(dest.join(path))
+                .unwrap()
+                .modified()
+                .unwrap()
+        };
+        let first = std::time::SystemTime::now() + std::time::Duration::from_secs(10);
+        assert_eq!(sync(first), 3);
+        assert_eq!(modified("src/lib.rs"), first);
+        assert_eq!(sync(first + std::time::Duration::from_secs(10)), 0);
+        assert_eq!(
+            modified("src/lib.rs"),
+            first,
+            "an unchanged file is left as it is"
+        );
+
+        // The work changes; a proof left the copy otherwise.
+        write(&root.join("src/lib.rs"), "lib, changed\n");
+        std::fs::remove_file(root.join("src/gone.rs")).unwrap();
+        write(&dest.join("tests/t.rs"), "TEST\n");
+        write(&dest.join("junk/out.txt"), "junk\n");
+        write(&dest.join("stray.txt"), "stray\n");
+        #[cfg(unix)]
+        {
+            std::fs::remove_file(dest.join("src/lib.rs")).unwrap();
+            std::os::unix::fs::symlink(root.join("src/lib.rs"), dest.join("src/lib.rs")).unwrap();
+        }
+        let second = first + std::time::Duration::from_secs(20);
+        assert_eq!(sync(second), 2);
+        for (path, text) in [("src/lib.rs", "lib, changed\n"), ("tests/t.rs", "test\n")] {
+            assert_eq!(std::fs::read_to_string(dest.join(path)).unwrap(), text);
+            assert_eq!(modified(path), second, "{path}");
+            assert!(!std::fs::symlink_metadata(dest.join(path))
+                .unwrap()
+                .is_symlink());
+        }
+        for path in ["src/gone.rs", "junk", "stray.txt"] {
+            assert!(!dest.join(path).exists(), "{path}");
+        }
+
+        // Changed in place, its size and modification time as they were.
+        std::fs::write(dest.join("tests/t.rs"), "tset\n").unwrap();
+        std::fs::File::options()
+            .write(true)
+            .open(dest.join("tests/t.rs"))
+            .unwrap()
+            .set_modified(second)
+            .unwrap();
+        assert_eq!(sync(second), 1);
+        assert_eq!(
+            std::fs::read_to_string(dest.join("tests/t.rs")).unwrap(),
+            "test\n"
+        );
+
+        // A file the proof replaced with a directory, and the other way round.
+        std::fs::remove_file(dest.join("tests/t.rs")).unwrap();
+        std::fs::create_dir_all(dest.join("tests/t.rs/inner")).unwrap();
+        std::fs::remove_dir_all(dest.join("src")).unwrap();
+        write(&dest.join("src"), "not a directory\n");
+        assert_eq!(sync(second), 2);
+        assert_eq!(
+            std::fs::read_to_string(dest.join("tests/t.rs")).unwrap(),
+            "test\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(dest.join("src/lib.rs")).unwrap(),
+            "lib, changed\n"
         );
     }
 }

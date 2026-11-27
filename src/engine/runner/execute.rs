@@ -584,7 +584,7 @@ impl Runner<'_> {
         };
         let red = (|| -> Result<Red> {
             let builds = self.store.builds(&|| options.stop.is_set())?;
-            let copy = self.copy(step, &builds, "before")?;
+            let copy = self.copy(step, &builds)?;
             let green = prove(Place::Copy(&copy))?;
             if green.timed_out || green.exit_code != Some(0) {
                 return Ok(Red::CopyFails {
@@ -634,7 +634,7 @@ impl Runner<'_> {
         }
         let ran = (|| -> Result<(Proof, Option<Metrics>, Vec<String>)> {
             let builds = self.store.builds(&|| options.stop.is_set())?;
-            let copy = self.copy(step, &builds, "held")?;
+            let copy = self.copy(step, &builds)?;
             baseline
                 .hold(copy.dir(), &files)
                 .context("cannot put the held files back in the copy")?;
@@ -658,19 +658,27 @@ impl Runner<'_> {
         }
     }
 
-    /// A copy of the work for `step`'s proof, in a directory named for what
-    /// it is for, `kind`. It is made while `builds` is held, so every file in
-    /// it is newer than anything built there before, and a build that goes by
-    /// times builds it whole.
-    fn copy<'b>(&self, step: &Step, builds: &'b Builds, kind: &str) -> Result<WorkCopy<'b>> {
-        let scratch = Scratch::new(self.store.root(), kind)?;
-        let copy = WorkCopy {
-            dir: scratch.path.join("work"),
+    /// The copy of the work, brought to what it is now for `step`'s proof.
+    /// It is kept from the last proof and only what changed since is written,
+    /// stamped past that proof's build, so a build that goes by times
+    /// rebuilds only that.
+    fn copy<'b>(&self, step: &Step, builds: &'b Builds) -> Result<WorkCopy<'b>> {
+        let copied = keying::Digests::kept(&builds.digests(), builds.root().to_path_buf());
+        keying::sync_workspace(
+            &self.root,
+            &builds.work(),
+            step,
+            &self.digests,
+            &copied,
+            builds.stamp(),
+        )
+        .context("cannot copy the work")?;
+        // What the copy's files held only saves reading them next time.
+        let _ = copied.keep(&builds.digests());
+        Ok(WorkCopy {
+            dir: builds.work(),
             builds,
-            _scratch: scratch,
-        };
-        keying::copy_workspace(&self.root, copy.dir(), step).context("cannot copy the work")?;
-        Ok(copy)
+        })
     }
 
     /// Run a proof command in `place`, the flow root or a copy of it, and
@@ -704,11 +712,12 @@ impl Runner<'_> {
                 // CARGO_TARGET_DIR would have it: cargo goes by its sources'
                 // times and paths relative to the package, so the work's
                 // next build would take the copy's binaries for its own.
-                // Every copy builds in one place, held by one at a time, and
-                // without what only a debugger or the next edit of the same
-                // files would use, unless the step asks for it: debug info
-                // is most of a build's size, and a copy is never edited.
-                let builds = copy.builds.dir().to_string_lossy().into_owned();
+                // The copy builds in one place, held by one proof at a time,
+                // and without what only a debugger would use, unless the step
+                // asks for it: debug info is most of a build's size. Nor
+                // incrementally: on flot itself that is 45% more for a second
+                // less after an edit.
+                let builds = copy.builds.target().to_string_lossy().into_owned();
                 for name in ["CARGO_TARGET_DIR", "CARGO_BUILD_BUILD_DIR"] {
                     env.insert(name.into(), builds.clone());
                 }
@@ -1046,12 +1055,11 @@ enum Place<'a> {
     Copy(&'a WorkCopy<'a>),
 }
 
-/// A copy of the work, which exists only while the build its proofs use is
-/// held, and is removed when it is done with.
+/// The copy of the work, which a proof can use only while it holds it and
+/// the build it goes with.
 struct WorkCopy<'b> {
     dir: PathBuf,
     builds: &'b Builds,
-    _scratch: Scratch,
 }
 
 impl WorkCopy<'_> {

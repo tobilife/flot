@@ -3956,6 +3956,42 @@ fn held_project() -> Project {
 }
 
 #[test]
+fn a_kept_copy_builds_again_what_the_work_changed() {
+    // A build that goes by times, as cargo and make do, kept in the copies'
+    // build from one run to the next.
+    let project = held_project();
+    let timed = HELD.replace("verify = 'for", "verify = 'sh build.sh && for");
+    project.write("flot.toml", &timed);
+    project.write(
+        "build.sh",
+        "out=\"${CARGO_TARGET_DIR:-build}/app\"; mkdir -p \"${out%/*}\"\n\
+         [ \"$out\" -nt app.txt ] || cp app.txt \"$out\"\n",
+    );
+    project.write(
+        "tests/check.sh",
+        "grep -q fixed \"${CARGO_TARGET_DIR:-build}/app\" || { echo not fixed; exit 1; }\n",
+    );
+    project.write(".gitignore", ".flot\n.test-keys/\nbuild/\n");
+    commit(project.path(), "build by times");
+
+    // Fixed, with a test of its own that is as strict: verified.
+    project.write("app.txt", "fixed\n");
+    project.write(
+        "tests/check.sh",
+        "grep -q fixed \"${CARGO_TARGET_DIR:-build}/app\" || exit 1 # mine\n",
+    );
+    project.flot(&["run"]).ok().has("passed");
+
+    // Broken again, with the test loosened: the copy must build the broken
+    // file, not keep what it built from the fixed one.
+    project.write("app.txt", "broken\n");
+    project.write("tests/check.sh", "true\n");
+    let run = project.flot(&["run", "--force"]);
+    assert_eq!(run.code, 2, "{}", run.stdout);
+    project.flot(&["log", "s", "--held"]).ok().has("not fixed");
+}
+
+#[test]
 fn a_proof_that_passes_only_with_tests_the_work_changed_proves_nothing() {
     // A weakened test passes here and fails as the revision has it.
     let weakened = held_project();
@@ -3987,12 +4023,12 @@ fn a_proof_that_passes_only_with_tests_the_work_changed_proves_nothing() {
     // short name on Windows.
     held.ok()
         .has("app.txt is not fixed")
-        .has("/.flot/builds/copies and ")
+        .has("/.flot/builds/target and ")
         .has("debug 0 0 incremental 1");
     assert!(
         held.stdout
             .lines()
-            .any(|line| line.starts_with("builds in ") && line.ends_with("/.flot/builds/copies")),
+            .any(|line| line.starts_with("builds in ") && line.ends_with("/.flot/builds/target")),
         "{}",
         held.stdout
     );

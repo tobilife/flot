@@ -747,20 +747,23 @@ to other files keeps the verdict and one to the tests runs the proof again;
 `flot verify` treats a step whose `held` patterns changed, or a verified
 claim not held to the revision's files, as a proof that differs.
 
-Proofs in copies build Rust in one directory of their own,
-`.flot/builds/copies` (`CARGO_TARGET_DIR` and `CARGO_BUILD_BUILD_DIR` are set
-to it, whatever the step's environment says): sharing the work's build
-directory would leave the work's next `cargo` run with the binaries built
-from the copy. One proof at a time holds it, in this run or another, from
-making its copy to its last command, so every file of a copy is newer than
-what was built there before and dependencies are built once for every step.
-It is built without debug info and incremental compilation
-(`CARGO_PROFILE_DEV_DEBUG`, `CARGO_PROFILE_TEST_DEBUG` and
-`CARGO_INCREMENTAL` are `0` unless the step sets them), which only a debugger
-or a rebuild of the same copy would use. On flot itself, with `rules` and
-`cli` held, the copies' builds take 260 MB where one directory per step took
-1,621 MB. `flot run` removes it once no proof has used it for seven
-days, and `flot gc` at once; the next copy builds again.
+Proofs on copies of the work run in one copy, kept in `.flot/builds/work`,
+and build Rust in one directory of their own, `.flot/builds/target`
+(`CARGO_TARGET_DIR` and `CARGO_BUILD_BUILD_DIR` are set to it, whatever the
+step's environment says): sharing the work's build directory would leave the
+work's next `cargo` run with the binaries built from the copy. One proof at
+a time holds them, in this run or another, from bringing the copy up to date
+to its last command. Bringing it up to date writes only the files the work
+holds otherwise, with a modification time past the last proof's build, so a
+build that goes by times rebuilds what changed and nothing else; anything
+else in the copy, such as what an earlier proof wrote or a file it put back,
+is removed or written again. The build has no debug info and is not
+incremental (`CARGO_PROFILE_DEV_DEBUG`, `CARGO_PROFILE_TEST_DEBUG` and
+`CARGO_INCREMENTAL` are `0` unless the step sets them). On flot itself, with
+`rules` and `cli` held, it takes 262 MB where a build directory per step
+took 1,621 MB. `flot run` removes the copy and its build once no proof has
+used them for seven days, and `flot gc` at once; the next proof copies and
+builds again.
 
 ### Refusing the edit
 

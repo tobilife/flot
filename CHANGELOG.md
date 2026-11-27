@@ -2,23 +2,27 @@
 
 ## Unreleased
 
-- Building flot needs Rust 1.89 (it was 1.88): the store and the copies'
-  build are locked with the standard library's file locks instead of calls
-  to the system through `unsafe` code.
-
-- Proofs on copies of the work, for `fails_before` or `held`, build Rust in
-  one directory, `.flot/builds/copies`, held by one proof at a time, instead
-  of one per step, and without debug info or incremental compilation unless
-  the step's environment asks for them. On flot itself, with two steps held,
-  the copies' builds take 260 MB instead of 1,621 MB, and a run after an
-  edit to the tests went from 69 to 58 s (medians of four). `flot run` removes it once no proof has used it for seven days, and
-  removes the per-step directories earlier versions made.
+- Proofs on copies of the work, for `fails_before` or `held`, run in one
+  copy kept in `.flot/builds/work` and build Rust in `.flot/builds/target`,
+  held by one proof at a time, instead of a new copy each time and a build
+  directory per step. Only the files that changed since the last proof are
+  written again, stamped past its build, so `cargo` rebuilds only them;
+  anything else a proof left in the copy is removed. The copy builds without
+  debug info or incremental compilation unless the step's environment asks
+  for them. On flot itself, with two steps held and a test edited each run
+  (medians of four, versions run in turn): the builds take 262 MB instead
+  of 1,621 MB, a run went from 69 to 58 s with one build directory, and
+  from 56 to 46 s with the kept copy. `flot run` removes the copy and its
+  build once no proof has used them for seven days, and the per-step
+  directories earlier versions made.
 - A copy of the work is written when it is made. On Windows, and on macOS,
   where a copy is a clone, a copied file kept its modification time, so
   `cargo` in a copy could take a file older than its last build there for
   the version it built, and prove what an earlier copy held: the revision's
   files a `fails_before` check put back, or the held files.
-
+- Building flot needs Rust 1.89 (it was 1.88): the store and the copies'
+  build are locked with the standard library's file locks instead of calls
+  to the system through `unsafe` code.
 - `flot guard` names flot's own binary as the binary that enforces the
   guard wherever it is. A binary built by a proof on a copy of the work sits
   in the store, and was named as evidence in the store instead.

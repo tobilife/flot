@@ -111,18 +111,44 @@ pub struct StoreLock {
     _file: fs::File,
 }
 
-/// The directory every proof on a copy of the work builds in, held by one
-/// proof at a time, in this flot or another: one build for all of them, so
-/// dependencies are built and kept once. Released when dropped, which marks
-/// when it was last used.
+/// The copy of the work proofs run in and the directory they build in, held
+/// by one proof at a time, in this flot or another: one copy and one build
+/// for all of them, kept from one proof to the next, so a proof rebuilds
+/// only what changed since the last. Released when dropped, which marks when
+/// they were last used.
 pub struct Builds {
-    dir: PathBuf,
+    root: PathBuf,
     file: fs::File,
+    /// When the last holder released them.
+    released: std::time::SystemTime,
 }
 
 impl Builds {
-    pub fn dir(&self) -> &Path {
-        &self.dir
+    /// Where the proofs build.
+    pub fn target(&self) -> PathBuf {
+        self.root.join("target")
+    }
+
+    /// The copy of the work.
+    pub fn work(&self) -> PathBuf {
+        self.root.join("work")
+    }
+
+    /// What the copy's files held when last read, for the next proof.
+    pub fn digests(&self) -> PathBuf {
+        self.root.join("work.json")
+    }
+
+    /// Where to stamp the copy's digests' fence: on the copy's file system.
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
+
+    /// The time to give a file written in the copy: past everything the last
+    /// holder built, by more than the coarsest file system's two seconds, so
+    /// a build that goes by times takes it as changed.
+    pub fn stamp(&self) -> std::time::SystemTime {
+        std::time::SystemTime::now().max(self.released + std::time::Duration::from_secs(2))
     }
 }
 
@@ -219,16 +245,21 @@ impl Store {
             }
             std::thread::sleep(std::time::Duration::from_millis(50));
         }
+        let released = file
+            .metadata()
+            .and_then(|meta| meta.modified())
+            .with_context(|| format!("cannot read {}", root.join("lock").display()))?;
         Ok(Builds {
-            dir: root.join("copies"),
+            root,
             file,
+            released,
         })
     }
 
     /// Remove builds no proof will use: those of another layout, and the
-    /// copies' build once no proof has used it for [`BUILDS_KEPT`]. Nothing is
-    /// removed while a proof holds it. A build that cannot be removed now is
-    /// tried again next time.
+    /// copy and its build once no proof has used them for [`BUILDS_KEPT`].
+    /// Nothing is removed while a proof holds them. What cannot be removed now
+    /// is tried again next time.
     pub fn prune_builds(&self) {
         let root = self.root.join(BUILDS);
         let Ok(entries) = fs::read_dir(&root) else {
@@ -246,7 +277,8 @@ impl Store {
             .is_ok_and(|used| used.elapsed().is_ok_and(|age| age > BUILDS_KEPT));
         for entry in entries.flatten() {
             let name = entry.file_name();
-            if name == "lock" || (name == "copies" && !stale) {
+            let kept = ["target", "work", "work.json", "fence"];
+            if name == "lock" || (!stale && kept.iter().any(|kept| name == *kept)) {
                 continue;
             }
             let path = entry.path();
@@ -923,7 +955,7 @@ fn try_lock(file: &fs::File) -> std::io::Result<bool> {
     }
 }
 
-fn write_atomic(path: &Path, data: &[u8]) -> Result<()> {
+pub(crate) fn write_atomic(path: &Path, data: &[u8]) -> Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
@@ -1137,7 +1169,10 @@ mod tests {
     fn one_proof_at_a_time_builds_in_the_copies_build() {
         let (_dir, store) = store();
         let held = store.builds(&|| false).unwrap();
-        assert_eq!(held.dir(), store.root().join("builds/copies"));
+        assert_eq!(held.target(), store.root().join("builds/target"));
+        assert_eq!(held.work(), store.root().join("builds/work"));
+        // Kept with the copy, and removed with it.
+        assert_eq!(held.digests(), store.root().join("builds/work.json"));
         // Another holder, in this process or another, waits until told to stop.
         let error = store.builds(&|| true).err().unwrap().to_string();
         assert!(error.contains("another proof built"), "{error}");
@@ -1166,31 +1201,67 @@ mod tests {
                 )
                 .unwrap();
         };
+        let kept = ["target/debug", "work/src", "work.json", "fence"];
+        let all_there = |there: bool| {
+            for path in kept {
+                assert_eq!(builds.join(path).exists(), there, "{path}");
+            }
+        };
         drop(store.builds(&|| false).unwrap());
-        fs::create_dir_all(builds.join("copies/debug")).unwrap();
+        for path in kept {
+            if path.contains('/') {
+                fs::create_dir_all(builds.join(path)).unwrap();
+            } else {
+                fs::write(builds.join(path), "x").unwrap();
+            }
+        }
         fs::create_dir_all(builds.join("cli/debug")).unwrap();
 
         // Another layout's build goes at once; one used last week stays.
         used(6);
         store.prune_builds();
         assert!(!builds.join("cli").exists());
-        assert!(builds.join("copies/debug").exists());
+        all_there(true);
 
         // Held by a proof, even an old one stays.
         used(8);
         let held = store.builds(&|| false).unwrap();
         used(8);
         store.prune_builds();
-        assert!(builds.join("copies/debug").exists());
+        all_there(true);
         drop(held);
 
         // Released, it was used just now.
         store.prune_builds();
-        assert!(builds.join("copies/debug").exists());
+        all_there(true);
         used(8);
         store.prune_builds();
-        assert!(!builds.join("copies").exists());
+        all_there(false);
         assert!(builds.join("lock").exists());
+    }
+
+    #[test]
+    fn a_file_written_in_the_copy_is_newer_than_the_last_build() {
+        let (_dir, store) = store();
+        drop(store.builds(&|| false).unwrap());
+        let released = fs::metadata(store.root().join("builds/lock"))
+            .unwrap()
+            .modified()
+            .unwrap();
+        let builds = store.builds(&|| false).unwrap();
+        assert!(builds.stamp() >= released + std::time::Duration::from_secs(2));
+        // Long after, it is now.
+        let lock = store.root().join("builds/lock");
+        drop(builds);
+        fs::File::options()
+            .write(true)
+            .open(&lock)
+            .unwrap()
+            .set_modified(std::time::SystemTime::now() - std::time::Duration::from_secs(60))
+            .unwrap();
+        let before = std::time::SystemTime::now();
+        let stamp = store.builds(&|| false).unwrap().stamp();
+        assert!(stamp >= before && stamp < before + std::time::Duration::from_secs(2));
     }
 
     #[test]

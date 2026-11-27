@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- A copy of the work is written when it is made. On Windows, and on macOS,
+  where a copy is a clone, a copied file kept its modification time, so
+  `cargo` in a copy could take a file older than its last build there for
+  the version it built, and prove what an earlier copy held: the revision's
+  files a `fails_before` check put back, or the held files.
+
 - `flot guard` names flot's own binary as the binary that enforces the
   guard wherever it is. A binary built by a proof on a copy of the work sits
   in the store, and was named as evidence in the store instead.

@@ -626,10 +626,21 @@ pub fn copy_workspace(root: &Path, dest: &Path, step: &Step) -> Result<()> {
             std::fs::create_dir_all(parent)
                 .with_context(|| format!("cannot create {}", parent.display()))?;
         }
-        std::fs::copy(&path, &target)
-            .with_context(|| format!("cannot copy {}", relative.display()))?;
+        copy_new(&path, &target).with_context(|| format!("cannot copy {}", relative.display()))?;
     }
     Ok(())
+}
+
+/// Copy `from` to the new file `to`, written now, with `from`'s permissions.
+/// Not `std::fs::copy`, which on macOS clones the file and on Windows copies
+/// it whole, its modification time with it: a build that goes by times would
+/// take a copied file older than its last build for one it already built.
+fn copy_new(from: &Path, to: &Path) -> std::io::Result<()> {
+    let mut source = std::fs::File::open(from)?;
+    let permissions = source.metadata()?.permissions();
+    let mut target = std::fs::File::create(to)?;
+    std::io::copy(&mut source, &mut target)?;
+    target.set_permissions(permissions)
 }
 
 /// A file's bytes and what the file system says of it, both from one open
@@ -1197,6 +1208,40 @@ mod tests {
         assert_eq!(
             matched(root, "**/*.rs", Reach::Everything),
             ["src/lib.rs", "target/debug/gen.rs"]
+        );
+    }
+
+    #[test]
+    fn a_copy_of_the_work_is_written_when_it_is_made() {
+        let dir = tempfile::tempdir().unwrap();
+        let (root, dest) = (dir.path().join("work"), dir.path().join("copy"));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("old.rs"), "fn old() {}").unwrap();
+        let long_ago =
+            std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_000_000_000);
+        std::fs::File::options()
+            .write(true)
+            .open(root.join("old.rs"))
+            .unwrap()
+            .set_modified(long_ago)
+            .unwrap();
+        let mut readonly = std::fs::metadata(root.join("old.rs"))
+            .unwrap()
+            .permissions();
+        readonly.set_readonly(true);
+        std::fs::set_permissions(root.join("old.rs"), readonly).unwrap();
+
+        let before = std::time::SystemTime::now() - std::time::Duration::from_secs(5);
+        copy_workspace(&root, &dest, &step("")).unwrap();
+
+        let copied = std::fs::metadata(dest.join("old.rs")).unwrap();
+        assert_eq!(std::fs::read(dest.join("old.rs")).unwrap(), b"fn old() {}");
+        assert!(copied.permissions().readonly());
+        // A build that goes by times must see it as newer than anything it built.
+        assert!(
+            copied.modified().unwrap() > before,
+            "{:?}",
+            copied.modified()
         );
     }
 }

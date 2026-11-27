@@ -15,6 +15,13 @@
   different result: exit 0 -> 1, stderr`). In `--json` and over MCP, as
   `reasons`. A receipt that is gone or altered tells nothing, and the step
   says so.
+- A run never sorts behind the one before it. A run id starts with the
+  start time, and `latest~N`, `flot runs`, `flot flaky` and `flot diff`
+  count back in that order, but `latest` names the run recorded last; when
+  this host's clock was set back between two runs, the two disagreed. A test
+  failed this way once in this repository's self-check on WSL2: its three
+  runs' ids put the second before the first, by about 0.7 s. Such a run's start is now recorded 1 ms after the newest
+  run's, with a limitation saying so.
 
 ## 0.2.9
 

@@ -92,10 +92,13 @@ impl Runner<'_> {
     /// receipts.
     pub(super) fn report(
         &self,
-        assembly: Assembly,
+        mut assembly: Assembly,
         started_at_ms: u64,
         started: Instant,
     ) -> Result<RunReport> {
+        let (started_at_ms, note) =
+            after_the_run_before(started_at_ms, self.store.newest_local_start_ms()?);
+        assembly.limitations.extend(note);
         let pairs: Vec<(String, String)> = assembly
             .steps
             .iter()
@@ -485,5 +488,40 @@ fn outcome(receipt: &Receipt) -> String {
         "unverified".into()
     } else {
         "held".into()
+    }
+}
+
+/// When a run starts, kept after the newest run this host recorded. Run ids
+/// begin with the start, and `latest~N` and the run list count back in that
+/// order, so a clock set back since then would otherwise put this run behind
+/// one recorded before it while `latest` still names this one. The start is
+/// then recorded 1 ms after that run's, and the run says so.
+fn after_the_run_before(now_ms: u64, previous_start_ms: Option<u64>) -> (u64, Option<String>) {
+    match previous_start_ms {
+        Some(previous) if now_ms <= previous => (
+            previous + 1,
+            Some(format!(
+                "this host's clock read no later than the start of the newest run recorded here ({} ms earlier); the start is recorded 1 ms after it, so runs stay in the order they were recorded",
+                previous - now_ms
+            )),
+        ),
+        _ => (now_ms, None),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::after_the_run_before;
+
+    #[test]
+    fn a_run_starts_after_the_one_recorded_before_it() {
+        assert_eq!(after_the_run_before(500, None), (500, None));
+        assert_eq!(after_the_run_before(500, Some(499)), (500, None));
+        let (start, note) = after_the_run_before(500, Some(500));
+        assert_eq!(start, 501);
+        assert!(note.unwrap().contains("(0 ms earlier)"));
+        let (start, note) = after_the_run_before(300, Some(1000));
+        assert_eq!(start, 1001);
+        assert!(note.unwrap().contains("(700 ms earlier)"));
     }
 }

@@ -35,6 +35,14 @@
 the previous one), a full run id, or a prefix of at least four characters of a
 run id or of the root digest it ends with.
 
+A run id starts with the millisecond the run started, and runs are counted
+back in that order. When this host's clock reads no later than the start of
+the newest run executed here, as after the clock was set back, the run's start
+is recorded 1 ms after that one's and the run lists the limitation `this
+host's clock read no later than the start of the newest run recorded here`, so
+`latest~1` is still the run before. Imported runs keep their own host's clock
+and move nothing.
+
 `flot run` prints one line per step. A step that executed also shows the first
 and last lines of its output (the middle is marked as omitted when it exceeds
 `max_inline_bytes`) and, when something was left out, the `flot log` command

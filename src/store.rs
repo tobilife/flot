@@ -568,6 +568,16 @@ impl Store {
             .is_ok_and(|path| path.exists())
     }
 
+    /// When the newest run this host executed started, read off its id: the
+    /// run that `latest~N` and the run list count back from.
+    pub fn newest_local_start_ms(&self) -> Result<Option<u64>> {
+        Ok(self
+            .list_runs()?
+            .iter()
+            .filter(|id| !self.is_imported(id))
+            .find_map(|id| id.get(..13)?.parse().ok()))
+    }
+
     pub fn list_runs(&self) -> Result<Vec<String>> {
         let mut ids = Vec::new();
         let dir = self.root.join("runs");

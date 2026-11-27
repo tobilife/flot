@@ -2288,6 +2288,54 @@ fn a_tampered_receipt_is_refused_by_name_not_printed() {
 }
 
 #[test]
+fn a_clock_set_back_does_not_put_a_run_behind_the_one_before_it() {
+    let project = Project::new(TWO_STEPS);
+    project.flot(&["run"]).ok();
+    // A run an hour ahead of this clock, as a clock set back leaves one.
+    let store = project.path().join(".flot");
+    let latest = std::fs::read_to_string(store.join("latest")).unwrap();
+    let runs = store.join("runs");
+    let mut manifest: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(runs.join(format!("{latest}.json"))).unwrap(),
+    )
+    .unwrap();
+    let ahead = manifest["started_at_ms"].as_u64().unwrap() + 3_600_000;
+    let root = latest.split_once('-').unwrap().1;
+    let id = format!("{ahead:013}-{root}");
+    manifest["started_at_ms"] = ahead.into();
+    manifest["run_id"] = id.clone().into();
+    std::fs::write(runs.join(format!("{id}.json")), manifest.to_string()).unwrap();
+
+    project
+        .flot(&["run", "--force"])
+        .ok()
+        .has("this host's clock read no later than the start of the newest run recorded here");
+    let next = format!("{:013}-{root}", ahead + 1);
+    assert_eq!(run_id(&project), next);
+    let shown = project.flot(&["show", "--json"]).json();
+    assert_eq!(shown["run_id"], next.as_str());
+    assert_eq!(
+        project.flot(&["show", "--json", "latest~1"]).json()["run_id"],
+        id.as_str()
+    );
+    project.flot(&["verify"]).ok();
+
+    // Another host's clock is its own: a run imported from ahead of this
+    // clock moves nothing here.
+    let elsewhere = Project::new(TWO_STEPS);
+    elsewhere.flot(&["run"]).ok();
+    let runs = elsewhere.path().join(".flot/runs");
+    std::fs::write(runs.join(format!("{id}.json")), manifest.to_string()).unwrap();
+    let imported = elsewhere.path().join(".flot/imported");
+    std::fs::create_dir_all(&imported).unwrap();
+    std::fs::write(imported.join(format!("{id}.json")), "").unwrap();
+    elsewhere
+        .flot(&["run", "--force"])
+        .ok()
+        .lacks("this host's clock");
+}
+
+#[test]
 fn zero_jobs_is_refused() {
     let project = Project::new(TWO_STEPS);
     assert_eq!(project.flot(&["run", "-j", "0"]).code, 3);

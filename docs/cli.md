@@ -10,7 +10,7 @@
 | `flot verify [RUN] [--proofs-from REV] [--markdown]` | re-authenticate a run from the store alone; with a revision (or the flow's `proofs_from`), also check its proofs are as they are there; `--markdown` prints the check as a report ([in CI](ci.md)) |
 | `flot doctor` | check what the evidence relies on here: the flow parses, `proofs_from` is set and resolves, every proof declares the files it reads, git ignores the store, the signing key and trust list, no flaky step or proof in recent runs, that a requested sandbox can be enforced (on Linux, a `write` policy needs Landlock ABI 3), and that no Claude Code settings switch hooks off; exits 1 if a check fails. It changes nothing, except that where a store exists it creates this host's secret (`host.secret`, beside the signing key) if there is none |
 | `flot guard [PATH...] [--command CMD [--powershell]] [--hook] [--replay]` | name the paths whose change would touch the proofs or decide whether they are checked (CI workflows, git hooks, Claude Code settings and plugins, the flot binary), or a directory holding one, and exit 2 if any; `--command` reads a shell command line (a PowerShell one with `--powershell`) for the files it writes, the whole-tree git commands git says would change one, downloaded code piped into an interpreter and the `flot` commands that change whose evidence counts; `--hook` answers a Claude Code `PreToolUse` payload for any tool, denies a call it cannot judge where a flow is, and notes a denial in the store for the next run to record; `--replay` judges every call in Claude Code transcripts (the PATHS, by default `~/.claude/projects`) as the hook would now and lists what it would refuse ([refusing the edit](flows.md#refusing-the-edit)) |
-| `flot diff [LEFT] [RIGHT]` | step-by-step comparison by receipt identity; by default `latest~1` against `latest` |
+| `flot diff [LEFT] [RIGHT]` | step-by-step comparison by receipt identity; by default `latest~1` against `latest`; under each changed step, why, read from its two receipts ([diff](#diff)) |
 | `flot receipt ID` | one receipt as JSON (id prefix accepted) |
 | `flot log STEP [RUN] [--stderr] [--candidate NAME] [--attempt N]` | complete output one step of a run printed; by default the receipt the run kept, else another candidate it ran or an earlier attempt |
 | `flot cat DIGEST` | one stored object, byte-exact |
@@ -115,6 +115,40 @@ A step that may take more attempts says which one each line is
 (`start flaky attempt 2/2`), a step with candidates which candidate
 (`start pick candidate fast`), and a step that was not run ends `done ship
 cancelled`, with no time.
+
+## Diff
+
+`flot diff` names each step whose receipt changed, and under it why, read
+from the two receipts. A different step key means the work was not the same:
+`command changed`, `inputs:` or `proof inputs:` with the files that changed,
+were added or were removed (five named, the rest counted), `dependencies:`
+with the steps whose receipts it built on changed, `derived by flot A -> B`,
+`claims or their proof command changed`, or, when none of those, the rest of
+the step's definition (its env, outputs or settings). The same key with a
+different receipt is `same key, different result:` and what differs: the exit
+code, stdout, stderr, outputs, other files it changed, claim results. A
+receipt that is gone from the store, or whose body no longer matches its id,
+tells nothing, and the step says so. In `--json` each step has `reasons`.
+
+Real output, comparing this repository's self-check before and after one
+file changed (exit 2, as for any difference):
+
+```text
+$ flot diff 1795738845615-033e13c9ff66 1795738950533-a7b9115bcf58
+left  1795738845615-033e13c9ff66  passed
+right 1795738950533-a7b9115bcf58  passed
+  build                receipt changed          21c60ee3af20 -> 3602298f68a4
+        inputs: src/core/receipt/check.rs changed
+        dependencies: format
+  format               receipt changed          df655231df15 -> 7ffde95c0a58
+        inputs: src/core/receipt/check.rs changed
+  lint                 receipt changed          d20bcda1c198 -> 0b2171b1ee65
+        inputs: src/core/receipt/check.rs changed
+        dependencies: build
+  test                 receipt changed          f64bf779de3b -> 69dd690f164c
+        inputs: src/core/receipt/check.rs changed
+        dependencies: build
+```
 
 ## Selecting a flow
 

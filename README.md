@@ -81,7 +81,8 @@ It pays off when:
   report in the job summary and on the pull request; as a required check it
   blocks the merge.
 - **You want to know what changed between two runs.** `flot diff` names each
-  step whose receipt or status changed, and `flot search` finds the runs whose
+  step whose receipt or status changed and why (the files it read, its
+  dependencies, its command, or the same work coming out otherwise), and `flot search` finds the runs whose
   output, claims or limitations mention a message, newest first.
 
 It is not the tool when:

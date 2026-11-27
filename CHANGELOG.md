@@ -8,6 +8,13 @@
   running it decides`, and lists the probes it rests on in `assumes` in
   `--json` and over MCP. Before, a plan for this repository with nothing
   changed said all five steps would run; the run then reused four.
+- `flot diff` says why each changed step changed, read from its two receipts:
+  the files it or its proof read (`inputs: src/a.rs changed, b.rs added`),
+  the dependencies whose receipts changed, its command, its claims, the flot
+  that derived it, or, with the same key, what came out otherwise (`same key,
+  different result: exit 0 -> 1, stderr`). In `--json` and over MCP, as
+  `reasons`. A receipt that is gone or altered tells nothing, and the step
+  says so.
 
 ## 0.2.9
 

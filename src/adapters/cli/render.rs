@@ -686,6 +686,9 @@ pub(super) fn render_diff(diff: &RunDiff) {
             step.left.clone().unwrap_or_else(|| "-".into()),
             step.right.clone().unwrap_or_else(|| "-".into())
         );
+        for reason in &step.reasons {
+            say!("        {reason}");
+        }
     }
 }
 

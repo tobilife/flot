@@ -566,7 +566,7 @@ fn tool_catalog() -> Vec<Value> {
         tool(
             "flot_diff",
             Effect::Reads,
-            "Compare two runs by receipt identity. Identical receipts mean the same work over the same inputs reached the same verdict.",
+            "Compare two runs by receipt identity. Identical receipts mean the same work over the same inputs reached the same verdict. Each changed step lists in `reasons` why, read from its two receipts: the files it or its proof read, its dependencies, its command, its claims, or, with the same key, the same work coming out otherwise.",
             json!({
                 "left": { "type": "string", "description": "Run selector; defaults to latest~1, the run before the latest." },
                 "right": { "type": "string", "description": "Run selector; defaults to latest." }

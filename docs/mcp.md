@@ -121,7 +121,7 @@ from the shell.
 | `flot_run` | execute and record receipts (`only`, `force`, `jobs`, `max_cost_usd`, which can only [lower the flow's own](agents.md#spend-and-the-cost-ceiling)); `result` says what to act on |
 | `flot_show` | steps, claim verdicts and limitations of a run |
 | `flot_verify` | re-authenticate a run from the store; `result` is what `flot verify` exits with |
-| `flot_diff` | compare two runs by receipt identity; `left` defaults to `latest~1`, `right` to `latest` |
+| `flot_diff` | compare two runs by receipt identity; `left` defaults to `latest~1`, `right` to `latest`; each changed step says why in `reasons` |
 | `flot_receipt` | one receipt, by id or hex prefix |
 | `flot_step_output` | complete output of one step of a run, by step id (`step`, `run`, `candidate`, `attempt`, `stderr`, `max_bytes`) |
 | `flot_read_object` | one stored object by digest, with `max_bytes` |

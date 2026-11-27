@@ -465,10 +465,17 @@ impl Workspace {
 
     pub fn diff(&self, left: &str, right: &str) -> Result<RunDiff> {
         let store = self.store()?;
-        Ok(compare::diff(
-            &store.resolve_run(left)?,
-            &store.resolve_run(right)?,
-        ))
+        let (left, right) = (store.resolve_run(left)?, store.resolve_run(right)?);
+        // Only a receipt whose body still hashes to its id can say why.
+        let receipts = left
+            .steps
+            .iter()
+            .chain(&right.steps)
+            .filter_map(|step| store.load_receipt(&step.receipt_id).ok())
+            .filter(Receipt::is_authentic)
+            .map(|receipt| (receipt.receipt_id.clone(), receipt))
+            .collect();
+        Ok(compare::diff(&left, &right, &receipts))
     }
 
     /// A receipt by full id or unambiguous hex prefix. One whose body no

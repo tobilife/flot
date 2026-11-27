@@ -362,7 +362,25 @@ fn diff_reports_identical_runs_and_real_changes() {
     project.flot(&["run"]).ok();
     let changed = project.flot(&["diff", &first_id, "latest"]);
     assert_eq!(changed.code, 2);
-    changed.has("receipt changed").has("write");
+    changed
+        .has("receipt changed")
+        .has("write")
+        .has("        inputs: seed.txt changed\n");
+    let changed = project.flot(&["diff", &first_id, "latest", "--json"]);
+    assert_eq!(
+        changed.json()["steps"][0]["reasons"],
+        serde_json::json!(["inputs: seed.txt changed"])
+    );
+
+    // An altered receipt says nothing about why.
+    let path = receipt_file(&project, 0);
+    let text = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(&path, text.replacen("echo flot", "echo forged", 1)).unwrap();
+    let altered = project.flot(&["diff", &first_id, "latest"]);
+    assert_eq!(altered.code, 2);
+    altered
+        .has("a receipt is not in this store, so why cannot be told")
+        .lacks("command changed");
 }
 
 #[test]

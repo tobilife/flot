@@ -17,6 +17,15 @@
   directory share one walk of it, and git is asked for the executable bits
   it records only when a scan found files: the same repository on `/mnt/d`
   then takes 4.4 s, and this repository's own check 0.8 s.
+- Within one run, a file is read again only when the file system says it
+  changed since it was read: its size, inode, mode, modification time or
+  change time differ, and a rewrite that keeps the size and puts the
+  modification time back still moves the change time. A file changed after
+  the run began is read every time. On Linux and macOS; `flot plan` reads
+  every file. Measured with release builds, medians of the run's own time,
+  for a run that reuses every step: the 2,320-file repository on `/mnt/d`
+  from 4.32 to 3.51 s, on ext4 from 102 to 82 ms, and this repository's own
+  check from 758 to 693 ms.
 - `flot log` without a step names the steps of the latest run instead of
   only saying a step is required.
 - `flot doctor` names every proof that declares no `verify_inputs` on one

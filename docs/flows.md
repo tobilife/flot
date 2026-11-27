@@ -55,6 +55,18 @@ never matched one computed in CI, so a run signed there could not be reused
 there. A file git does not track, and an output, keep the bit the file system
 shows.
 
+Within one `flot run` a file is read once, and its digest is reused while the
+file system says the file has not changed since: the same device, inode,
+size, mode, modification time and change time. Every write moves the change
+time, even one that keeps the size and puts the modification time back, so
+the file is read again. A file changed after the run's first read is read
+every time, because a second change within one tick of the file
+system's clock would look the same; git treats files as new as its index the
+same way. This holds on Linux and macOS. On Windows, and in `flot plan`,
+every file is read each time it is needed. A program that sets a file's
+change time back by hand, as Windows lets programs do on its drives, can
+hide an edit from the rest of that run.
+
 ### Files a step changed
 
 A step also answers for the files it changes. flot reads the project before

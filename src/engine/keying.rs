@@ -17,6 +17,9 @@ use crate::core::digest;
 use crate::core::flow::{Step, SCHEMA_VERSION};
 use crate::core::receipt::{DepRef, FileDigest, ToolIdentity};
 
+mod digests;
+pub use digests::Digests;
+
 /// What a step reads, digested before it runs.
 #[derive(Debug, Clone, Default)]
 pub struct Facts {
@@ -26,8 +29,8 @@ pub struct Facts {
 }
 
 /// Digest everything a step declares it reads, relative to `root`.
-pub fn facts_of(root: &Path, step: &Step) -> Facts {
-    facts_with(root, step, &[])
+pub fn facts_of(root: &Path, step: &Step, digests: &Digests) -> Facts {
+    facts_with(root, step, &[], digests)
 }
 
 /// [`facts_of`] a copy of the project at `root`, such as a candidate's,
@@ -35,8 +38,8 @@ pub fn facts_of(root: &Path, step: &Step) -> Facts {
 /// wildcard reach, and the executable bits `root`'s repository records. The
 /// copy has no history of its own, and its key must be the one `root`
 /// computes.
-pub fn facts_of_copy(copy: &Path, root: &Path, step: &Step) -> Facts {
-    facts_in(copy, Some(root), step, &[])
+pub fn facts_of_copy(copy: &Path, root: &Path, step: &Step, digests: &Digests) -> Facts {
+    facts_in(copy, Some(root), step, &[], digests)
 }
 
 /// Whether git records each file it tracks under `root` as executable, when
@@ -66,15 +69,28 @@ pub fn recorded_modes(root: &Path) -> Option<BTreeMap<String, bool>> {
 /// Like `facts_of`, as the files will be once `pending` are in place: files
 /// that are missing now but that reusing an upstream receipt will restore.
 /// `plan` needs this to predict what `run` will see.
-pub fn facts_with(root: &Path, step: &Step, pending: &[FileDigest]) -> Facts {
-    facts_in(root, None, step, pending)
+pub fn facts_with(root: &Path, step: &Step, pending: &[FileDigest], digests: &Digests) -> Facts {
+    facts_in(root, None, step, pending, digests)
 }
 
 /// The facts of `step` in `root`, a copy of `origin` when that is given.
-fn facts_in(root: &Path, origin: Option<&Path>, step: &Step, pending: &[FileDigest]) -> Facts {
-    let (inputs, mut limitations) = digest_in(root, origin, &step.inputs, "input", pending);
-    let (verify_inputs, proof_limitations) =
-        digest_in(root, origin, &step.verify_inputs, "verify input", pending);
+fn facts_in(
+    root: &Path,
+    origin: Option<&Path>,
+    step: &Step,
+    pending: &[FileDigest],
+    digests: &Digests,
+) -> Facts {
+    let (inputs, mut limitations) =
+        digest_in(root, origin, &step.inputs, "input", pending, digests);
+    let (verify_inputs, proof_limitations) = digest_in(
+        root,
+        origin,
+        &step.verify_inputs,
+        "verify input",
+        pending,
+        digests,
+    );
     limitations.extend(proof_limitations);
     // A step that always runs is never reused, whatever its key.
     if step.inputs.is_empty() && !step.always {
@@ -414,10 +430,11 @@ pub fn scan_globs<E>(
 
 /// How a scan records each file it reads.
 enum Keep<'a, E> {
-    /// The digest of its content. Files are read several at a time: on a
-    /// network or 9p mount each read waits on a round trip, and reading one
-    /// at a time spends most of the scan waiting.
-    Digest,
+    /// The digest of its content, through `Digests`, which may already
+    /// hold it. Files are read several at a time: on a network or 9p mount
+    /// each read waits on a round trip, and reading one at a time spends
+    /// most of the scan waiting.
+    Digest(&'a Digests),
     /// What the callback returns for its bytes, one file at a time, so a
     /// large tree is never held in memory at once.
     With(&'a mut dyn FnMut(&[u8]) -> Result<String, E>),
@@ -489,12 +506,12 @@ fn scan_in<E>(
         _ => None,
     };
     let read: Vec<std::io::Result<(String, bool)>> = match keep {
-        Keep::Digest => digest_all(&unique),
+        Keep::Digest(digests) => digest_all(&unique, digests),
         Keep::With(keep) => {
             let mut read = Vec::with_capacity(unique.len());
             for (_, path) in &unique {
                 read.push(match read_file(path) {
-                    Ok((bytes, mode)) => Ok((keep(&bytes)?, mode)),
+                    Ok((bytes, meta)) => Ok((keep(&bytes)?, executable(&meta))),
                     Err(error) => Err(error),
                 });
             }
@@ -534,10 +551,11 @@ fn scan_in<E>(
 
 /// The digest and executable bit of each file, in order, read by up to eight
 /// threads at once. Each thread holds one file at a time.
-fn digest_all(files: &[(String, PathBuf)]) -> Vec<std::io::Result<(String, bool)>> {
-    let one = |(_, path): &(String, PathBuf)| {
-        read_file(path).map(|(bytes, mode)| (digest::bytes(&bytes), mode))
-    };
+fn digest_all(
+    files: &[(String, PathBuf)],
+    digests: &Digests,
+) -> Vec<std::io::Result<(String, bool)>> {
+    let one = |(_, path): &(String, PathBuf)| digests.digest(path);
     // A thread costs more than reading a few small files.
     let threads = std::thread::available_parallelism()
         .map_or(1, usize::from)
@@ -614,37 +632,36 @@ pub fn copy_workspace(root: &Path, dest: &Path, step: &Step) -> Result<()> {
     Ok(())
 }
 
-/// A file's bytes and whether anyone may execute it, both from one open
+/// A file's bytes and what the file system says of it, both from one open
 /// handle: asking by path again costs another round trip, which on a network
-/// or 9p mount is as slow as the read.
-fn read_file(path: &Path) -> std::io::Result<(Vec<u8>, bool)> {
+/// or 9p mount is as slow as the read. The metadata is taken before the
+/// bytes, so a change while they are read is a change after it.
+fn read_file(path: &Path) -> std::io::Result<(Vec<u8>, std::fs::Metadata)> {
     use std::io::Read;
     let mut file = std::fs::File::open(path)?;
     let meta = file.metadata()?;
-    #[cfg(unix)]
-    let executable = {
-        use std::os::unix::fs::PermissionsExt;
-        meta.permissions().mode() & 0o111 != 0
-    };
-    #[cfg(not(unix))]
-    let executable = false;
     let mut bytes = Vec::with_capacity(usize::try_from(meta.len()).unwrap_or(0));
     file.read_to_end(&mut bytes)?;
-    Ok((bytes, executable))
+    Ok((bytes, meta))
+}
+
+/// Whether anyone may execute the file `meta` describes.
+fn executable(meta: &std::fs::Metadata) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        meta.permissions().mode() & 0o111 != 0
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = meta;
+        false
+    }
 }
 
 /// Whether anyone may execute the file.
 pub fn is_executable(path: &Path) -> bool {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::metadata(path).is_ok_and(|meta| meta.permissions().mode() & 0o111 != 0)
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = path;
-        false
-    }
+    std::fs::metadata(path).is_ok_and(|meta| executable(&meta))
 }
 
 /// The match options flot means by a pattern: `*` stays within a directory.
@@ -714,24 +731,16 @@ pub fn scan_outputs(
     Ok(scan)
 }
 
-/// Digest the files a step reads. Patterns that match nothing are reported,
-/// because a key that cannot see a file cannot notice it changing.
-pub fn digest_globs(
-    root: &Path,
-    patterns: &[String],
-    kind: &str,
-    pending: &[FileDigest],
-) -> (Vec<FileDigest>, Vec<String>) {
-    digest_in(root, None, patterns, kind, pending)
-}
-
-/// [`digest_globs`] in `root`, a copy of `origin` when that is given.
+/// Digest the files a step reads, in `root`, a copy of `origin` when that is
+/// given. Patterns that match nothing are reported, because a key that cannot
+/// see a file cannot notice it changing.
 fn digest_in(
     root: &Path,
     origin: Option<&Path>,
     patterns: &[String],
     kind: &str,
     pending: &[FileDigest],
+    digests: &Digests,
 ) -> (Vec<FileDigest>, Vec<String>) {
     let mut scan = match scan_in(
         root,
@@ -740,7 +749,7 @@ fn digest_in(
         kind,
         Reach::Tracked,
         true,
-        Keep::<std::convert::Infallible>::Digest,
+        Keep::<std::convert::Infallible>::Digest(digests),
     ) {
         Ok(scan) => scan,
         Err(never) => match never {},
@@ -804,7 +813,7 @@ pub fn step_key(flow_name: &str, step: &Step, facts: &Facts, deps: &[DepRef]) ->
 /// Every file a wildcard reaches under `root` (so not what git ignores, and
 /// never `.git` or the store), with the digest of its content. `root` is the
 /// project `origin` or a copy of it, read with the project's ignore rules.
-pub fn snapshot(root: &Path, origin: &Path) -> Scan {
+pub fn snapshot(root: &Path, origin: &Path, digests: &Digests) -> Scan {
     scan_in(
         root,
         (root != origin).then_some(origin),
@@ -812,7 +821,7 @@ pub fn snapshot(root: &Path, origin: &Path) -> Scan {
         "project file",
         Reach::Tracked,
         false,
-        Keep::<std::convert::Infallible>::Digest,
+        Keep::<std::convert::Infallible>::Digest(digests),
     )
     .unwrap_or_else(|never| match never {})
 }
@@ -985,7 +994,11 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("b.txt"), "b").unwrap();
         std::fs::write(dir.path().join("a.txt"), "a").unwrap();
-        let facts = facts_of(dir.path(), &step("inputs = [\"*.txt\", \"missing/**\"]"));
+        let facts = facts_of(
+            dir.path(),
+            &step("inputs = [\"*.txt\", \"missing/**\"]"),
+            &Digests::default(),
+        );
         let (inputs, limitations) = (facts.inputs, facts.limitations);
         let paths: Vec<&str> = inputs.iter().map(|input| input.path.as_str()).collect();
         assert_eq!(paths, vec!["a.txt", "b.txt"]);
@@ -1071,7 +1084,8 @@ mod tests {
         let root = Path::new(env!("CARGO_MANIFEST_DIR"));
         let patterns = ["src/**/*.rs".to_string(), "tests/**/*".to_string()];
         let scan = |keep| scan_in(root, None, &patterns, "input", Reach::Tracked, false, keep);
-        let at_once = scan(Keep::<std::convert::Infallible>::Digest).unwrap();
+        let digests = Digests::default();
+        let at_once = scan(Keep::<std::convert::Infallible>::Digest(&digests)).unwrap();
         let mut one = |bytes: &[u8]| Ok(digest::bytes(bytes));
         let in_turn = scan(Keep::With(&mut one)).unwrap();
         assert!(at_once.files.len() >= 64, "{} files", at_once.files.len());

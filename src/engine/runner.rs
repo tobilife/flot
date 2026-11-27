@@ -19,7 +19,7 @@ use self::execute::Unrun;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicU64;
-use std::sync::{OnceLock, RwLock};
+use std::sync::{Arc, OnceLock, RwLock};
 use std::time::Duration;
 
 use anyhow::{bail, Context, Result};
@@ -218,15 +218,17 @@ pub struct Runner<'a> {
     /// Each step's receipt in the newest run of this flow recorded here,
     /// read once when a step first needs it.
     latest: OnceLock<HashMap<String, String>>,
+    /// The digests of files already read, shared with candidates' runners.
+    digests: Arc<keying::Digests>,
 }
 
 impl<'a> Runner<'a> {
     /// What `step` reads in this runner's workspace, keyed as its origin's.
     fn facts(&self, step: &Step) -> keying::Facts {
         if self.root == self.origin {
-            keying::facts_of(&self.root, step)
+            keying::facts_of(&self.root, step, &self.digests)
         } else {
-            keying::facts_of_copy(&self.root, &self.origin, step)
+            keying::facts_of_copy(&self.root, &self.origin, step, &self.digests)
         }
     }
 
@@ -240,7 +242,16 @@ impl<'a> Runner<'a> {
             baseline: None,
             scope: RwLock::new(()),
             latest: OnceLock::new(),
+            digests: Arc::default(),
         }
+    }
+
+    /// Read a file again only when the file system says it changed since
+    /// this runner read it (see [`keying::Digests`]). The fence is stamped in
+    /// the store, so `plan`, which writes nothing, reads every file.
+    pub fn reusing_digests(mut self) -> Self {
+        self.digests = Arc::new(keying::Digests::fenced_in(self.store.root().join("tmp")));
+        self
     }
 
     /// Check every proof against `baseline` before running it or reusing a
@@ -303,7 +314,7 @@ impl<'a> Runner<'a> {
         let mut plan = Vec::new();
         for step_id in order {
             let step = self.flow.step(&step_id).expect("validated step");
-            let facts = keying::facts_with(&self.root, step, &pending);
+            let facts = keying::facts_with(&self.root, step, &pending, &self.digests);
             let mut limitations = facts.limitations.clone();
             let drift = self.drift(step, &facts.verify_inputs);
             if let Some(ProofOutcome::Unanchored {

@@ -396,6 +396,7 @@ impl Workspace {
         let baseline = self.baseline(Some(&flow), options.proofs_from.as_deref())?;
         let mut report = Runner::new(&flow, &self.root, &store)
             .with_baseline(baseline.as_ref())
+            .reusing_digests()
             .run(options)?;
         report.vouched = audit::vouched(&store, &report.manifest)?;
         Ok(report)

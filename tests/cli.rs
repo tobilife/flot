@@ -5580,6 +5580,38 @@ fn a_step_that_changes_files_outside_may_change_fails() {
         .has("must be a relative path inside the flow root");
 }
 
+/// A step rewrites a file at its old size and puts its old modification time
+/// back; the step after it, in the same run, keys on what the file holds now,
+/// not on what the run read of it before.
+#[cfg(unix)]
+#[test]
+fn a_file_rewritten_with_its_old_size_and_time_is_read_again_in_the_same_run() {
+    let project = Project::new(
+        r#"
+[flow]
+name = "rewritten"
+
+[[step]]
+id = "edit"
+run = "touch -r data.txt was && printf new > data.txt && touch -r was data.txt && rm was"
+inputs = ["stamp.txt"]
+may_change = ["data.txt", "was"]
+
+[[step]]
+id = "read"
+needs = ["edit"]
+inputs = ["data.txt"]
+run = "cat data.txt"
+"#,
+    );
+    project.write("stamp.txt", "stamp\n");
+    project.write("data.txt", "old");
+    project.flot(&["run"]).ok().has("ran      read");
+    // A second process reads the file afresh: had the first keyed `read` on
+    // the old content, its receipt would not answer now.
+    project.flot(&["run"]).ok().has("cached   read");
+}
+
 #[test]
 fn a_markdown_report_renders_what_a_flow_says_as_text() {
     let project = Project::new(

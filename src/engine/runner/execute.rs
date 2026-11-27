@@ -223,7 +223,8 @@ impl Runner<'_> {
             (Some(shared), None)
         };
         let binds = self.binds();
-        let before = (scoped || binds).then(|| keying::snapshot(&self.root, &self.origin));
+        let before =
+            (scoped || binds).then(|| keying::snapshot(&self.root, &self.origin, &self.digests));
         let lines = options.progress.lines(&step.id, false);
         let outcome = match exec::run_confined(
             &step.run,
@@ -244,7 +245,7 @@ impl Runner<'_> {
         };
         let after = before
             .as_ref()
-            .map(|_| keying::snapshot(&self.root, &self.origin));
+            .map(|_| keying::snapshot(&self.root, &self.origin, &self.digests));
         let mut problems = Vec::new();
         let strayed = match (&before, &after) {
             (Some(before), Some(after)) if scoped => {

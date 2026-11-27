@@ -2,7 +2,7 @@
 //! the best reusable receipt among them stands in for running them.
 
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{OnceLock, RwLock};
+use std::sync::{Arc, OnceLock, RwLock};
 use std::time::Duration;
 
 use anyhow::Result;
@@ -54,7 +54,7 @@ impl Runner<'_> {
         let mut known = Vec::new();
         for name in &step.candidates {
             let candidate = step.as_candidate(name);
-            let facts = keying::facts_with(&self.root, &candidate, pending);
+            let facts = keying::facts_with(&self.root, &candidate, pending, &self.digests);
             let key = self.step_key(&candidate, &facts, deps);
             match self.recall(&candidate, &key, &mut misses) {
                 Ok(Some(recalled)) => known.push(recalled),
@@ -130,6 +130,7 @@ impl Runner<'_> {
                 baseline: self.baseline,
                 scope: RwLock::new(()),
                 latest: OnceLock::new(),
+                digests: Arc::clone(&self.digests),
             };
             let mut said = Vec::new();
             let (receipt, attempts) = match keying::copy_workspace(&self.root, &place, &candidate) {
@@ -138,7 +139,7 @@ impl Runner<'_> {
                     runner.attempt(keyed, gate, options, &mut said)?
                 }
                 Err(error) => {
-                    let facts = keying::facts_of(&self.root, &candidate);
+                    let facts = keying::facts_of(&self.root, &candidate, &self.digests);
                     let keyed = self.keyed(&candidate, facts, deps.to_vec());
                     let why =
                         format!("could not run: its workspace could not be prepared: {error:#}");

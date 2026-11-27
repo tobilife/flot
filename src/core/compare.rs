@@ -6,7 +6,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::Serialize;
 
 use crate::core::digest;
-use crate::core::receipt::{FileDigest, Receipt, ReceiptIdentity, RunManifest, Verdict};
+use crate::core::receipt::{FileDigest, Partial, Receipt, ReceiptIdentity, RunManifest, Verdict};
 
 /// How many files one reason names before it only counts the rest.
 const NAMED_FILES: usize = 5;
@@ -30,6 +30,11 @@ pub struct RunDiff {
     pub same_flow: bool,
     pub left_verdict: Verdict,
     pub right_verdict: Verdict,
+    /// How many steps each run selected, when it did not run them all.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub left_partial: Option<Partial>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub right_partial: Option<Partial>,
     pub steps: Vec<StepDiff>,
 }
 
@@ -42,12 +47,21 @@ pub fn diff(
     right: &RunManifest,
     receipts: &BTreeMap<String, Receipt>,
 ) -> RunDiff {
+    // A step one run of the same flow lacks was left out of a partial run,
+    // not added to the flow or removed from it.
+    let missing = |run: &RunManifest, side: &str, otherwise: &str| -> String {
+        if run.partial.is_some() && left.flow_digest == right.flow_digest {
+            format!("not selected in {side}")
+        } else {
+            otherwise.into()
+        }
+    };
     let mut steps = Vec::new();
     for step in &left.steps {
         match right.step(&step.step_id) {
             None => steps.push(StepDiff {
                 step_id: step.step_id.clone(),
-                change: "removed".into(),
+                change: missing(right, "right", "removed"),
                 left: Some(digest::short(&step.receipt_id)),
                 right: None,
                 reasons: Vec::new(),
@@ -76,7 +90,7 @@ pub fn diff(
         if left.step(&step.step_id).is_none() {
             steps.push(StepDiff {
                 step_id: step.step_id.clone(),
-                change: "added".into(),
+                change: missing(left, "left", "added"),
                 left: None,
                 right: Some(digest::short(&step.receipt_id)),
                 reasons: Vec::new(),
@@ -91,6 +105,8 @@ pub fn diff(
         right: right.run_id.clone(),
         left_verdict: left.verdict,
         right_verdict: right.verdict,
+        left_partial: left.partial,
+        right_partial: right.partial,
         steps,
     }
 }
@@ -472,5 +488,29 @@ mod tests {
             diff(&left, &right, &receipts).steps[0].reasons,
             vec!["inputs: a.rs changed"]
         );
+    }
+
+    #[test]
+    fn a_step_a_partial_run_left_out_is_not_called_added_or_removed() {
+        let both = vec![
+            step("a", "sha256:1", StepStatus::Ok),
+            step("b", "sha256:2", StepStatus::Ok),
+        ];
+        let mut only_a = manifest("p", vec![step("a", "sha256:1", StepStatus::Ok)]);
+        only_a.partial = Some(Partial { selected: 1, of: 2 });
+        let whole = manifest("w", both);
+        let receipts = BTreeMap::new();
+        let forward = diff(&only_a, &whole, &receipts);
+        assert_eq!(forward.steps[0].change, "not selected in left");
+        assert_eq!(forward.left_partial, Some(Partial { selected: 1, of: 2 }));
+        assert_eq!(forward.right_partial, None);
+        assert_eq!(
+            diff(&whole, &only_a, &receipts).steps[0].change,
+            "not selected in right"
+        );
+        // Another flow can have added the step for real.
+        let mut other = whole.clone();
+        other.flow_digest = "sha256:other".into();
+        assert_eq!(diff(&only_a, &other, &receipts).steps[0].change, "added");
     }
 }

@@ -22,6 +22,10 @@
   failed this way once in this repository's self-check on WSL2: its three
   runs' ids put the second before the first, by about 0.7 s. Such a run's start is now recorded 1 ms after the newest
   run's, with a limitation saying so.
+- `flot diff` against a partial run said the steps it left out were `added`
+  (or `removed`) and showed its verdict as a plain `passed`. It now says `not
+  selected in left`, shows `passed, partial: 1 of 2 steps`, and gives
+  `left_partial`/`right_partial` in `--json`.
 
 ## 0.2.9
 

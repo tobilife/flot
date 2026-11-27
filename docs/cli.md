@@ -137,6 +137,10 @@ different receipt is `same key, different result:` and what differs: the exit
 code, stdout, stderr, outputs, other files it changed, claim results. A
 receipt that is gone from the store, or whose body no longer matches its id,
 tells nothing, and the step says so. In `--json` each step has `reasons`.
+A run that selected only some steps shows `passed, partial: 1 of 2 steps`
+(`left_partial`/`right_partial` in `--json`), and a step it left out is `not
+selected in left` (or `right`), not `added` or `removed`, while both runs
+are of the same flow.
 
 Real output, comparing this repository's self-check before and after one
 file changed (exit 2, as for any difference):

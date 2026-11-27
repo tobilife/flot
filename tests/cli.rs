@@ -384,6 +384,24 @@ fn diff_reports_identical_runs_and_real_changes() {
 }
 
 #[test]
+fn diff_names_a_partial_run_and_the_steps_it_left_out() {
+    let project = Project::new(TWO_STEPS);
+    assert_eq!(project.flot(&["run", "--only", "a"]).code, 2);
+    project.flot(&["run"]).ok();
+    let diff = project.flot(&["diff"]);
+    assert_eq!(diff.code, 2, "{}", diff.stdout);
+    diff.has("passed, partial: 1 of 2 steps")
+        .has("  b                    not selected in left")
+        .lacks("added");
+    let diff = project.flot(&["diff", "--json"]).json();
+    assert_eq!(
+        diff["left_partial"],
+        serde_json::json!({"selected": 1, "of": 2})
+    );
+    assert!(diff.get("right_partial").is_none(), "{diff}");
+}
+
+#[test]
 fn verify_authenticates_a_recorded_run() {
     let project = Project::new(PROVEN);
     project.write("seed.txt", "one");

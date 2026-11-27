@@ -669,8 +669,25 @@ fn render_authorship(authorship: Authorship, signers: &[SignerCheck]) {
 }
 
 pub(super) fn render_diff(diff: &RunDiff) {
-    say!("left  {}  {}", diff.left, diff.left_verdict.label());
-    say!("right {}  {}", diff.right, diff.right_verdict.label());
+    let verdict = |verdict: Verdict, partial: Option<Partial>| match partial {
+        Some(partial) => format!(
+            "{}, partial: {} of {} steps",
+            verdict.label(),
+            partial.selected,
+            partial.of
+        ),
+        None => verdict.label().to_string(),
+    };
+    say!(
+        "left  {}  {}",
+        diff.left,
+        verdict(diff.left_verdict, diff.left_partial)
+    );
+    say!(
+        "right {}  {}",
+        diff.right,
+        verdict(diff.right_verdict, diff.right_partial)
+    );
     if !diff.same_flow {
         say!("flow definition differs between the two runs");
     }

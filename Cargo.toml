@@ -1,6 +1,6 @@
 [package]
 name = "flot-cli"
-version = "0.2.11"
+version = "0.2.12"
 edition = "2021"
 rust-version = "1.89"
 description = "Verifiable agent flow runtime: every step emits a content-addressed receipt, every claim is bound to evidence."

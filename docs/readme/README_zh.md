@@ -20,7 +20,7 @@
 
 <code>cargo install flot-cli</code>
 
-最新版本 **0.2.11**：`held = ["tests/**"]` 把证明绑定到该修订中的测试，只能通过自己放宽或删除的测试的改动什么也证明不了；在工作副本上运行的证明不再让工作区的 `cargo` 用上副本的二进制；新增 `flot log STEP --proof`；在 WSL2 的 Windows 盘上，只复用的 run 快了 6 倍 · [更新日志](../../CHANGELOG.md)
+最新版本 **0.2.12**：`mutants` 在证明通过后运行变异测试工具（StrykerJS、cargo-mutants），只有每个变异体都被捕获或由人允许时才算 verified，因此无论代码怎么改都能通过的测试什么也证明不了；在工作副本上运行的证明保留副本，只重写改动的文件；构建 flot 需要 Rust 1.89 · [更新日志](../../CHANGELOG.md)
 
 </div>
 

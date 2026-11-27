@@ -20,7 +20,7 @@
 
 <code>cargo install flot-cli</code>
 
-Latest release **0.2.11**: `held = ["tests/**"]` holds a proof to the tests as the revision has them, so a change that passes only tests it loosened or deleted proves nothing; a proof on a copy of the work no longer leaves the work's `cargo` with the copy's binaries; `flot log STEP --proof`; a cached run on a Windows drive under WSL2 is 6x faster · [changelog](CHANGELOG.md)
+Latest release **0.2.12**: `mutants` runs a mutation tester (StrykerJS, cargo-mutants) once a proof passes and verifies only if every mutant is caught or allowed by a person, so tests that pass whatever the code does prove nothing; proofs on a copy of the work keep their copy and rewrite only what changed; building flot needs Rust 1.89 · [changelog](CHANGELOG.md)
 
 </div>
 

@@ -20,7 +20,7 @@
 
 <code>cargo install flot-cli</code>
 
-최신 릴리스 **0.2.11**: `held = ["tests/**"]`는 증명을 리비전의 테스트에 묶어, 스스로 느슨하게 하거나 지운 테스트만 통과하는 변경은 아무것도 증명하지 못합니다. 작업 복사본에서 돈 증명이 더 이상 작업 트리의 `cargo`에 복사본의 바이너리를 남기지 않습니다. `flot log STEP --proof`를 추가했고, WSL2의 Windows 드라이브에서 재사용만 하는 run이 6배 빨라졌습니다 · [변경 기록](../../CHANGELOG.md)
+최신 릴리스 **0.2.12**: `mutants`는 증명이 통과하면 mutation 테스트 도구(StrykerJS, cargo-mutants)를 돌려, 모든 mutant가 잡히거나 사람이 허용했을 때만 verified로 하므로 코드가 어떻게 바뀌어도 통과하는 테스트는 아무것도 증명하지 못합니다. 작업 복사본에서 도는 증명은 복사본을 유지하고 바뀐 파일만 다시 씁니다. flot을 빌드하려면 Rust 1.89가 필요합니다 · [변경 기록](../../CHANGELOG.md)
 
 </div>
 

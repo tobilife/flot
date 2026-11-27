@@ -1,6 +1,11 @@
 # Changelog
 
-## Unreleased
+## 0.2.12
+
+A proof can be held to the mutants a mutation tester makes of the work,
+proofs on copies of the work keep their copy and rebuild only what
+changed, and flot locks its store with the standard library. Found by
+using flot on itself and on open-design.
 
 - A step can hold its proof to the mutants a mutation tester makes of the
   work: with `mutants = { run, report, allow }`, once the proof passes the

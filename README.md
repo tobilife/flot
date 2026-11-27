@@ -20,7 +20,7 @@
 
 <code>cargo install flot-cli</code>
 
-Latest release **0.2.9**: `flot run` shows its steps live on stderr as they run (a view on a terminal, one line per event in CI); the guard finds git and `flot` commands with the same reading that finds changed files, closing bypasses through `chronic`, `strace`, `ash`, `sudo -s`, `ssh` and variables · [changelog](CHANGELOG.md)
+Latest release **0.2.10**: `flot plan` predicts the reuse that follows an `always` probe instead of showing every later step as running; `flot diff` says why each step changed (`inputs: src/a.rs changed`, `same key, different result: exit 0 -> 1`); a clock set back no longer reorders runs · [changelog](CHANGELOG.md)
 
 </div>
 

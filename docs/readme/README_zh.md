@@ -20,7 +20,7 @@
 
 <code>cargo install flot-cli</code>
 
-最新版本 **0.2.9**：`flot run` 在 stderr 上实时显示正在运行的步骤（终端上是实时视图，CI 中每个事件一行）；守卫用找出被改文件的同一种解析来找 git 和 `flot` 命令，堵住了经由 `chronic`、`strace`、`ash`、`sudo -s`、`ssh` 和变量的绕过 · [更新日志](../../CHANGELOG.md)
+最新版本 **0.2.10**：`flot plan` 不再把 `always` 步骤之后的步骤都显示为要运行，而是预测哪些会被复用；`flot diff` 说明每个步骤为何改变（`inputs: src/a.rs changed`、`same key, different result: exit 0 -> 1`）；时钟回拨不再打乱 run 的顺序 · [更新日志](../../CHANGELOG.md)
 
 </div>
 

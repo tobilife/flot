@@ -1,11 +1,15 @@
 # Changelog
 
-## Unreleased
+## 0.2.10
+
+`flot plan` predicts the reuse that follows an `always` probe, `flot diff`
+says why each step changed, and a clock set back can no longer reorder
+runs. Found by using flot on itself.
 
 - `flot plan` no longer shows every step after an `always` probe as running.
   It predicts on what the probe recorded last time, marks each reuse that
-  prediction makes with `? reused if toolchain comes out as last time`, and lists the probes it rests on in `assumes` in
-  `--json` and over MCP. Before, a plan for this repository with nothing
+  prediction makes with `? reused if toolchain comes out as last time`, and
+  lists the probes it rests on in `assumes` in `--json` and over MCP. Before, a plan for this repository with nothing
   changed said all five steps would run; the run then reused four.
 - `flot diff` says why each changed step changed, read from its two receipts:
   the files it or its proof read (`inputs: src/a.rs changed, b.rs added`),
@@ -19,8 +23,8 @@
   count back in that order, but `latest` names the run recorded last; when
   this host's clock was set back between two runs, the two disagreed. A test
   failed this way once in this repository's self-check on WSL2: its three
-  runs' ids put the second before the first, by about 0.7 s. Such a run's start is now recorded 1 ms after the newest
-  run's, with a limitation saying so.
+  runs' ids put the second before the first, by about 0.7 s. Such a run's start is now recorded 1 ms after
+  the newest run's, with a limitation saying so.
 - `flot diff` against a partial run said the steps it left out were `added`
   (or `removed`) and showed its verdict as a plain `passed`. It now says `not
   selected in left`, shows `passed, partial: 1 of 2 steps`, and gives

@@ -20,7 +20,7 @@
 
 <code>cargo install flot-cli</code>
 
-최신 릴리스 **0.2.9**: `flot run`이 실행 중인 단계를 stderr에 실시간으로 보여 줍니다(터미널에서는 실시간 화면, CI에서는 이벤트마다 한 줄). 가드는 바뀌는 파일을 찾는 것과 같은 해석으로 git과 `flot` 명령을 찾아 `chronic`, `strace`, `ash`, `sudo -s`, `ssh`, 변수를 통한 우회를 막습니다 · [변경 기록](../../CHANGELOG.md)
+최신 릴리스 **0.2.10**: `flot plan`이 `always` 단계 뒤의 단계를 모두 실행할 것처럼 보여 주지 않고 재사용을 예측합니다. `flot diff`가 단계마다 바뀐 이유를 말합니다(`inputs: src/a.rs changed`, `same key, different result: exit 0 -> 1`). 시계가 뒤로 가도 run 순서가 바뀌지 않습니다 · [변경 기록](../../CHANGELOG.md)
 
 </div>
 

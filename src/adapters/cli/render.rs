@@ -337,6 +337,38 @@ pub(super) fn render_detail(detail: &RunDetail) {
                         }
                     }
                 }
+                if let Some(mutants) = &claim.mutants {
+                    let mut tally = format!(
+                        "        mutants: {} caught, {} survived",
+                        mutants.caught,
+                        mutants.survived.len()
+                    );
+                    if !mutants.allowed.is_empty() {
+                        tally.push_str(&format!(", {} allowed", mutants.allowed.len()));
+                    }
+                    if mutants.untested > 0 {
+                        tally.push_str(&format!(", {} untested", mutants.untested));
+                    }
+                    say!("{tally}");
+                    // As an allow list entry names each, so a person who
+                    // accepts one can copy it and give the reason.
+                    let quoted = |text: &str| serde_json::to_string(text).unwrap_or_default();
+                    for (label, survivors) in [
+                        ("survived", &mutants.survived),
+                        ("allowed", &mutants.allowed),
+                    ] {
+                        for survivor in survivors {
+                            say!(
+                                "          {label} at {}:{}: {{ file = {}, mutation = {}, code = {} }}",
+                                survivor.file,
+                                survivor.line,
+                                quoted(&survivor.file),
+                                quoted(&survivor.mutation),
+                                quoted(&survivor.code)
+                            );
+                        }
+                    }
+                }
             }
         }
         if matches!(step.status, StepStatus::Failed | StepStatus::Timeout) {

@@ -7,7 +7,8 @@
 //! ran, and it exited zero.
 
 use crate::core::flow::Step;
-use crate::core::receipt::{Before, ClaimRecord, ClaimStatus, Held, StepStatus};
+use crate::core::mutants::Survivor;
+use crate::core::receipt::{Before, ClaimRecord, ClaimStatus, Held, Mutated, StepStatus};
 
 /// What running a proof command produced.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -90,6 +91,7 @@ pub fn settle(
                 reason: Some(reason.clone()),
                 before: None,
                 held: None,
+                mutants: None,
             })
             .collect();
     }
@@ -177,6 +179,7 @@ pub fn settle(
             reason: reason.clone(),
             before: None,
             held: None,
+            mutants: None,
         })
         .collect()
 }
@@ -397,6 +400,151 @@ pub fn hold_held(
         .collect()
 }
 
+/// What testing a step's proof against mutants came to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Mutation {
+    /// The mutation tester could not be run.
+    Unchecked(String),
+    /// It ran `command`, with `commit` as `$FLOT_PROOFS_FROM`, ending as
+    /// `run` says.
+    Ran {
+        command: String,
+        commit: Option<String>,
+        run: Proof,
+        /// Digest of the report it wrote, when it wrote one.
+        report_digest: Option<String>,
+        /// The report, judged against the allow list, or why it could not
+        /// be read.
+        judged: Result<Judged, String>,
+        /// Files the verdict judged that the run changed.
+        changed: Vec<String>,
+    },
+}
+
+/// A complete report, its survivors split by the allow list.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Judged {
+    pub caught: u32,
+    pub untested: u32,
+    pub survived: Vec<Survivor>,
+    pub allowed: Vec<Survivor>,
+}
+
+/// Hold the claims verified so far to the mutants of the work: one whose
+/// proof let a mutant survive that no entry of the allow list allows stays
+/// unverified, since the proof cannot tell that change from the work. So
+/// does one whose mutants could not all be tested. Other claims are left as
+/// they are.
+pub fn hold_mutants(
+    step_id: &str,
+    claims: Vec<ClaimRecord>,
+    mutation: Mutation,
+    limitations: &mut Vec<String>,
+) -> Vec<ClaimRecord> {
+    let read = format!("read `flot log {step_id} --mutants`");
+    let (mutated, reason) = match mutation {
+        Mutation::Unchecked(error) => (
+            None,
+            Some(format!(
+                "could not test the proof against mutants ({error})"
+            )),
+        ),
+        Mutation::Ran {
+            command,
+            commit,
+            run,
+            report_digest,
+            judged,
+            changed,
+        } => {
+            let reason = if run.timed_out {
+                Some(format!("the mutation run timed out; {read}"))
+            } else if run.exit_code.is_none() {
+                Some(format!("the mutation run was stopped; {read}"))
+            } else if !changed.is_empty() {
+                Some(format!(
+                    "the mutation run changed {}, which the verdict judged",
+                    changed.join(", ")
+                ))
+            } else {
+                match &judged {
+                    Err(error) => Some(format!(
+                        "the mutation report shows nothing: {error}; {read}"
+                    )),
+                    Ok(judged) if judged.survived.is_empty() => None,
+                    Ok(judged) => {
+                        let count = judged.survived.len();
+                        let named: Vec<String> = judged
+                            .survived
+                            .iter()
+                            .take(3)
+                            .map(|survivor| {
+                                format!(
+                                    "{}:{}: {}",
+                                    survivor.file, survivor.line, survivor.mutation
+                                )
+                            })
+                            .collect();
+                        Some(format!(
+                            "{count} {} the proof: {}{}; `flot show` names each as the allow list does",
+                            if count == 1 { "mutant survived" } else { "mutants survived" },
+                            named.join("; "),
+                            if count > 3 {
+                                format!("; and {} more", count - 3)
+                            } else {
+                                String::new()
+                            }
+                        ))
+                    }
+                }
+            };
+            let judged = judged.unwrap_or(Judged {
+                caught: 0,
+                untested: 0,
+                survived: Vec::new(),
+                allowed: Vec::new(),
+            });
+            (
+                Some(Mutated {
+                    command,
+                    commit,
+                    exit_code: run.exit_code,
+                    output_digest: run.output_digest,
+                    report_digest,
+                    caught: judged.caught,
+                    untested: judged.untested,
+                    survived: judged.survived,
+                    allowed: judged.allowed,
+                }),
+                reason,
+            )
+        }
+    };
+    if let Some(reason) = &reason {
+        limitations.push(format!("{reason}; claims stay unverified"));
+    }
+    claims
+        .into_iter()
+        .map(|claim| {
+            if claim.status != ClaimStatus::Verified {
+                return claim;
+            }
+            match &reason {
+                None => ClaimRecord {
+                    mutants: mutated.clone(),
+                    ..claim
+                },
+                Some(reason) => ClaimRecord {
+                    status: ClaimStatus::Unverified,
+                    reason: Some(reason.clone()),
+                    mutants: mutated.clone(),
+                    ..claim
+                },
+            }
+        })
+        .collect()
+}
+
 /// Claims of a step that never ran.
 pub fn not_run(step: &Step, reason: &str) -> Vec<ClaimRecord> {
     unverified(step, reason)
@@ -414,6 +562,7 @@ fn unverified(step: &Step, reason: &str) -> Vec<ClaimRecord> {
             reason: Some(reason.to_string()),
             before: None,
             held: None,
+            mutants: None,
         })
         .collect()
 }
@@ -636,6 +785,147 @@ mod tests {
             &mut Vec::new(),
         );
         let held = hold_before(refuted.clone(), at(Some(1), false), &mut Vec::new());
+        assert_eq!(held, refuted);
+    }
+
+    #[test]
+    fn only_a_proof_no_mutant_survives_unallowed_holds() {
+        let step = step("claims = [\"x\"]\nverify = \"true\"");
+        let verified = || {
+            settle(
+                &step,
+                StepStatus::Ok,
+                false,
+                ProofOutcome::Ran(proof(Some(0), false)),
+                &mut Vec::new(),
+            )
+        };
+        let survivor = |line: u32| Survivor {
+            file: "src/a.rs".into(),
+            mutation: format!("replace f{line} with ()"),
+            code: format!("sha256:{line}"),
+            line,
+        };
+        let judged = |survived: Vec<Survivor>, allowed: Vec<Survivor>| Judged {
+            caught: 7,
+            untested: 2,
+            survived,
+            allowed,
+        };
+        let ran = |exit_code: Option<i32>,
+                   timed_out: bool,
+                   judged: Result<Judged, String>,
+                   changed: Vec<String>| Mutation::Ran {
+            command: "m".into(),
+            commit: Some("abc123".into()),
+            run: Proof {
+                exit_code,
+                timed_out,
+                output_digest: "sha256:mutants".into(),
+            },
+            report_digest: Some("sha256:report".into()),
+            judged,
+            changed,
+        };
+
+        // Every survivor allowed: verified, with what was tested recorded.
+        let mut limitations = Vec::new();
+        let held = hold_mutants(
+            "s",
+            verified(),
+            ran(
+                Some(2),
+                false,
+                Ok(judged(vec![], vec![survivor(1)])),
+                vec![],
+            ),
+            &mut limitations,
+        );
+        assert_eq!(statuses(&held), vec![ClaimStatus::Verified]);
+        assert!(limitations.is_empty(), "{limitations:?}");
+        assert_eq!(
+            held[0].mutants,
+            Some(Mutated {
+                command: "m".into(),
+                commit: Some("abc123".into()),
+                exit_code: Some(2),
+                output_digest: "sha256:mutants".into(),
+                report_digest: Some("sha256:report".into()),
+                caught: 7,
+                untested: 2,
+                survived: vec![],
+                allowed: vec![survivor(1)],
+            })
+        );
+
+        let read = "read `flot log s --mutants`";
+        for (mutation, reason) in [
+            (
+                ran(Some(2), false, Ok(judged(vec![survivor(4)], vec![])), vec![]),
+                "1 mutant survived the proof: src/a.rs:4: replace f4 with (); `flot show` names each as the allow list does".to_string(),
+            ),
+            (
+                ran(
+                    Some(2),
+                    false,
+                    Ok(judged((1..=5).map(survivor).collect(), vec![])),
+                    vec![],
+                ),
+                "5 mutants survived the proof: src/a.rs:1: replace f1 with (); src/a.rs:2: replace f2 with (); src/a.rs:3: replace f3 with (); and 2 more;".to_string(),
+            ),
+            (
+                ran(Some(0), true, Ok(judged(vec![], vec![])), vec![]),
+                format!("the mutation run timed out; {read}"),
+            ),
+            (
+                ran(None, false, Ok(judged(vec![], vec![])), vec![]),
+                format!("the mutation run was stopped; {read}"),
+            ),
+            (
+                ran(
+                    Some(0),
+                    false,
+                    Ok(judged(vec![], vec![])),
+                    vec!["out.txt".into(), "t.sh".into()],
+                ),
+                "the mutation run changed out.txt, t.sh, which the verdict judged".to_string(),
+            ),
+            (
+                ran(Some(1), false, Err("no report".into()), vec![]),
+                format!("the mutation report shows nothing: no report; {read}"),
+            ),
+            (
+                Mutation::Unchecked("no scratch".into()),
+                "could not test the proof against mutants (no scratch)".to_string(),
+            ),
+        ] {
+            let mut limitations = Vec::new();
+            let held = hold_mutants("s", verified(), mutation, &mut limitations);
+            assert_eq!(statuses(&held), vec![ClaimStatus::Unverified], "{reason}");
+            let said = held[0].reason.as_deref().unwrap();
+            assert!(said.contains(&reason), "{said}");
+            assert_eq!(limitations, [format!("{said}; claims stay unverified")]);
+        }
+
+        // What did not verify is left as it was.
+        let refuted = settle(
+            &step,
+            StepStatus::Ok,
+            false,
+            ProofOutcome::Ran(proof(Some(1), false)),
+            &mut Vec::new(),
+        );
+        let held = hold_mutants(
+            "s",
+            refuted.clone(),
+            ran(
+                Some(2),
+                false,
+                Ok(judged(vec![survivor(4)], vec![])),
+                vec![],
+            ),
+            &mut Vec::new(),
+        );
         assert_eq!(held, refuted);
     }
 

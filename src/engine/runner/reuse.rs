@@ -101,6 +101,23 @@ impl Runner<'_> {
                 return Ok(None);
             }
         }
+        // And which mutants were tested: the run may mutate the changes
+        // since the revision.
+        if step.mutants.is_some() {
+            let tested_at = known
+                .identity
+                .claims
+                .iter()
+                .find_map(|claim| claim.mutants.as_ref())
+                .map(|mutants| mutants.commit.as_deref());
+            if tested_at != Some(self.baseline.map(|baseline| baseline.commit.as_str())) {
+                notes.push(
+                    "cached receipt was not tested against mutants with this revision; the step runs again"
+                        .into(),
+                );
+                return Ok(None);
+            }
+        }
         for output in &known.identity.outputs {
             if !step.declares_output(&output.path) {
                 notes.push(format!(

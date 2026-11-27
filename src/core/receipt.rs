@@ -20,6 +20,7 @@ use serde::{Deserialize, Serialize};
 use crate::core::digest;
 use crate::core::flow::SCHEMA_VERSION;
 use crate::core::metrics::{Metrics, Spend};
+use crate::core::mutants::Survivor;
 
 pub const FLOT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -94,6 +95,38 @@ pub struct ClaimRecord {
     /// revision.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub held: Option<Held>,
+    /// The mutants the proof was tested against, for a step that declares
+    /// `mutants`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mutants: Option<Mutated>,
+}
+
+/// What a mutation tester run against a step's proof found.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Mutated {
+    /// The command that ran it.
+    pub command: String,
+    /// The commit it had as `$FLOT_PROOFS_FROM`, when proofs are checked
+    /// against one: what it may have mutated the changes since.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub commit: Option<String>,
+    /// How it ended; `None` when it was stopped.
+    pub exit_code: Option<i32>,
+    /// Digest of its combined output.
+    pub output_digest: String,
+    /// Digest of the report it wrote, when it wrote one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub report_digest: Option<String>,
+    /// Mutants the proof caught.
+    pub caught: u32,
+    /// Mutants that could not be tested.
+    pub untested: u32,
+    /// Mutants the proof did not catch and no entry of the allow list allows.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub survived: Vec<Survivor>,
+    /// Mutants the proof did not catch that the allow list allows.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub allowed: Vec<Survivor>,
 }
 
 /// What a proof showed of the files a step holds to a revision: the
@@ -350,6 +383,10 @@ impl Receipt {
                     .as_ref()
                     .and_then(|held| held.output_digest.as_deref()),
             );
+            if let Some(mutants) = &claim.mutants {
+                objects.push(mutants.output_digest.as_str());
+                objects.extend(mutants.report_digest.as_deref());
+            }
         }
         objects
     }
@@ -653,6 +690,7 @@ mod tests {
                 output_digest: before.clone(),
             }),
             held: None,
+            mutants: None,
             ..claim(ClaimStatus::Verified, Some("true"))
         });
         let receipt = Receipt::seal(body, Observed::default());
@@ -714,6 +752,7 @@ mod tests {
             reason: None,
             before: None,
             held: None,
+            mutants: None,
         }
     }
 
@@ -815,6 +854,7 @@ mod tests {
                         output_digest: digest::bytes(b"no\n"),
                     }),
                     held: None,
+                    mutants: None,
                 },
                 ClaimRecord {
                     text: "the docs say so".into(),
@@ -825,6 +865,7 @@ mod tests {
                     reason: Some("no verify command".into()),
                     before: None,
                     held: None,
+                    mutants: None,
                 },
             ],
             limitations: vec!["step declares no inputs".into()],

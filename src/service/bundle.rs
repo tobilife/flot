@@ -229,6 +229,18 @@ pub fn exposures(bundle: &Bundle) -> Result<Vec<Exposure>> {
                     ),
                 );
             }
+            if let Some(mutants) = &claim.mutants {
+                places.insert(
+                    &mutants.output_digest,
+                    format!("step `{step}` mutation run of \"{}\"", claim.text),
+                );
+                if let Some(report) = &mutants.report_digest {
+                    places.insert(
+                        report,
+                        format!("step `{step}` mutation report of \"{}\"", claim.text),
+                    );
+                }
+            }
         }
     }
 

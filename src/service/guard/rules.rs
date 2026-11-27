@@ -125,9 +125,9 @@ impl Guard {
                 flow.steps
                     .iter()
                     .flat_map(|step| {
-                        step.verify_inputs.iter().filter_map(|pattern| {
-                            let compiled = glob::Pattern::new(pattern).ok()?;
-                            Some((compiled, pattern.clone(), step.id.clone()))
+                        step.proof_inputs().into_iter().filter_map(|pattern| {
+                            let compiled = glob::Pattern::new(&pattern).ok()?;
+                            Some((compiled, pattern, step.id.clone()))
                         })
                     })
                     .collect()

@@ -15,7 +15,7 @@ use std::sync::Mutex;
 use anyhow::{Context, Result};
 
 use crate::core::digest;
-use crate::core::flow::{Flow, Step};
+use crate::core::flow::{Flow, Mutants, Step};
 use crate::core::receipt::{ClaimStatus, FileDigest, ReceiptIdentity};
 use crate::engine::git::Git;
 use crate::engine::keying;
@@ -88,6 +88,10 @@ struct Proof<'a> {
     held: Option<&'a [String]>,
     /// For a receipt, the digest of the files its proof was held to, if any.
     held_base: Option<&'a str>,
+    /// For a step, the mutants it tests its proof against, if any.
+    mutants: Option<Option<&'a Mutants>>,
+    /// For a receipt, the command that tested its proof against mutants.
+    mutated_by: Option<&'a str>,
     /// Whether a claim was verified: only then does how it was matter.
     verified: bool,
 }
@@ -324,16 +328,19 @@ impl Baseline {
     /// it reads now; `None` when it matches, or when there is nothing to
     /// prove here or there.
     pub fn drift(&self, step: &Step, verify_inputs: &[FileDigest]) -> Result<Option<Drift>> {
+        let patterns = step.proof_inputs();
         self.compare(&Proof {
             step_id: &step.id,
             claims: step.claims.iter().map(String::as_str).collect(),
             verify: step.verify.as_deref(),
-            patterns: Some(&step.verify_inputs),
+            patterns: Some(&patterns),
             files: verify_inputs,
             fails_before: Some(step.fails_before),
             checked_at: None,
             held: Some(&step.held),
             held_base: None,
+            mutants: Some(step.mutants.as_ref()),
+            mutated_by: None,
             verified: false,
         })
     }
@@ -367,6 +374,12 @@ impl Baseline {
                 .iter()
                 .find_map(|claim| claim.held.as_ref())
                 .map(|held| held.base.as_str()),
+            mutants: None,
+            mutated_by: identity
+                .claims
+                .iter()
+                .find_map(|claim| claim.mutants.as_ref())
+                .map(|mutated| mutated.command.as_str()),
             verified: identity
                 .claims
                 .iter()
@@ -397,7 +410,7 @@ impl Baseline {
                 }
                 if proof
                     .patterns
-                    .is_some_and(|patterns| patterns != old.verify_inputs.as_slice())
+                    .is_some_and(|patterns| patterns != old.proof_inputs().as_slice())
                 {
                     reasons.push("its verify_inputs differ".into());
                 }
@@ -443,6 +456,21 @@ impl Baseline {
                     }
                     None => {}
                 }
+                match (proof.mutants, &old.mutants) {
+                    (Some(declared), _) if declared != old.mutants.as_ref() => {
+                        reasons.push("its mutants differ".into());
+                    }
+                    (Some(_), _) => {}
+                    // A receipt tested against the revision's mutants: what
+                    // it verified, the revision's command must have tested.
+                    (None, Some(mutants)) if proof.verified => match proof.mutated_by {
+                        None => reasons.push("its proof was not tested against mutants".into()),
+                        Some(command) if command != mutants.run => reasons
+                            .push("its proof was tested against mutants by another command".into()),
+                        Some(_) => {}
+                    },
+                    (None, _) => {}
+                }
             }
         }
         for file in proof.files {
@@ -458,8 +486,8 @@ impl Baseline {
         let read: BTreeSet<&str> = proof.files.iter().map(|file| file.path.as_str()).collect();
         let patterns: Vec<glob::Pattern> = old
             .iter()
-            .flat_map(|old| &old.verify_inputs)
-            .filter_map(|pattern| glob::Pattern::new(pattern).ok())
+            .flat_map(|old| old.proof_inputs())
+            .filter_map(|pattern| glob::Pattern::new(&pattern).ok())
             .collect();
         for path in self.tree.keys() {
             if !read.contains(path.as_str())

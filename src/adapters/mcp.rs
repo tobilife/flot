@@ -263,13 +263,14 @@ impl Server {
                         candidate: text("candidate"),
                         attempt: count("attempt"),
                     },
-                    match (flag("stderr"), flag("proof"), flag("held")) {
-                        (false, false, false) => crate::service::Stream::Stdout,
-                        (true, false, false) => crate::service::Stream::Stderr,
-                        (false, true, false) => crate::service::Stream::Proof,
-                        (false, false, true) => crate::service::Stream::Held,
+                    match (flag("stderr"), flag("proof"), flag("held"), flag("mutants")) {
+                        (false, false, false, false) => crate::service::Stream::Stdout,
+                        (true, false, false, false) => crate::service::Stream::Stderr,
+                        (false, true, false, false) => crate::service::Stream::Proof,
+                        (false, false, true, false) => crate::service::Stream::Held,
+                        (false, false, false, true) => crate::service::Stream::Mutants,
                         _ => bail!(
-                            "`stderr`, `proof` and `held` name different outputs; ask for one"
+                            "`stderr`, `proof`, `held` and `mutants` name different outputs; ask for one"
                         ),
                     },
                 )?,
@@ -610,6 +611,7 @@ fn tool_catalog() -> Vec<Value> {
                 "stderr": { "type": "boolean", "description": "Read stderr instead of stdout." },
                 "proof": { "type": "boolean", "description": "Read what the step's proof printed (stdout and stderr together) instead." },
                 "held": { "type": "boolean", "description": "Read what the step's proof printed with its held files as the revision has them instead." },
+                "mutants": { "type": "boolean", "description": "Read what the step's mutation tester printed instead." },
                 "max_bytes": { "type": "integer", "minimum": 1, "description": "Inline byte ceiling; the complete object stays retrievable." }
             }),
             &["step"],
@@ -752,6 +754,16 @@ verify = "grep -q flot artifact.txt"
         );
         assert_eq!(held["isError"], true, "{held}");
         assert!(held.to_string().contains("holds no files"), "{held}");
+        let mutants = call(
+            &server,
+            "flot_step_output",
+            json!({ "step": "write", "mutants": true }),
+        );
+        assert_eq!(mutants["isError"], true, "{mutants}");
+        assert!(
+            mutants.to_string().contains("tested no mutants"),
+            "{mutants}"
+        );
     }
 
     #[test]

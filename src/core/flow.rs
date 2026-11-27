@@ -141,12 +141,33 @@ pub struct Step {
     /// rewritten test is at the revision.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub held: Vec<String>,
+    /// A mutation tester the proof must stand up to: once the proof passes,
+    /// this runs and the claims verify only if every mutant its report
+    /// lists is caught, or allowed by a person in the allow list.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mutants: Option<Mutants>,
     /// The step runs on every run and its receipt is never reused: for a
     /// probe of what no key covers, such as the toolchain on `PATH`. Its
     /// receipt id follows what it printed and produced, so the steps that
     /// need it run again only when that changed. Not part of the step key.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub always: bool,
+}
+
+/// A mutation tester run against a step's proof, and what it reports.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Mutants {
+    /// Command run from the flow root once the proof passes, with
+    /// `$FLOT_MUTANTS_DIR`, an empty directory, to write its report in.
+    pub run: String,
+    /// Path of the report in `$FLOT_MUTANTS_DIR`: a mutation testing report
+    /// (the schema Stryker writes) or cargo-mutants' `outcomes.json`.
+    pub report: String,
+    /// The allow list, relative to the flow root: mutants a person accepts
+    /// as surviving, each with a reason. A proof input of the step.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub allow: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -169,6 +190,22 @@ impl Step {
         let mut step = self.clone();
         step.env.insert(CANDIDATE_ENV.into(), name.into());
         step
+    }
+
+    /// The patterns of the files the proof reads: `verify_inputs`, and the
+    /// mutants' allow list, whose entries decide the verdict as much.
+    pub fn proof_inputs(&self) -> Vec<String> {
+        let mut patterns = self.verify_inputs.clone();
+        if let Some(allow) = self
+            .mutants
+            .as_ref()
+            .and_then(|mutants| mutants.allow.as_ref())
+        {
+            if !patterns.contains(allow) {
+                patterns.push(allow.clone());
+            }
+        }
+        patterns
     }
 
     /// How many attempts one run may make at this step.
@@ -338,6 +375,46 @@ impl Flow {
                     glob::Pattern::new(pattern).with_context(|| {
                         format!("step `{}` held `{}` is not a valid glob", step.id, pattern)
                     })?;
+                }
+            }
+            if let Some(mutants) = &step.mutants {
+                if step.claims.is_empty() || step.verify.is_none() {
+                    bail!(
+                        "step `{}` tests mutants, which needs claims and a verify command to prove them",
+                        step.id
+                    );
+                }
+                if !step.candidates.is_empty() {
+                    bail!(
+                        "step `{}` tests mutants, which candidates do not support: the mutants are of the work, not of a candidate's copy",
+                        step.id
+                    );
+                }
+                if mutants.run.trim().is_empty() {
+                    bail!("step `{}` has an empty mutants run command", step.id);
+                }
+                if !is_contained(&mutants.report) {
+                    bail!(
+                        "step `{}` mutants report `{}` must be a relative path inside $FLOT_MUTANTS_DIR",
+                        step.id,
+                        mutants.report
+                    );
+                }
+                if let Some(allow) = &mutants.allow {
+                    if !is_contained(allow) || allow.contains(['*', '?', '[']) {
+                        bail!(
+                            "step `{}` mutants allow `{}` must be a path inside the flow root, without wildcards",
+                            step.id,
+                            allow
+                        );
+                    }
+                    if step.declares_output(allow) {
+                        bail!(
+                            "step `{}` declares its mutants allow list `{}` as an output; a step cannot produce its own proof",
+                            step.id,
+                            allow
+                        );
+                    }
                 }
             }
             if step.always && !step.candidates.is_empty() {
@@ -793,6 +870,70 @@ claims = ["b holds"]
         assert!(!serde_json::to_string(&plain.steps[0])
             .unwrap()
             .contains("fails_before"));
+    }
+
+    #[test]
+    fn mutants_need_a_proof_a_report_inside_its_directory_and_an_allow_list_in_the_root() {
+        let base = "[flow]\nname = \"demo\"\n\n[[step]]\nid = \"a\"\nrun = \"true\"\n";
+        let proven = format!("{base}claims = [\"x\"]\nverify = \"true\"\n");
+        let mutants = "mutants = { run = \"m\", report = \"r.json\", allow = \"allow.toml\" }\n";
+        let step = &flow(&format!("{proven}{mutants}")).unwrap().steps[0];
+        assert_eq!(
+            step.mutants,
+            Some(Mutants {
+                run: "m".into(),
+                report: "r.json".into(),
+                allow: Some("allow.toml".into()),
+            })
+        );
+        // The allow list is read by the proof, once.
+        assert_eq!(step.proof_inputs(), ["allow.toml"]);
+        let listed = flow(&format!(
+            "{proven}verify_inputs = [\"allow.toml\", \"t\"]\n{mutants}"
+        ))
+        .unwrap();
+        assert_eq!(listed.steps[0].proof_inputs(), ["allow.toml", "t"]);
+        for (text, refusal) in [
+            (
+                format!("{base}{mutants}"),
+                "needs claims and a verify command",
+            ),
+            (
+                format!("{base}claims = [\"x\"]\n{mutants}"),
+                "needs claims and a verify command",
+            ),
+            (
+                format!("{proven}{mutants}candidates = [\"p\", \"q\"]\n"),
+                "candidates do not support",
+            ),
+            (
+                format!("{proven}mutants = {{ run = \" \", report = \"r\" }}\n"),
+                "empty mutants run command",
+            ),
+            (
+                format!("{proven}mutants = {{ run = \"m\", report = \"../r\" }}\n"),
+                "inside $FLOT_MUTANTS_DIR",
+            ),
+            (
+                format!("{proven}mutants = {{ run = \"m\", report = \"r\", allow = \"a/*\" }}\n"),
+                "without wildcards",
+            ),
+            (
+                format!("{proven}outputs = [\"allow.toml\"]\n{mutants}"),
+                "cannot produce its own proof",
+            ),
+            (
+                format!("{proven}mutants = {{ run = \"m\" }}\n"),
+                "missing field `report`",
+            ),
+        ] {
+            let error = format!("{:#}", flow(&text).unwrap_err());
+            assert!(error.contains(refusal), "{text}: {error}");
+        }
+        // Unset, it leaves the flow's digest as it was.
+        assert!(!serde_json::to_string(&flow(&proven).unwrap().steps[0])
+            .unwrap()
+            .contains("mutants"));
     }
 
     #[test]

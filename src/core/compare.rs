@@ -444,6 +444,7 @@ mod tests {
             reason: None,
             before: None,
             held: None,
+            mutants: None,
         }
     }
 

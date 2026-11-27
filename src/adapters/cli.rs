@@ -312,6 +312,7 @@ fn dispatch(
             stderr,
             proof,
             held,
+            mutants,
             candidate,
             attempt,
         } => {
@@ -320,10 +321,11 @@ fn dispatch(
                 candidate: candidate.clone(),
                 attempt: attempt.map(|number| number as usize),
             };
-            let stream = match (*stderr, *proof, *held) {
-                (true, _, _) => crate::service::Stream::Stderr,
-                (_, true, _) => crate::service::Stream::Proof,
-                (_, _, true) => crate::service::Stream::Held,
+            let stream = match (*stderr, *proof, *held, *mutants) {
+                (true, _, _, _) => crate::service::Stream::Stderr,
+                (_, true, _, _) => crate::service::Stream::Proof,
+                (_, _, true, _) => crate::service::Stream::Held,
+                (_, _, _, true) => crate::service::Stream::Mutants,
                 _ => crate::service::Stream::Stdout,
             };
             let digest = workspace.step_output(run, step.as_deref(), &which, stream)?;

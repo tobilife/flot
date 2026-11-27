@@ -155,6 +155,9 @@ pub(super) enum Command {
         /// revision has them.
         #[arg(long, conflicts_with_all = ["stderr", "proof"])]
         held: bool,
+        /// What the step's mutation tester printed.
+        #[arg(long, conflicts_with_all = ["stderr", "proof", "held"])]
+        mutants: bool,
         /// Another candidate the run executed, instead of the one it kept.
         #[arg(long, value_name = "NAME")]
         candidate: Option<String>,

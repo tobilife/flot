@@ -217,6 +217,8 @@ pub enum Stream {
     /// What the step's proof printed with its `held` files as the revision
     /// has them.
     Held,
+    /// What the step's mutation tester printed.
+    Mutants,
 }
 
 /// A stored object under a delivery budget. The complete object stays
@@ -630,6 +632,17 @@ impl Workspace {
                     } else {
                         "it holds no files to a revision, or its proof did not pass first"
                     }
+                ),
+            },
+            Stream::Mutants => match identity
+                .claims
+                .iter()
+                .find_map(|claim| claim.mutants.as_ref())
+            {
+                Some(mutants) => mutants.output_digest.clone(),
+                None => bail!(
+                    "step `{step}` of run {} tested no mutants: it declares none, or its proof did not pass first",
+                    manifest.run_id
                 ),
             },
         })

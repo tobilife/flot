@@ -213,6 +213,12 @@ impl Search<'_> {
                 .and_then(|held| held.output_digest.as_deref())
                 .map(|digest| ("proof with the held files", digest))
         }));
+        outputs.extend(identity.claims.iter().filter_map(|claim| {
+            claim
+                .mutants
+                .as_ref()
+                .map(|mutants| ("mutation run", mutants.output_digest.as_str()))
+        }));
         for (source, object) in outputs {
             let bytes = match self.store.read_bytes(object) {
                 Ok(bytes) => bytes,

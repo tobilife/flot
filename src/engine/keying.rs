@@ -295,25 +295,73 @@ fn candidates(
     reach: Reach,
     copy: Option<&Arc<CopyIgnore>>,
 ) -> Result<Vec<PathBuf>, String> {
-    let compiled = glob::Pattern::new(pattern).map_err(|error| error.to_string())?;
-    let (base, wild) = literal_base(pattern);
-    if !wild {
-        let path = root.join(pattern);
-        return Ok(if path.is_file() {
-            vec![path]
-        } else {
-            Vec::new()
-        });
+    candidates_of(root, &[pattern], reach, copy)
+        .pop()
+        .expect("one pattern has one answer")
+}
+
+/// [`candidates`] for each of `patterns`, in order. Patterns whose wildcards
+/// start in the same directory share one walk of it: on a network or 9p
+/// mount a walk is most of a scan, and `**/*.ts`, `**/*.tsx` and `**/*.json`
+/// would otherwise walk the whole project three times.
+fn candidates_of(
+    root: &Path,
+    patterns: &[&str],
+    reach: Reach,
+    copy: Option<&Arc<CopyIgnore>>,
+) -> Vec<Result<Vec<PathBuf>, String>> {
+    let mut found: Vec<Result<Vec<PathBuf>, String>> = Vec::with_capacity(patterns.len());
+    // The patterns to match while walking each start directory.
+    let mut walks: BTreeMap<&str, Vec<(usize, glob::Pattern)>> = BTreeMap::new();
+    for (index, pattern) in patterns.iter().enumerate() {
+        let compiled = match glob::Pattern::new(pattern) {
+            Ok(compiled) => compiled,
+            Err(error) => {
+                found.push(Err(error.to_string()));
+                continue;
+            }
+        };
+        let (base, wild) = literal_base(pattern);
+        if !wild {
+            let path = root.join(pattern);
+            found.push(Ok(if path.is_file() {
+                vec![path]
+            } else {
+                Vec::new()
+            }));
+            continue;
+        }
+        found.push(Ok(Vec::new()));
+        walks.entry(base).or_default().push((index, compiled));
     }
-    let start = root.join(base);
-    if !start.is_dir() {
-        return Ok(Vec::new());
+    for (base, matchers) in walks {
+        let start = root.join(base);
+        if !start.is_dir() {
+            continue;
+        }
+        for path in walk(&start, reach, copy) {
+            let Ok(relative) = path.strip_prefix(root) else {
+                continue;
+            };
+            for (index, compiled) in &matchers {
+                if compiled.matches_path_with(relative, match_options()) {
+                    if let Ok(paths) = &mut found[*index] {
+                        paths.push(path.clone());
+                    }
+                }
+            }
+        }
     }
+    found
+}
+
+/// Every file below `start` a wildcard may reach, in walk order.
+fn walk(start: &Path, reach: Reach, copy: Option<&Arc<CopyIgnore>>) -> Vec<PathBuf> {
     // A copy's rules are the project's, applied below; the walker would read
     // the store's.
     let copy = copy.filter(|_| reach == Reach::Tracked).cloned();
     let tracked = reach == Reach::Tracked && copy.is_none();
-    let walker = ignore::WalkBuilder::new(&start)
+    let walker = ignore::WalkBuilder::new(start)
         .standard_filters(false)
         .git_ignore(tracked)
         .git_exclude(tracked)
@@ -336,15 +384,11 @@ fn candidates(
     // The walker already knows each entry's type (of its target, since links
     // are followed); asking the file system again costs a round trip per
     // file, which on a network or 9p mount is most of the walk.
-    Ok(walker
+    walker
         .flatten()
         .filter(|entry| entry.file_type().is_some_and(|kind| kind.is_file()))
         .map(ignore::DirEntry::into_path)
-        .filter(|path| {
-            path.strip_prefix(root)
-                .is_ok_and(|relative| compiled.matches_path_with(relative, match_options()))
-        })
-        .collect())
+        .collect()
 }
 
 /// Resolve globs, relative to `root`, handing each matched file's bytes to
@@ -400,8 +444,14 @@ fn scan_in<E>(
     let mut matches: Vec<(&String, Vec<String>)> = Vec::new();
     let mut unique: Vec<(String, PathBuf)> = Vec::new();
     let mut seen = std::collections::HashSet::new();
-    for pattern in patterns {
-        let entries = match candidates(root, pattern, reach, copy.as_ref()) {
+    let listed = candidates_of(
+        root,
+        &patterns.iter().map(String::as_str).collect::<Vec<_>>(),
+        reach,
+        copy.as_ref(),
+    );
+    for (pattern, entries) in patterns.iter().zip(listed) {
+        let entries = match entries {
             Ok(entries) => entries,
             Err(error) => {
                 scan.problems
@@ -1027,6 +1077,35 @@ mod tests {
         assert!(at_once.files.len() >= 64, "{} files", at_once.files.len());
         assert_eq!(at_once.files, in_turn.files);
         assert!(at_once.problems.is_empty() && at_once.unmatched.is_empty());
+    }
+
+    /// Patterns walked together in this repository find, each, what walking
+    /// for it alone finds: shared starts, nested starts, a literal path, a
+    /// pattern matching nothing and an invalid one.
+    #[test]
+    fn patterns_walked_together_find_what_each_finds_alone() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let patterns = [
+            "**/*.rs",
+            "**/*.toml",
+            "src/**/*.rs",
+            "src/engine/*.rs",
+            "Cargo.toml",
+            "**/*.nothing",
+            "[",
+        ];
+        let together = candidates_of(root, &patterns, Reach::Tracked, None);
+        assert_eq!(together.len(), patterns.len());
+        for (pattern, found) in patterns.iter().zip(together) {
+            assert_eq!(
+                found,
+                candidates(root, pattern, Reach::Tracked, None),
+                "{pattern}"
+            );
+            if !["**/*.nothing", "["].contains(pattern) {
+                assert!(!found.unwrap().is_empty(), "{pattern} found nothing");
+            }
+        }
     }
 
     #[test]

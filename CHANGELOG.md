@@ -13,7 +13,10 @@
   on a 2,320-file repository on `/mnt/d`, a run that reuses every step went
   from 22.1 s to 5.9 s and `flot plan` from 9.6 s to 3.5 s; on the same
   repository on ext4, from 261 to 120 ms and from 112 to 53 ms. Keys and
-  recorded changes are the same as before.
+  recorded changes are the same as before. Patterns starting in the same
+  directory share one walk of it, and git is asked for the executable bits
+  it records only when a scan found files: the same repository on `/mnt/d`
+  then takes 4.4 s, and this repository's own check 0.8 s.
 - `flot log` without a step names the steps of the latest run instead of
   only saying a step is required.
 - `flot doctor` names every proof that declares no `verify_inputs` on one

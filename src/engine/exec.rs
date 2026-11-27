@@ -742,7 +742,10 @@ mod tests {
         #[cfg(all(unix, not(any(target_os = "linux", target_os = "macos"))))]
         assert!(outcome.output_detached);
         #[cfg(windows)]
-        assert!(!outcome.output_detached && outcome.strays_stopped);
+        assert!(
+            !outcome.output_detached && outcome.strays_stopped,
+            "{outcome:?}"
+        );
         assert_eq!(outcome.stdout, b"early\n");
         assert!(
             started.elapsed() < Duration::from_secs(8),

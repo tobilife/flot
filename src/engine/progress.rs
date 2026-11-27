@@ -45,6 +45,9 @@ pub enum Event {
         status: StepStatus,
         duration_ms: u64,
         claims: ClaimCounts,
+        /// Why a step that never executed was not run, as its receipt says:
+        /// `not run: dependency lint (failed) did not hold`.
+        why: Option<String>,
     },
     /// Every step is settled; the run is recorded next.
     RunFinished { duration_ms: u64 },
@@ -70,6 +73,14 @@ impl Event {
             status: receipt.identity.status,
             duration_ms: exec::millis(took),
             claims: receipt.claim_counts(),
+            why: receipt
+                .identity
+                .limitations
+                .iter()
+                .find(|limitation| {
+                    limitation.starts_with("not run: ") || limitation.starts_with("could not run: ")
+                })
+                .cloned(),
         }
     }
 }
@@ -182,6 +193,7 @@ verify = "true"
                     candidate,
                     status,
                     claims,
+                    why,
                     ..
                 } => Event::StepFinished {
                     step,
@@ -190,6 +202,7 @@ verify = "true"
                     status,
                     duration_ms: 0,
                     claims,
+                    why,
                 },
                 Event::RunFinished { .. } => Event::RunFinished { duration_ms: 0 },
                 other => other,
@@ -226,9 +239,18 @@ verify = "true"
             status,
             duration_ms: 0,
             claims,
+            why: None,
         };
         let run = Event::RunStarted { steps: 3, jobs: 1 };
-        let cancelled = finished("after", 0, StepStatus::Cancelled, claims(0, 1));
+        let cancelled = Event::StepFinished {
+            step: "after".into(),
+            attempt: 0,
+            candidate: None,
+            status: StepStatus::Cancelled,
+            duration_ms: 0,
+            claims: claims(0, 1),
+            why: Some("not run: dependency fail (failed) did not hold".into()),
+        };
         let failing = [
             started("fail"),
             output("fail", Source::Stderr, "broken"),
@@ -263,5 +285,62 @@ verify = "true"
             Event::RunFinished { duration_ms: 0 },
         ]);
         assert_eq!(events_of(&runner), second);
+    }
+
+    #[test]
+    fn a_step_that_never_ran_says_why_and_one_that_ran_does_not() {
+        use crate::core::receipt::{Observed, ReceiptIdentity, ToolIdentity};
+        let receipt = |status, limitations: &[&str]| {
+            Receipt::seal(
+                ReceiptIdentity {
+                    flow: "f".into(),
+                    step_id: "s".into(),
+                    step_key: "sha256:k".into(),
+                    command: "true".into(),
+                    status,
+                    exit_code: None,
+                    stdout_digest: String::new(),
+                    stderr_digest: String::new(),
+                    inputs: vec![],
+                    verify_inputs: vec![],
+                    outputs: vec![],
+                    changed: Default::default(),
+                    deps: vec![],
+                    claims: vec![],
+                    limitations: limitations.iter().map(|l| l.to_string()).collect(),
+                    tool: ToolIdentity::default(),
+                    candidate: None,
+                    sandbox: None,
+                },
+                Observed::default(),
+            )
+        };
+        let why = |receipt: &Receipt| match Event::finished(receipt, 0, Duration::ZERO) {
+            Event::StepFinished { why, .. } => why,
+            other => panic!("{other:?}"),
+        };
+        let sandbox = "could not run: its sandbox cannot be enforced here: no landlock";
+        assert_eq!(
+            why(&receipt(
+                StepStatus::Failed,
+                &["step declares no inputs", sandbox]
+            )),
+            Some(sandbox.to_string())
+        );
+        assert_eq!(
+            why(&receipt(
+                StepStatus::Cancelled,
+                &["not run: flot was asked to stop"]
+            )),
+            Some("not run: flot was asked to stop".to_string())
+        );
+        // A candidate left out is not why the step did not run.
+        assert_eq!(
+            why(&receipt(
+                StepStatus::Ok,
+                &["candidate b not run: run cost ceiling of $1 reached"]
+            )),
+            None
+        );
     }
 }

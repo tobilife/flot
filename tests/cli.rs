@@ -6487,15 +6487,15 @@ run = "true"
 
 /// `text` with each duration, such as `1.2s`, written `T`.
 fn timeless(text: &str) -> String {
+    let digits = |text: &str| !text.is_empty() && text.bytes().all(|b| b.is_ascii_digit());
+    // `1.2s`, or `42ms` under a tenth of a second.
     let duration = |word: &str| {
-        word.strip_suffix('s')
-            .and_then(|number| number.split_once('.'))
-            .is_some_and(|(whole, tenth)| {
-                !whole.is_empty()
-                    && whole.bytes().all(|b| b.is_ascii_digit())
-                    && tenth.len() == 1
-                    && tenth.bytes().all(|b| b.is_ascii_digit())
-            })
+        word.strip_suffix("ms")
+            .is_some_and(|millis| digits(millis) && millis.len() <= 2)
+            || word
+                .strip_suffix('s')
+                .and_then(|number| number.split_once('.'))
+                .is_some_and(|(whole, tenth)| digits(whole) && tenth.len() == 1 && digits(tenth))
     };
     text.lines()
         .map(|line| {
@@ -6526,7 +6526,7 @@ fn run_tells_each_step_on_stderr_as_it_runs() {
             "start lint\n",
             "[lint:stderr] bad\n",
             "done lint failed T\n",
-            "done ship cancelled\n",
+            "done ship not run: dependency lint (failed) did not hold\n",
             "run finished T\n",
         )
     );
@@ -6538,7 +6538,7 @@ fn run_tells_each_step_on_stderr_as_it_runs() {
         "start lint\n",
         "[lint:stderr] bad\n",
         "done lint failed T\n",
-        "done ship cancelled\n",
+        "done ship not run: dependency lint (failed) did not hold\n",
         "run finished T\n",
     );
     assert_eq!(timeless(&again.stderr), reused);
@@ -6681,7 +6681,7 @@ fn the_live_view_takes_back_every_row_it_draws() {
             "\u{2713} build passed T claims 1/1\n",
             "[lint:stderr] bad\n",
             "\u{2717} lint failed T\n",
-            "\u{2717} ship cancelled\n",
+            "\u{2717} ship not run: dependency lint (failed) did not hold\n",
         )
     );
 }

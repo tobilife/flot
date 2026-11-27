@@ -26,6 +26,11 @@
   (or `removed`) and showed its verdict as a plain `passed`. It now says `not
   selected in left`, shows `passed, partial: 1 of 2 steps`, and gives
   `left_partial`/`right_partial` in `--json`.
+- The progress view says why a step was not run (`✗ ship not run: dependency
+  lint (failed) did not hold`) instead of `cancelled`, which read as if the
+  run had been stopped. Times under 0.1 s are in milliseconds (`16ms`, not
+  `0.0s`). docs/cli.md says what the time covers: the whole step, proof and
+  flot's checks included, so more than the command's time in the summary.
 
 ## 0.2.9
 

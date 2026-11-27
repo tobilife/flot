@@ -68,7 +68,11 @@ every byte the run records.
   prints. A step that ends leaves one line: `✓` when it passed and `✗`
   otherwise, then what it came to (`passed`; `unverified` or `refuted`
   when it succeeded but a claim is unproven or disproven; `failed`,
-  `timeout` or `cancelled`), its time, and how many of its claims held. A
+  `timeout` or `cancelled`), its time, and how many of its claims held. The
+  time is the whole step: its command, its proof and flot's own checks
+  around them, so it is longer than the command's time the summary on
+  stdout gives; under 0.1 s it is in milliseconds. A step that was not run
+  says why instead: `✗ ship not run: dependency lint (failed) did not hold`. A
   reused step's line starts with `cached`. The rows are taken back with
   cursor-up and clear-line alone (the cursor is never hidden and the screen
   never switched), so a run stopped at any point leaves the terminal as it
@@ -105,7 +109,7 @@ start test
 done test passed 1.5s claims 1/1
 start ship
 [ship] shipping
-done ship passed 0.0s
+done ship passed 16ms
 run finished 3.2s
 ```
 
@@ -116,13 +120,13 @@ run 3 steps, 1 job
 cached build passed claims 1/1
 cached test passed claims 1/1
 cached ship passed
-run finished 0.0s
+run finished 28ms
 ```
 
 A step that may take more attempts says which one each line is
 (`start flaky attempt 2/2`), a step with candidates which candidate
-(`start pick candidate fast`), and a step that was not run ends `done ship
-cancelled`, with no time.
+(`start pick candidate fast`), and a step that was not run says why, with no
+time: `done ship not run: dependency lint (failed) did not hold`.
 
 ## Diff
 

@@ -173,8 +173,32 @@ fn held(claims: ClaimCounts) -> String {
     }
 }
 
+/// How a step ended: its outcome, time and claims, or, for one that never
+/// executed, why it was not run, which says more than `cancelled`.
+fn ended(
+    status: StepStatus,
+    attempt: u32,
+    duration_ms: u64,
+    claims: ClaimCounts,
+    why: Option<&str>,
+) -> String {
+    if let Some(why) = why {
+        return why.to_string();
+    }
+    // A step that never executed took no time worth telling.
+    let took = match attempt {
+        0 => String::new(),
+        _ => format!(" {}", seconds(duration_ms)),
+    };
+    format!("{}{took}{}", outcome(status, claims), held(claims))
+}
+
+/// `52ms` under a tenth of a second, `1.2s` from there.
 fn seconds(millis: u64) -> String {
-    format!("{}.{}s", millis / 1000, millis % 1000 / 100)
+    match millis {
+        0..100 => format!("{millis}ms"),
+        _ => format!("{}.{}s", millis / 1000, millis % 1000 / 100),
+    }
 }
 
 /// `[build]`, `[build:stderr]` or `[build:proof]`.
@@ -236,17 +260,12 @@ impl Plain {
                 status,
                 duration_ms,
                 claims,
+                why,
             } => {
                 let attempts = self.attempts.get(step).copied().unwrap_or(0);
-                // A step that never executed took no time worth telling.
-                let took = match attempt {
-                    0 => String::new(),
-                    _ => format!(" {}", seconds(*duration_ms)),
-                };
                 format!(
-                    "done {step} {}{took}{}{}",
-                    outcome(*status, *claims),
-                    held(*claims),
+                    "done {step} {}{}",
+                    ended(*status, *attempt, *duration_ms, *claims, why.as_deref()),
                     which(*attempt, attempts, candidate.as_deref())
                 )
             }
@@ -347,22 +366,18 @@ impl<W: Write> Live<W> {
                 status,
                 duration_ms,
                 claims,
+                why,
             } => {
                 let attempts = match self.running.iter().position(|r| r.step == *step) {
                     Some(index) => self.running.remove(index).attempts,
                     None => 0,
                 };
-                let word = outcome(*status, *claims);
-                let took = match attempt {
-                    0 => String::new(),
-                    _ => format!(" {}", seconds(*duration_ms)),
-                };
                 let text = format!(
-                    " {step} {word}{took}{}{}",
-                    held(*claims),
+                    " {step} {}{}",
+                    ended(*status, *attempt, *duration_ms, *claims, why.as_deref()),
                     which(*attempt, attempts, candidate.as_deref())
                 );
-                let mark = match word {
+                let mark = match outcome(*status, *claims) {
                     "passed" => self.paint("32", "\u{2713}"),
                     _ => self.paint("31", "\u{2717}"),
                 };
@@ -520,6 +535,7 @@ mod tests {
             status,
             duration_ms: millis,
             claims,
+            why: None,
         }
     }
 
@@ -596,7 +612,7 @@ mod tests {
         let written = String::from_utf8(live.out).unwrap();
         assert_eq!(
             written,
-            "\x1b[33m[build:stderr]\x1b[0m careful\n\x1b[32m\u{2713}\x1b[0m build passed 0.0s\n"
+            "\x1b[33m[build:stderr]\x1b[0m careful\n\x1b[32m\u{2713}\x1b[0m build passed 0ms\n"
         );
     }
 
@@ -636,13 +652,22 @@ mod tests {
                 status: StepStatus::Ok,
                 duration_ms: 50,
                 claims: claims(0, 0, 1),
+                why: None,
             },
             Event::StepCached {
                 step: "lint".into(),
                 candidate: None,
                 claims: claims(1, 0, 0),
             },
-            finished("ship", 0, StepStatus::Cancelled, 0, claims(0, 1, 0)),
+            Event::StepFinished {
+                step: "ship".into(),
+                attempt: 0,
+                candidate: None,
+                status: StepStatus::Cancelled,
+                duration_ms: 0,
+                claims: claims(0, 1, 0),
+                why: Some("not run: dependency lint (failed) did not hold".into()),
+            },
             Event::RunFinished { duration_ms: 12345 },
         ]
         .iter()
@@ -657,9 +682,9 @@ mod tests {
                 "start flaky attempt 2/2",
                 "done flaky passed 1.9s claims 1/1 attempt 2/2",
                 "start pick candidate fast",
-                "done pick refuted 0.0s claims 0/1 candidate fast",
+                "done pick refuted 50ms claims 0/1 candidate fast",
                 "cached lint passed claims 1/1",
-                "done ship cancelled claims 0/1",
+                "done ship not run: dependency lint (failed) did not hold",
                 "run finished 12.3s",
             ]
         );

@@ -53,7 +53,7 @@
   中，Claude Code 在新克隆的 `itoa` 仓库里拿到一个失败的流程，从记录的输出中找到失败的测试，
   修正了那个写错的数字，并从 `flot_run` 得到 `passed`，花费 $0.42。
 - **智能体在循环：修改、检查、再修改。** 输入没有变化的步骤会被复用，所以反复检查几乎没有
-  成本：本仓库的把关强制全部运行需要 47 秒，没有变化时只需 2.2 秒。设置了 `attempts = N` 的步骤
+  成本：本仓库的把关强制全部运行需要 29 秒，没有变化时只需 1.0 秒。设置了 `attempts = N` 的步骤
   会带着证明给出的失败信息重新运行，直到成立：在一次真实运行中，Claude Code 仅凭检查的失败输出
   找到了规格里没有写明的规则，第二次尝试通过，花费 $0.25。
 - **多个智能体处理同一个变更。** 审阅者在成本上限之下并发运行，并记录每一个的花费：在
@@ -141,37 +141,35 @@ flot show        # 最近一次运行的步骤、声明和局限
 ```
 $ flot run --force
 ran      toolchain            ok        51ms  claims 0v/0u/0r  receipt ac8c426f2dc2
-ran      format               ok        516ms  claims 1v/0u/0r  receipt c4b8109455ba
-ran      build                ok        7376ms  claims 1v/0u/0r  receipt 7618944cd3e4
-ran      cli                  ok        5952ms  claims 1v/0u/0r  receipt 3f9fa2ffc163
-    complete output: flot log cli 1795749192916-5517c789d045
-ran      lint                 ok        3901ms  claims 1v/0u/0r  receipt a729c8555639
-ran      rules                ok        1716ms  claims 1v/0u/0r  receipt 5f5d64e2d157
-ran      unit                 ok        3201ms  claims 1v/0u/0r  receipt 1ebc4854a725
-    complete output: flot log unit 1795749192916-5517c789d045
+ran      format               ok        525ms  claims 1v/0u/0r  receipt 31522f2a3a59
+ran      build                ok        1684ms  claims 1v/0u/0r  receipt b52fba96aaee
+ran      cli                  ok        1603ms  claims 1v/0u/0r  receipt 7b87465bcc2d
+ran      lint                 ok        1553ms  claims 1v/0u/0r  receipt 57c25728d2dc
+ran      rules                ok        1643ms  claims 1v/0u/0r  receipt 8ff3e16228ac
+ran      unit                 ok        1593ms  claims 1v/0u/0r  receipt 6b8d86baf14c
 
-PASSED 1795749192916-5517c789d045  root 5517c789d045  46750ms
+PASSED 1795759430290-287a58faa9fd  root 287a58faa9fd  29238ms
 limitations:
-  - proofs checked against origin/main (5d172c1b56c1)
+  - proofs checked against origin/main (b13444d78183)
 
 $ flot run     # nothing changed: receipts are reused and the root is identical
-ran      toolchain            ok        51ms  claims 0v/0u/0r  receipt ac8c426f2dc2
-cached   format               ok        516ms  claims 1v/0u/0r  receipt c4b8109455ba
-cached   build                ok        7376ms  claims 1v/0u/0r  receipt 7618944cd3e4
-cached   cli                  ok        5952ms  claims 1v/0u/0r  receipt 3f9fa2ffc163
-cached   lint                 ok        3901ms  claims 1v/0u/0r  receipt a729c8555639
-cached   rules                ok        1716ms  claims 1v/0u/0r  receipt 5f5d64e2d157
-cached   unit                 ok        3201ms  claims 1v/0u/0r  receipt 1ebc4854a725
+ran      toolchain            ok        52ms  claims 0v/0u/0r  receipt ac8c426f2dc2
+cached   format               ok        525ms  claims 1v/0u/0r  receipt 31522f2a3a59
+cached   build                ok        1684ms  claims 1v/0u/0r  receipt b52fba96aaee
+cached   cli                  ok        1603ms  claims 1v/0u/0r  receipt 7b87465bcc2d
+cached   lint                 ok        1553ms  claims 1v/0u/0r  receipt 57c25728d2dc
+cached   rules                ok        1643ms  claims 1v/0u/0r  receipt 8ff3e16228ac
+cached   unit                 ok        1593ms  claims 1v/0u/0r  receipt 6b8d86baf14c
 
-PASSED 1795749239899-5517c789d045  root 5517c789d045  2188ms
+PASSED 1795759459798-287a58faa9fd  root 287a58faa9fd  991ms
 limitations:
-  - proofs checked against origin/main (5d172c1b56c1)
+  - proofs checked against origin/main (b13444d78183)
 ```
 
-以上输出由 flot 0.2.10 记录，环境是 WSL2，仓库位于 Windows 驱动器上。第二次运行复用了
-有证明的六个步骤，用时 2.2 秒而不是 47 秒；被复用的步骤只显示记录时的耗时，不再打印其他内容。
+以上输出由 0.2.10 之后的 main 构建记录，环境是 WSL2，仓库位于 Windows 驱动器上。第二次运行复用了
+有证明的六个步骤，用时 1.0 秒而不是 29 秒；被复用的步骤只显示记录时的耗时，不再打印其他内容。
 `toolchain` 每次都会运行：只要 `rustc -vV` 和 `cargo -V` 的输出不变，它的收据就不变；工具链一变，其余步骤就会重新运行。对于实际运行的步骤，flot 还会在那一行
-下面打印输出的开头和结尾几行，这里省略了；`flot log unit` 可以打印完整输出。
+下面打印输出的开头和结尾几行，这里省略了；`flot log unit` 可以打印完整输出。测试步骤只构建测试，由证明运行测试，测试打印的内容用 `flot log unit --proof` 查看。
 
 运行期间，`flot run` 还会在 stderr 上显示每个正在运行的步骤、已用时间以及它打印的行，并标上步骤名：
 在终端上是实时视图，在 CI 中每个事件一行（`--progress auto|live|plain|off`，见[进度显示](../cli.md#progress)）。

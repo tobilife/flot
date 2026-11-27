@@ -56,8 +56,8 @@
   플로우를 받아, 기록된 출력에서 실패한 테스트를 찾고 잘못된 숫자 하나를 고쳐 `flot_run`에서
   `passed`를 받았습니다. 비용은 $0.42였습니다.
 - **에이전트가 고치고, 확인하고, 다시 고치는 반복을 할 때.** 입력이 바뀌지 않은 단계는
-  재사용되므로 확인을 반복해도 비용이 거의 없습니다. 이 저장소의 검증은 강제로 전부 돌리면 47초, 바뀐
-  것이 없으면 2.2초 걸립니다. `attempts = N`인 단계는 증명이 남긴 실패 내용을 받아 통과할
+  재사용되므로 확인을 반복해도 비용이 거의 없습니다. 이 저장소의 검증은 강제로 전부 돌리면 29초, 바뀐
+  것이 없으면 1.0초 걸립니다. `attempts = N`인 단계는 증명이 남긴 실패 내용을 받아 통과할
   때까지 다시 실행됩니다. 실제 실행에서 Claude Code는 검사의 실패 출력만 보고 명세에 없던
   규칙을 찾아 두 번째 시도에서 통과했고, 비용은 $0.25였습니다.
 - **에이전트 여러 개가 한 변경을 맡을 때.** 리뷰어들이 비용 상한 아래에서 동시에 실행되고,
@@ -152,39 +152,38 @@ flot show        # 최근 실행의 단계, 주장, 한계(limitation)
 ```
 $ flot run --force
 ran      toolchain            ok        51ms  claims 0v/0u/0r  receipt ac8c426f2dc2
-ran      format               ok        516ms  claims 1v/0u/0r  receipt c4b8109455ba
-ran      build                ok        7376ms  claims 1v/0u/0r  receipt 7618944cd3e4
-ran      cli                  ok        5952ms  claims 1v/0u/0r  receipt 3f9fa2ffc163
-    complete output: flot log cli 1795749192916-5517c789d045
-ran      lint                 ok        3901ms  claims 1v/0u/0r  receipt a729c8555639
-ran      rules                ok        1716ms  claims 1v/0u/0r  receipt 5f5d64e2d157
-ran      unit                 ok        3201ms  claims 1v/0u/0r  receipt 1ebc4854a725
-    complete output: flot log unit 1795749192916-5517c789d045
+ran      format               ok        525ms  claims 1v/0u/0r  receipt 31522f2a3a59
+ran      build                ok        1684ms  claims 1v/0u/0r  receipt b52fba96aaee
+ran      cli                  ok        1603ms  claims 1v/0u/0r  receipt 7b87465bcc2d
+ran      lint                 ok        1553ms  claims 1v/0u/0r  receipt 57c25728d2dc
+ran      rules                ok        1643ms  claims 1v/0u/0r  receipt 8ff3e16228ac
+ran      unit                 ok        1593ms  claims 1v/0u/0r  receipt 6b8d86baf14c
 
-PASSED 1795749192916-5517c789d045  root 5517c789d045  46750ms
+PASSED 1795759430290-287a58faa9fd  root 287a58faa9fd  29238ms
 limitations:
-  - proofs checked against origin/main (5d172c1b56c1)
+  - proofs checked against origin/main (b13444d78183)
 
 $ flot run     # nothing changed: receipts are reused and the root is identical
-ran      toolchain            ok        51ms  claims 0v/0u/0r  receipt ac8c426f2dc2
-cached   format               ok        516ms  claims 1v/0u/0r  receipt c4b8109455ba
-cached   build                ok        7376ms  claims 1v/0u/0r  receipt 7618944cd3e4
-cached   cli                  ok        5952ms  claims 1v/0u/0r  receipt 3f9fa2ffc163
-cached   lint                 ok        3901ms  claims 1v/0u/0r  receipt a729c8555639
-cached   rules                ok        1716ms  claims 1v/0u/0r  receipt 5f5d64e2d157
-cached   unit                 ok        3201ms  claims 1v/0u/0r  receipt 1ebc4854a725
+ran      toolchain            ok        52ms  claims 0v/0u/0r  receipt ac8c426f2dc2
+cached   format               ok        525ms  claims 1v/0u/0r  receipt 31522f2a3a59
+cached   build                ok        1684ms  claims 1v/0u/0r  receipt b52fba96aaee
+cached   cli                  ok        1603ms  claims 1v/0u/0r  receipt 7b87465bcc2d
+cached   lint                 ok        1553ms  claims 1v/0u/0r  receipt 57c25728d2dc
+cached   rules                ok        1643ms  claims 1v/0u/0r  receipt 8ff3e16228ac
+cached   unit                 ok        1593ms  claims 1v/0u/0r  receipt 6b8d86baf14c
 
-PASSED 1795749239899-5517c789d045  root 5517c789d045  2188ms
+PASSED 1795759459798-287a58faa9fd  root 287a58faa9fd  991ms
 limitations:
-  - proofs checked against origin/main (5d172c1b56c1)
+  - proofs checked against origin/main (b13444d78183)
 ```
 
-flot 0.2.10으로, 저장소를 Windows 드라이브에 둔 WSL2에서 기록한 출력입니다.
-두 번째 실행은 증명이 있는 여섯 단계를 재사용해 47초가 아니라 2.2초 걸렸고, 재사용된 단계는
+0.2.10 이후 main 빌드로, 저장소를 Windows 드라이브에 둔 WSL2에서 기록한 출력입니다.
+두 번째 실행은 증명이 있는 여섯 단계를 재사용해 29초가 아니라 1.0초 걸렸고, 재사용된 단계는
 기록될 때의 소요 시간만 보여 주고 다른 출력은 없습니다. `toolchain`은 매번 실행됩니다.
 `rustc -vV`와 `cargo -V`의 출력이 같으면 영수증도 같고, 툴체인이 바뀌면 나머지 단계가 다시 실행됩니다.
 실행된 단계 아래에는 출력의 앞과 끝 몇 줄도 찍히는데 여기서는 생략했고, 전체는
-`flot log unit`으로 볼 수 있습니다.
+`flot log unit`으로 볼 수 있습니다. 테스트 단계는 테스트를 빌드만 하고 실행은 증명이
+하므로, 테스트가 출력한 내용은 `flot log unit --proof`로 봅니다.
 
 실행하는 동안 `flot run`은 stderr에 실행 중인 단계와 지금까지 걸린 시간, 그리고 단계가 찍는
 줄을 단계 이름을 붙여 보여 줍니다. 터미널에서는 실시간 화면으로, CI에서는 이벤트마다 한 줄로

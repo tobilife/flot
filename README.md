@@ -60,7 +60,7 @@ It pays off when:
   `flot_run`, for $0.42.
 - **An agent loops: change, check, change again.** Steps whose inputs did not
   change are reused, so the check is cheap to repeat: this repository's gate
-  takes 47 s forced and 2.2 s when nothing changed. A step with `attempts = N`
+  takes 29 s forced and 1.0 s when nothing changed. A step with `attempts = N`
   runs again with what its proof said, until it holds: in a real run the
   check's failure output led Claude Code to a rule the spec never stated, on
   the second attempt, for $0.25.
@@ -168,41 +168,40 @@ This repository gates itself with flot ([`flot.toml`](flot.toml)):
 ```
 $ flot run --force
 ran      toolchain            ok        51ms  claims 0v/0u/0r  receipt ac8c426f2dc2
-ran      format               ok        516ms  claims 1v/0u/0r  receipt c4b8109455ba
-ran      build                ok        7376ms  claims 1v/0u/0r  receipt 7618944cd3e4
-ran      cli                  ok        5952ms  claims 1v/0u/0r  receipt 3f9fa2ffc163
-    complete output: flot log cli 1795749192916-5517c789d045
-ran      lint                 ok        3901ms  claims 1v/0u/0r  receipt a729c8555639
-ran      rules                ok        1716ms  claims 1v/0u/0r  receipt 5f5d64e2d157
-ran      unit                 ok        3201ms  claims 1v/0u/0r  receipt 1ebc4854a725
-    complete output: flot log unit 1795749192916-5517c789d045
+ran      format               ok        525ms  claims 1v/0u/0r  receipt 31522f2a3a59
+ran      build                ok        1684ms  claims 1v/0u/0r  receipt b52fba96aaee
+ran      cli                  ok        1603ms  claims 1v/0u/0r  receipt 7b87465bcc2d
+ran      lint                 ok        1553ms  claims 1v/0u/0r  receipt 57c25728d2dc
+ran      rules                ok        1643ms  claims 1v/0u/0r  receipt 8ff3e16228ac
+ran      unit                 ok        1593ms  claims 1v/0u/0r  receipt 6b8d86baf14c
 
-PASSED 1795749192916-5517c789d045  root 5517c789d045  46750ms
+PASSED 1795759430290-287a58faa9fd  root 287a58faa9fd  29238ms
 limitations:
-  - proofs checked against origin/main (5d172c1b56c1)
+  - proofs checked against origin/main (b13444d78183)
 
 $ flot run     # nothing changed: receipts are reused and the root is identical
-ran      toolchain            ok        51ms  claims 0v/0u/0r  receipt ac8c426f2dc2
-cached   format               ok        516ms  claims 1v/0u/0r  receipt c4b8109455ba
-cached   build                ok        7376ms  claims 1v/0u/0r  receipt 7618944cd3e4
-cached   cli                  ok        5952ms  claims 1v/0u/0r  receipt 3f9fa2ffc163
-cached   lint                 ok        3901ms  claims 1v/0u/0r  receipt a729c8555639
-cached   rules                ok        1716ms  claims 1v/0u/0r  receipt 5f5d64e2d157
-cached   unit                 ok        3201ms  claims 1v/0u/0r  receipt 1ebc4854a725
+ran      toolchain            ok        52ms  claims 0v/0u/0r  receipt ac8c426f2dc2
+cached   format               ok        525ms  claims 1v/0u/0r  receipt 31522f2a3a59
+cached   build                ok        1684ms  claims 1v/0u/0r  receipt b52fba96aaee
+cached   cli                  ok        1603ms  claims 1v/0u/0r  receipt 7b87465bcc2d
+cached   lint                 ok        1553ms  claims 1v/0u/0r  receipt 57c25728d2dc
+cached   rules                ok        1643ms  claims 1v/0u/0r  receipt 8ff3e16228ac
+cached   unit                 ok        1593ms  claims 1v/0u/0r  receipt 6b8d86baf14c
 
-PASSED 1795749239899-5517c789d045  root 5517c789d045  2188ms
+PASSED 1795759459798-287a58faa9fd  root 287a58faa9fd  991ms
 limitations:
-  - proofs checked against origin/main (5d172c1b56c1)
+  - proofs checked against origin/main (b13444d78183)
 ```
 
-Recorded with flot 0.2.10, on WSL2 with the repository on a Windows drive.
-The second run took 2.2 s instead of 47 s because the six proven steps were
-reused; a reused step reports the duration
+Recorded with a build of main after 0.2.10, on WSL2 with the repository on a
+Windows drive. The second run took 1.0 s instead of 29 s because the six
+proven steps were reused; a reused step reports the duration
 it was recorded with and prints nothing else. `toolchain` runs every time: its
 receipt stays the same while `rustc -vV` and `cargo -V` print the same, and it
 is what lets a different toolchain run the other steps again. Under each step that ran, flot also
 prints the first and last lines of its output, left out here; `flot log unit`
-prints all of it.
+prints all of it. The test steps only build the tests; their proofs run them,
+and `flot log unit --proof` prints what the tests printed.
 
 While it runs, `flot run` also shows on stderr each running step with its
 time so far and the lines it prints, tagged with its step: a live view on a

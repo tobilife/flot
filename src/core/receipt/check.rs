@@ -10,6 +10,13 @@ use super::{
 use crate::core::digest;
 use crate::core::metrics::Spend;
 
+/// What a run's receipts and observations are looked up in, by receipt id
+/// and by observation digest.
+struct Records<'a> {
+    receipts: &'a BTreeMap<&'a str, &'a Receipt>,
+    observations: &'a BTreeMap<&'a str, Observed>,
+}
+
 impl RunManifest {
     /// Everything in this manifest that does not follow from the receipts it
     /// names. Its run id, step list, per-step status and claim counts, totals,
@@ -25,6 +32,10 @@ impl RunManifest {
         receipts: &BTreeMap<&str, &Receipt>,
         observations: &BTreeMap<&str, Observed>,
     ) -> Vec<String> {
+        let records = Records {
+            receipts,
+            observations,
+        };
         let mut found = Vec::new();
         if self.run_id != Self::id_for(self.started_at_ms, &self.root_digest) {
             found.push(format!(
@@ -107,8 +118,7 @@ impl RunManifest {
                 &step.step_id,
                 &step.step_id,
                 &step.attempts,
-                receipts,
-                observations,
+                &records,
                 &mut spend,
                 &mut found,
             );
@@ -136,8 +146,7 @@ impl RunManifest {
                     &step.step_id,
                     &label,
                     &candidate.attempts,
-                    receipts,
-                    observations,
+                    &records,
                     &mut spend,
                     &mut found,
                 );
@@ -260,21 +269,19 @@ impl RunManifest {
 
     /// Judge a list of earlier attempts at a step and add what they spent.
     /// Returns their total reported cost, `None` when any of them is unknown.
-    #[allow(clippy::too_many_arguments)]
     fn attempts_judged(
         &self,
         step_id: &str,
         label: &str,
         attempts: &[RunAttempt],
-        receipts: &BTreeMap<&str, &Receipt>,
-        observations: &BTreeMap<&str, Observed>,
+        records: &Records,
         spend: &mut Spend,
         found: &mut Vec<String>,
     ) -> Option<u64> {
         let mut cost = Some(0);
         for (number, attempt) in attempts.iter().enumerate() {
             let label = format!("{label} attempt {}", number + 1);
-            let Some(earlier) = receipts.get(attempt.receipt_id.as_str()) else {
+            let Some(earlier) = records.receipts.get(attempt.receipt_id.as_str()) else {
                 found.push(format!(
                     "{label}: receipt {} is not available",
                     digest::short(&attempt.receipt_id)
@@ -294,7 +301,7 @@ impl RunManifest {
                     "{label}: it held, so the step would not have been tried again"
                 ));
             }
-            match observations.get(attempt.observed_digest.as_str()) {
+            match records.observations.get(attempt.observed_digest.as_str()) {
                 Some(observed) => {
                     spend.add_executed(observed.metrics);
                     cost = sum_costs(cost, observed.metrics.and_then(|m| m.cost_micro_usd));

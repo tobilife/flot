@@ -4,7 +4,6 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::Duration;
 
 use anyhow::{Context, Result};
 
@@ -230,8 +229,7 @@ impl Runner<'_> {
             &step.run,
             &self.root,
             &setup.env,
-            Duration::from_secs(budget.timeout_secs),
-            budget.max_output_bytes,
+            exec::Limits::of(budget),
             &options.stop,
             setup.confined.as_ref().map(|(_, prepared)| prepared),
             lines.as_ref(),
@@ -627,8 +625,7 @@ impl Runner<'_> {
             command,
             place,
             &env,
-            Duration::from_secs(budget.timeout_secs),
-            budget.max_output_bytes,
+            exec::Limits::of(budget),
             &options.stop,
             None,
             lines.as_ref(),

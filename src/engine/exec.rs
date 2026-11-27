@@ -20,6 +20,8 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
 
+use crate::core::flow::ResolvedBudget;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Outcome {
     pub exit_code: Option<i32>,
@@ -75,6 +77,24 @@ pub enum Stream {
 /// is kept for the record is told, so a stream past its budget stops where
 /// its record is cut.
 pub type Lines = Arc<dyn Fn(Stream, &[u8]) + Send + Sync>;
+
+/// How long a command may run and how many bytes each of its streams may
+/// print before it is stopped.
+#[derive(Debug, Clone, Copy)]
+pub struct Limits {
+    pub timeout: Duration,
+    pub max_output_bytes: usize,
+}
+
+impl Limits {
+    /// The limits a step's budget sets.
+    pub fn of(budget: ResolvedBudget) -> Self {
+        Limits {
+            timeout: Duration::from_secs(budget.timeout_secs),
+            max_output_bytes: budget.max_output_bytes,
+        }
+    }
+}
 
 impl Outcome {
     pub fn succeeded(&self) -> bool {
@@ -217,27 +237,23 @@ pub fn run_command(
     max_output_bytes: usize,
     stop: &StopSignal,
 ) -> Result<Outcome> {
-    run_confined(
-        command,
-        cwd,
-        env,
+    let limits = Limits {
         timeout,
         max_output_bytes,
-        stop,
-        None,
-        None,
-    )
+    };
+    run_confined(command, cwd, env, limits, stop, None, None)
 }
 
 /// [`run_command`], confined by `sandbox` when there is one, telling `lines`
 /// what it prints as it prints it when they are given.
-#[allow(clippy::too_many_arguments)]
 pub fn run_confined(
     command: &str,
     cwd: &Path,
     env: &BTreeMap<String, String>,
-    timeout: Duration,
-    max_output_bytes: usize,
+    Limits {
+        timeout,
+        max_output_bytes,
+    }: Limits,
     stop: &StopSignal,
     sandbox: Option<&crate::engine::sandbox::Prepared>,
     lines: Option<&Lines>,
@@ -843,8 +859,10 @@ mod tests {
                 "printf 'ab\\ncd\\r\\n' >&2; printf 'one\\ntwo\\nthree\\n'",
                 Path::new("."),
                 &env(),
-                Duration::from_secs(10),
-                9,
+                Limits {
+                    timeout: Duration::from_secs(10),
+                    max_output_bytes: 9,
+                },
                 &StopSignal::default(),
                 None,
                 lines,

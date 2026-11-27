@@ -60,7 +60,7 @@ It pays off when:
   `flot_run`, for $0.42.
 - **An agent loops: change, check, change again.** Steps whose inputs did not
   change are reused, so the check is cheap to repeat: this repository's gate
-  takes 25 s forced and 1.4 s when nothing changed. A step with `attempts = N`
+  takes 47 s forced and 2.2 s when nothing changed. A step with `attempts = N`
   runs again with what its proof said, until it holds: in a real run the
   check's failure output led Claude Code to a rule the spec never stated, on
   the second attempt, for $0.25.
@@ -167,36 +167,41 @@ This repository gates itself with flot ([`flot.toml`](flot.toml)):
 
 ```
 $ flot run --force
-ran      toolchain            ok        21ms  claims 0v/0u/0r  receipt 1fca18195c20
-ran      format               ok        312ms  claims 1v/0u/0r  receipt 4fb7511bf9b4
-ran      build                ok        896ms  claims 1v/0u/0r  receipt 967d03d654d0
-ran      lint                 ok        1086ms  claims 1v/0u/0r  receipt 8d49c8580516
-ran      test                 ok        7626ms  claims 2v/0u/0r  receipt d9d9645a73d9
-    complete output: flot log test 1795656258113-9733c6907cd0
+ran      toolchain            ok        51ms  claims 0v/0u/0r  receipt ac8c426f2dc2
+ran      format               ok        516ms  claims 1v/0u/0r  receipt c4b8109455ba
+ran      build                ok        7376ms  claims 1v/0u/0r  receipt 7618944cd3e4
+ran      cli                  ok        5952ms  claims 1v/0u/0r  receipt 3f9fa2ffc163
+    complete output: flot log cli 1795749192916-5517c789d045
+ran      lint                 ok        3901ms  claims 1v/0u/0r  receipt a729c8555639
+ran      rules                ok        1716ms  claims 1v/0u/0r  receipt 5f5d64e2d157
+ran      unit                 ok        3201ms  claims 1v/0u/0r  receipt 1ebc4854a725
+    complete output: flot log unit 1795749192916-5517c789d045
 
-PASSED 1795656258113-9733c6907cd0  root 9733c6907cd0  24805ms
+PASSED 1795749192916-5517c789d045  root 5517c789d045  46750ms
 limitations:
-  - proofs checked against origin/main (a921a812ccc7)
+  - proofs checked against origin/main (5d172c1b56c1)
 
 $ flot run     # nothing changed: receipts are reused and the root is identical
-ran      toolchain            ok        21ms  claims 0v/0u/0r  receipt 1fca18195c20
-cached   format               ok        312ms  claims 1v/0u/0r  receipt 4fb7511bf9b4
-cached   build                ok        896ms  claims 1v/0u/0r  receipt 967d03d654d0
-cached   lint                 ok        1086ms  claims 1v/0u/0r  receipt 8d49c8580516
-cached   test                 ok        7626ms  claims 2v/0u/0r  receipt d9d9645a73d9
+ran      toolchain            ok        51ms  claims 0v/0u/0r  receipt ac8c426f2dc2
+cached   format               ok        516ms  claims 1v/0u/0r  receipt c4b8109455ba
+cached   build                ok        7376ms  claims 1v/0u/0r  receipt 7618944cd3e4
+cached   cli                  ok        5952ms  claims 1v/0u/0r  receipt 3f9fa2ffc163
+cached   lint                 ok        3901ms  claims 1v/0u/0r  receipt a729c8555639
+cached   rules                ok        1716ms  claims 1v/0u/0r  receipt 5f5d64e2d157
+cached   unit                 ok        3201ms  claims 1v/0u/0r  receipt 1ebc4854a725
 
-PASSED 1795656285704-9733c6907cd0  root 9733c6907cd0  1398ms
+PASSED 1795749239899-5517c789d045  root 5517c789d045  2188ms
 limitations:
-  - proofs checked against origin/main (a921a812ccc7)
+  - proofs checked against origin/main (5d172c1b56c1)
 ```
 
-Recorded with a build of the `hardening` branch after 0.2.6, on WSL2 with the
-repository on a Windows drive. The second run took 1.4 s instead of 25 s
-because the four proven steps were reused; a reused step reports the duration
+Recorded with flot 0.2.10, on WSL2 with the repository on a Windows drive.
+The second run took 2.2 s instead of 47 s because the six proven steps were
+reused; a reused step reports the duration
 it was recorded with and prints nothing else. `toolchain` runs every time: its
 receipt stays the same while `rustc -vV` and `cargo -V` print the same, and it
 is what lets a different toolchain run the other steps again. Under each step that ran, flot also
-prints the first and last lines of its output, left out here; `flot log test`
+prints the first and last lines of its output, left out here; `flot log unit`
 prints all of it.
 
 While it runs, `flot run` also shows on stderr each running step with its

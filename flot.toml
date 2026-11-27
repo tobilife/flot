@@ -50,7 +50,8 @@ needs = ["toolchain", "build"]
 # The MCP server's tests read the plugin's skill.
 inputs = ["src/**/*.rs", "Cargo.toml", "plugins/claude-code/skills/flot/SKILL.md"]
 claims = ["the unit suite passes"]
-verify = "cargo test --quiet --lib --bins"
+# Doc tests run only when asked for, never with --lib or --test.
+verify = "cargo test --quiet --lib --bins && cargo test --quiet --doc"
 
 [[step]]
 id = "cli"

@@ -143,10 +143,12 @@ fn every_test_target_is_run_by_a_step_of_the_self_check() {
         .filter_map(|step| step.get("verify")?.as_str())
         .map(|verify| verify.split_whitespace().collect())
         .collect();
-    assert!(
-        proofs.iter().flatten().any(|word| *word == "--lib"),
-        "no step of flot.toml proves the unit tests (`--lib`)"
-    );
+    for (flag, what) in [("--lib", "the unit tests"), ("--doc", "the doc tests")] {
+        assert!(
+            proofs.iter().flatten().any(|word| *word == flag),
+            "no step of flot.toml proves {what} (`{flag}`)"
+        );
+    }
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
     for entry in std::fs::read_dir(dir).expect("tests/ is readable") {
         let path = entry.expect("tests/ lists").path();

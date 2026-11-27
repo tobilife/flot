@@ -5412,6 +5412,35 @@ fn guard_judges_the_file_a_path_leads_to() {
     }
 }
 
+/// Ask the flot binary at `bin` whether `bin` is protected, from `dir`.
+fn guard_own_binary(bin: &Path, dir: &Path, home: &Path) {
+    // Another test's child may still hold the copy open for writing for a
+    // moment after it was written (ETXTBSY on Linux).
+    let own = (0..100)
+        .find_map(|_| {
+            match Command::new(bin)
+                .args(["guard", bin.to_str().unwrap()])
+                .current_dir(dir)
+                .env("HOME", home)
+                .env("USERPROFILE", home)
+                .output()
+            {
+                Err(error) if error.kind() == std::io::ErrorKind::ExecutableFileBusy => {
+                    std::thread::sleep(std::time::Duration::from_millis(20));
+                    None
+                }
+                other => Some(other.unwrap()),
+            }
+        })
+        .expect("the copied binary starts");
+    let said = String::from_utf8_lossy(&own.stdout);
+    assert_eq!(own.status.code(), Some(2), "{said}");
+    assert!(
+        said.contains("it is the flot binary that enforces this guard"),
+        "{said}"
+    );
+}
+
 #[test]
 fn guard_consults_every_flow_above_a_file() {
     let project = two_proofs_project();
@@ -5481,31 +5510,18 @@ fn guard_consults_every_flow_above_a_file() {
         .join(flot_bin().file_name().unwrap());
     std::fs::create_dir_all(built.parent().unwrap()).unwrap();
     std::fs::copy(flot_bin(), &built).unwrap();
-    // Another test's child may still hold the copy open for writing for a
-    // moment after it was written (ETXTBSY on Linux).
-    let own = (0..100)
-        .find_map(|_| {
-            match Command::new(&built)
-                .args(["guard", built.to_str().unwrap()])
-                .current_dir(project.path())
-                .env("HOME", home.path())
-                .env("USERPROFILE", home.path())
-                .output()
-            {
-                Err(error) if error.kind() == std::io::ErrorKind::ExecutableFileBusy => {
-                    std::thread::sleep(std::time::Duration::from_millis(20));
-                    None
-                }
-                other => Some(other.unwrap()),
-            }
-        })
-        .expect("the copied binary starts");
-    let said = String::from_utf8_lossy(&own.stdout);
-    assert_eq!(own.status.code(), Some(2), "{said}");
-    assert!(
-        said.contains("it is the flot binary that enforces this guard"),
-        "{said}"
-    );
+    guard_own_binary(&built, project.path(), home.path());
+    // Also when the project is named through a link and the binary's own
+    // path is resolved, as macOS's /var is /private/var.
+    #[cfg(unix)]
+    {
+        let alias = home.path().join("alias");
+        std::os::unix::fs::symlink(project.path(), &alias).unwrap();
+        let named = alias
+            .join(".flot/builds/s/debug")
+            .join(flot_bin().file_name().unwrap());
+        guard_own_binary(&named, &alias, home.path());
+    }
     let tree = flot_in(
         project.path(),
         &["guard", "--command", "rm -rf ~/.claude"],

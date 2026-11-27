@@ -491,9 +491,12 @@ impl Guard {
     /// repository whose rule it is, and why.
     fn rule(&self, path: &Path) -> Option<(String, String)> {
         // The binary first: it is the binary wherever it is, a flot store
-        // included, where a proof built on a copy of the work leaves it.
+        // included, where a proof built on a copy of the work leaves it,
+        // and by whatever name, as macOS's `/var` for `/private/var`.
         if let Some(exe) = self.exe.as_deref() {
-            if strip_base(path, exe, FOLDS_CASE).as_deref() == Some("") {
+            let same = |path: &Path| strip_base(path, exe, FOLDS_CASE).as_deref() == Some("");
+            let name = |path: &Path| path.file_name().map(|name| folded(&name.to_string_lossy()));
+            if name(path) == name(exe) && (same(path) || same(&resolve(path))) {
                 return Some((
                     path.display().to_string(),
                     "it is the flot binary that enforces this guard".to_string(),

@@ -273,7 +273,11 @@ budgets, concurrency, outputs, guarded proofs, scope and sandbox.
   count for the change. A step with `held = ["tests/**"]` verifies only if
   its proof also passes with those files as the revision has them, so a
   change that passes only the tests it loosened or deleted proves nothing,
-  while the tests stay free to edit. The next run records what the plugin refused, and
+  while the tests stay free to edit. A step with `mutants` runs a mutation
+  tester (StrykerJS, cargo-mutants) once its proof passes and verifies only
+  if every mutant it makes is caught or allowed, with a reason, in an allow
+  list the revision has, so tests that pass whatever the code does prove
+  nothing. The next run records what the plugin refused, and
   `flot guard --replay` judges past Claude Code sessions the same way.
 - **Changes kept in scope.** A step with `may_change = ["src/**"]` fails if
   it creates, edits or deletes any other file that git does not ignore. On

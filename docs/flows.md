@@ -765,6 +765,113 @@ took 1,621 MB. `flot run` removes the copy and its build once no proof has
 used them for seven days, and `flot gc` at once; the next proof copies and
 builds again.
 
+### Proofs tested against mutants
+
+A proof can pass whatever the code does: a test that checks a function
+returns something, not what. `mutants` runs a mutation tester once the
+step's proof passes, and the claims verify only if every mutant it reports
+is caught, or allowed by a person in the allow list. A tester changes the
+code in small ways, one at a time, and runs the tests on each change; a
+mutant the tests do not fail on is a change they cannot tell from the code.
+
+```toml
+[[step]]
+id = "proto"
+run = "true"
+inputs = ["packages/sidecar-proto/src/**", "packages/sidecar-proto/tests/**"]
+claims = ["sidecar-proto's tests pass and catch every change to its source"]
+verify = "cd packages/sidecar-proto && npx vitest run"
+verify_inputs = ["packages/sidecar-proto/stryker.config.mjs", "packages/sidecar-proto/mutate.sh"]
+held = ["packages/sidecar-proto/tests/**"]
+mutants = { run = "sh packages/sidecar-proto/mutate.sh", report = "mutation.json", allow = "packages/sidecar-proto/mutants.allow.toml" }
+```
+
+`run` runs from the flow root with `$FLOT_MUTANTS_DIR`, an empty directory
+for the report, and `$FLOT_PROOFS_FROM`, the commit proofs are checked
+against when there is one, so it can mutate only what changed since (above,
+`mutate.sh` runs StrykerJS with `--mutate` on the lines `git diff
+"$FLOT_PROOFS_FROM"` names). `report` is the report's path in that
+directory, in one of two formats:
+
+- the mutation testing report schema, versions 1 and 2, which StrykerJS
+  and the tools that share it write. `Killed` and `Timeout` count as
+  caught, `Survived` and `NoCoverage` as survived, `CompileError`,
+  `RuntimeError` and `Ignored` as untested; a `Pending` mutant was never
+  tested, so the report verifies nothing. Paths are read under the
+  report's `projectRoot`, which must be in the flow root.
+- cargo-mutants' `outcomes.json`, with the `mutants.json` it writes beside
+  it: a mutant that file lists without an outcome was never tested, so the
+  report verifies nothing, and neither does a failing baseline.
+  `MissedMutant` counts as survived, `Unviable` as untested. Run it from
+  the flow root, which the report's paths are relative to.
+
+Real output on open-design, after a test of a new `sidecarStampArgs` was
+loosened to `expect(sidecarStampArgs(validStamp)).toHaveLength(5)`:
+
+```text
+$ flot run
+ran      proto                ok        12ms  claims 0v/1u/0r  receipt f46b5e0e3e35
+
+UNVERIFIED 1795797561765-9aea672dd074  root 9aea672dd074  3510ms
+limitations:
+  - proto: 2 mutants survived the proof: packages/sidecar-proto/src/index.ts:364: ArrowFunction: () => undefined; packages/sidecar-proto/src/index.ts:364: StringLiteral: ``; `flot show` names each as the allow list does; claims stay unverified
+  - proofs checked against main (143221f84f21)
+
+$ flot show latest
+run 1795797561765-9aea672dd074  flow od-mutants  root 9aea672dd074
+  proto                ok        ran     receipt f46b5e0e3e35
+      ? [unverified] sidecar-proto's tests pass and catch every change to its source
+        reason: 2 mutants survived the proof: packages/sidecar-proto/src/index.ts:364: ArrowFunction: () => undefined; packages/sidecar-proto/src/index.ts:364: StringLiteral: ``; `flot show` names each as the allow list does
+        with held files as the revision has them: passed
+        mutants: 1 caught, 2 survived
+          survived at packages/sidecar-proto/src/index.ts:364: { file = "packages/sidecar-proto/src/index.ts", mutation = "ArrowFunction: () => undefined", code = "sha256:4d72bf9a121082e3028d16a7162034bb2f41c0d094a7360fd3c99d12f7b2d655" }
+          survived at packages/sidecar-proto/src/index.ts:364: { file = "packages/sidecar-proto/src/index.ts", mutation = "StringLiteral: ``", code = "sha256:60c44aeae2dbdaabfe5634a33ff9f356e1e0b9ff02fcede195b185ee0ff9f0a4" }
+```
+
+With the test as it was, the three mutants of the new lines are caught and
+the claim verifies (`mutants: 3 caught, 0 survived`); the run took 5.3 s.
+`flot log proto --mutants` prints what the tester printed.
+
+A mutant can be equivalent, a change that does nothing the tests could
+see. The allow list, `allow`, is where a person says so, one entry per
+mutant, as `flot show` names it, with a reason:
+
+```toml
+[[allow]]
+file = "packages/sidecar-proto/src/index.ts"
+mutation = "StringLiteral: ``"
+code = "sha256:60c44aeae2dbdaabfe5634a33ff9f356e1e0b9ff02fcede195b185ee0ff9f0a4"
+reason = "why no test can tell this change apart"
+```
+
+`mutation` is cargo-mutants' description without its place (it names the
+function), or the schema's mutator and replacement; `code` is the digest of
+the code the mutant replaces, so an entry still names the mutant when other
+code moves it, and no longer once its code changes. An entry without a
+reason makes the report verify nothing. The allow list is a proof input:
+it feeds the step key, the guard refuses edits to it, and one that differs
+from the revision leaves the claims unverified
+(`packages/sidecar-proto/mutants.allow.toml is not there`), so an agent
+cannot allow its own survivors. With no allow list, nothing is allowed.
+List what `run` runs in `verify_inputs`, as `mutate.sh` is above, or an edit
+to it can change what is tested.
+
+The run counts toward the step's spend, and its output and report are kept
+in the store. A run that times out or is stopped, writes no report, or
+changes the outputs or the files the proof read verifies nothing. A cached
+receipt is reused only if it was tested against the same revision, since
+what is mutated can follow the changes since it, and `flot verify` treats a
+step whose `mutants` changed, or a verified claim not tested by the
+revision's command, as a proof that differs. It needs claims and a `verify`
+command, and is not available with `candidates`.
+
+flot tests its own proofs this way, with cargo-mutants on the code changed
+since main (the `mutants` step of `flot.toml`). On the change that added
+`mutants`, 1,748 lines added, it made 145 mutants: 108 caught, 37 that do
+not build, none surviving; the whole run took 202 s. With one assertion of the
+new tests removed, the run was unverified with the mutant it let through:
+`src/adapters/cli/render.rs:349: replace > with >= in render_detail`.
+
 ### Refusing the edit
 
 `flot guard PATH...` names the paths whose change would touch the proofs: the

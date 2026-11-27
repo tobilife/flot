@@ -51,6 +51,11 @@ leave the change to the user. The refusal is recorded in the next run.
   changed: read that run with `flot_step_output` (`step`, `held: true`) and
   fix the code until the original tests pass too. Change a held test only
   when its old expectation is wrong, and say so.
+- A claim left unverified because a mutant survived means the tests pass
+  whatever that code does: `flot_show` names each survivor. Write a test
+  that fails with the mutation (read the tester's output with
+  `flot_step_output`, `step`, `mutants: true`). Do not add the survivor to
+  the allow list: only a person may decide a mutant is harmless.
 - Fix the code under test, not the flow's proof commands, the files they
   read, or what runs the checks (CI workflows, git hooks, Claude Code
   settings): that voids the evidence.

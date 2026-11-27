@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- A step can hold its proof to the mutants a mutation tester makes of the
+  work: with `mutants = { run, report, allow }`, once the proof passes the
+  tester runs with `$FLOT_MUTANTS_DIR` for its report and
+  `$FLOT_PROOFS_FROM` for the revision, and the claims verify only if every
+  mutant is caught or allowed by an entry of the allow list, which names the
+  file, the mutation and a digest of the code it changes, with a reason.
+  The allow list is a proof input, so only one the revision has counts.
+  Reports in the mutation testing report schema (StrykerJS) and
+  cargo-mutants' `outcomes.json` are read; one with a mutant left untested
+  verifies nothing. `flot show` names each survivor as an entry would, and
+  `flot log STEP --mutants` prints what the tester printed. On open-design,
+  StrykerJS on the lines a change added found the two mutants a loosened
+  test let through; on flot, cargo-mutants on this change made 145 mutants
+  and found the one an assertion removed let through.
 - Proofs on copies of the work, for `fails_before` or `held`, run in one
   copy kept in `.flot/builds/work` and build Rust in `.flot/builds/target`,
   held by one proof at a time, instead of a new copy each time and a build

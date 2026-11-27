@@ -40,20 +40,41 @@ inputs = ["src/**/*.rs", "tests/**/*.rs"]
 claims = ["clippy reports no warnings on any target"]
 verify = "cargo clippy --all-targets -- -D warnings"
 
+# One proof per claim, so a failing test refutes only the claim it shows.
+# Each step is keyed on the files its tests read; tests/readme.rs checks that
+# every test target is run by one of them.
 [[step]]
-id = "test"
-run = "cargo test"
+id = "unit"
+run = "cargo test --lib --bins"
 needs = ["toolchain", "build"]
-# The tests also read the READMEs, the files that name the release, and the
-# plugin (its hooks and the skill), so those key this step too.
+# The MCP server's tests read the plugin's skill.
+inputs = ["src/**/*.rs", "Cargo.toml", "plugins/claude-code/skills/flot/SKILL.md"]
+claims = ["the unit suite passes"]
+verify = "cargo test --quiet --lib --bins"
+
+[[step]]
+id = "cli"
+run = "cargo test --test cli --test guard_corpus"
+needs = ["toolchain", "build"]
 inputs = [
-  "src/**/*.rs", "tests/**/*.rs", "Cargo.toml", "README.md", "docs/readme/*.md",
-  "docs/ci.md", "action.yml", "plugins/claude-code/**/*",
-  ".claude-plugin/marketplace.json", "tests/guard_corpus.toml",
-  "rust-toolchain.toml", ".github/workflows/*.yml",
+  "src/**/*.rs", "Cargo.toml", "tests/cli.rs", "tests/guard_corpus.rs",
+  "tests/guard_corpus.toml", "plugins/claude-code/**/*",
 ]
-claims = [
-  "the unit suite passes",
-  "the end-to-end CLI suite passes",
+claims = ["the end-to-end CLI suite passes"]
+verify = "cargo test --quiet --test cli --test guard_corpus"
+
+[[step]]
+id = "rules"
+run = "cargo test --test architecture --test readme"
+needs = ["toolchain", "build"]
+# The module rules read src/; the release checks read the files that name the
+# release or the toolchain, and this flow.
+inputs = [
+  "src/**/*.rs", "Cargo.toml", "tests/architecture.rs", "tests/readme.rs",
+  "flot.toml", "README.md", "docs/readme/*.md", "docs/ci.md", "action.yml",
+  "plugins/claude-code/.claude-plugin/plugin.json",
+  ".claude-plugin/marketplace.json", "rust-toolchain.toml",
+  ".github/workflows/*.yml",
 ]
-verify = "cargo test --quiet"
+claims = ["the module rules and the release references hold"]
+verify = "cargo test --quiet --test architecture --test readme"

@@ -130,3 +130,34 @@ fn the_workflows_build_with_the_pinned_toolchain() {
         }
     }
 }
+
+/// flot.toml proves each claim with its own `cargo test` selection, so a test
+/// target that no step selects would never be run by the self-check.
+#[test]
+fn every_test_target_is_run_by_a_step_of_the_self_check() {
+    let flow: toml::Value = toml::from_str(&read("flot.toml")).expect("flot.toml is TOML");
+    let proofs: Vec<Vec<&str>> = flow["step"]
+        .as_array()
+        .expect("flot.toml has steps")
+        .iter()
+        .filter_map(|step| step.get("verify")?.as_str())
+        .map(|verify| verify.split_whitespace().collect())
+        .collect();
+    assert!(
+        proofs.iter().flatten().any(|word| *word == "--lib"),
+        "no step of flot.toml proves the unit tests (`--lib`)"
+    );
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
+    for entry in std::fs::read_dir(dir).expect("tests/ is readable") {
+        let path = entry.expect("tests/ lists").path();
+        if path.extension().is_some_and(|ext| ext == "rs") {
+            let target = path.file_stem().unwrap().to_string_lossy().into_owned();
+            assert!(
+                proofs.iter().any(|words| words
+                    .windows(2)
+                    .any(|pair| pair == ["--test", target.as_str()])),
+                "no step of flot.toml proves tests/{target}.rs (`--test {target}`)"
+            );
+        }
+    }
+}

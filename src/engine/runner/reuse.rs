@@ -85,6 +85,22 @@ impl Runner<'_> {
                 return Ok(None);
             }
         }
+        // So does what the held files are at the revision.
+        if !step.held.is_empty() {
+            let held_at = known
+                .identity
+                .claims
+                .iter()
+                .find_map(|claim| claim.held.as_ref())
+                .map(|held| held.base.clone());
+            if held_at != self.baseline.map(|baseline| baseline.held_base(&step.held)) {
+                notes.push(
+                    "cached receipt was not proven with the held files as this revision has them; the step runs again"
+                        .into(),
+                );
+                return Ok(None);
+            }
+        }
         for output in &known.identity.outputs {
             if !step.declares_output(&output.path) {
                 notes.push(format!(

@@ -151,6 +151,10 @@ pub(super) enum Command {
         /// What the step's proof printed (stdout and stderr together) instead.
         #[arg(long, conflicts_with = "stderr")]
         proof: bool,
+        /// What the step's proof printed with its `held` files as the
+        /// revision has them.
+        #[arg(long, conflicts_with_all = ["stderr", "proof"])]
+        held: bool,
         /// Another candidate the run executed, instead of the one it kept.
         #[arg(long, value_name = "NAME")]
         candidate: Option<String>,

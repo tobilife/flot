@@ -443,6 +443,7 @@ mod tests {
             verify_output_digest: None,
             reason: None,
             before: None,
+            held: None,
         }
     }
 

@@ -206,6 +206,13 @@ impl Search<'_> {
                 .as_ref()
                 .map(|before| ("proof before the change", before.output_digest.as_str()))
         }));
+        outputs.extend(identity.claims.iter().filter_map(|claim| {
+            claim
+                .held
+                .as_ref()
+                .and_then(|held| held.output_digest.as_deref())
+                .map(|digest| ("proof with the held files", digest))
+        }));
         for (source, object) in outputs {
             let bytes = match self.store.read_bytes(object) {
                 Ok(bytes) => bytes,

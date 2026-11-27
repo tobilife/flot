@@ -132,6 +132,15 @@ pub struct Step {
     /// there. A proof that passes either way shows nothing this change did.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub fails_before: bool,
+    /// Proof files held to the revision proofs are checked against, as globs
+    /// relative to the flow root, such as the tests: once the proof passes,
+    /// it runs again on a copy of the work with these files as the revision
+    /// has them (edited ones put back, deleted ones restored, new ones
+    /// removed), and the claims verify only if it passes there too. Work
+    /// that rewrites or drops a test to pass stays unverified until the
+    /// rewritten test is at the revision.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub held: Vec<String>,
     /// The step runs on every run and its receipt is never reused: for a
     /// probe of what no key covers, such as the toolchain on `PATH`. Its
     /// receipt id follows what it printed and produced, so the steps that
@@ -303,6 +312,32 @@ impl Flow {
                         "step `{}` sets fails_before, which candidates do not support: a candidate's copy of the work has no history to undo its changes against",
                         step.id
                     );
+                }
+            }
+            if !step.held.is_empty() {
+                if step.claims.is_empty() || step.verify.is_none() {
+                    bail!(
+                        "step `{}` holds files to the revision, which needs claims and a verify command to prove them",
+                        step.id
+                    );
+                }
+                if !step.candidates.is_empty() {
+                    bail!(
+                        "step `{}` holds files to the revision, which candidates do not support: each candidate's copy would need its own",
+                        step.id
+                    );
+                }
+                for pattern in &step.held {
+                    if !is_contained(pattern) {
+                        bail!(
+                            "step `{}` held `{}` must be a relative path inside the flow root",
+                            step.id,
+                            pattern
+                        );
+                    }
+                    glob::Pattern::new(pattern).with_context(|| {
+                        format!("step `{}` held `{}` is not a valid glob", step.id, pattern)
+                    })?;
                 }
             }
             if step.always && !step.candidates.is_empty() {
@@ -758,6 +793,43 @@ claims = ["b holds"]
         assert!(!serde_json::to_string(&plain.steps[0])
             .unwrap()
             .contains("fails_before"));
+    }
+
+    #[test]
+    fn held_files_need_a_proof_paths_inside_the_root_and_no_candidates() {
+        let base = "[flow]\nname = \"demo\"\n\n[[step]]\nid = \"a\"\nrun = \"true\"\n";
+        let proven = format!("{base}claims = [\"x\"]\nverify = \"true\"\n");
+        let flow_of = |extra: &str| flow(&format!("{proven}{extra}"));
+        assert_eq!(
+            flow_of("held = [\"tests/**\"]\n").unwrap().steps[0].held,
+            ["tests/**"]
+        );
+        for (text, refusal) in [
+            (
+                format!("{base}held = [\"t\"]\n"),
+                "needs claims and a verify command",
+            ),
+            (
+                format!("{base}claims = [\"x\"]\nheld = [\"t\"]\n"),
+                "needs claims and a verify command",
+            ),
+            (
+                format!("{proven}held = [\"t\"]\ncandidates = [\"p\", \"q\"]\n"),
+                "candidates do not support",
+            ),
+            (
+                format!("{proven}held = [\"../t\"]\n"),
+                "inside the flow root",
+            ),
+            (format!("{proven}held = [\"[\"]\n"), "not a valid glob"),
+        ] {
+            let error = format!("{:#}", flow(&text).unwrap_err());
+            assert!(error.contains(refusal), "{text}: {error}");
+        }
+        // Unset, it leaves the flow's digest as it was.
+        assert!(!serde_json::to_string(&flow(&proven).unwrap().steps[0])
+            .unwrap()
+            .contains("held"));
     }
 
     #[test]

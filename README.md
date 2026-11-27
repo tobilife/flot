@@ -270,7 +270,10 @@ budgets, concurrency, outputs, guarded proofs, scope and sandbox.
   that no step read, the changes no claim speaks for. A step with
   `fails_before = true` verifies only if its proof also fails with every
   change since the revision undone, so a proof that passed anyway does not
-  count for the change. The next run records what the plugin refused, and
+  count for the change. A step with `held = ["tests/**"]` verifies only if
+  its proof also passes with those files as the revision has them, so a
+  change that passes only the tests it loosened or deleted proves nothing,
+  while the tests stay free to edit. The next run records what the plugin refused, and
   `flot guard --replay` judges past Claude Code sessions the same way.
 - **Changes kept in scope.** A step with `may_change = ["src/**"]` fails if
   it creates, edits or deletes any other file that git does not ignore. On

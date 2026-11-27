@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- A step with `held = ["tests/**"]` verifies only if its proof also passes
+  on a copy of the work where those files are as the `proofs_from` revision
+  has them, so a change that passes only tests it loosened, deleted or
+  replaced proves nothing, while the tests stay free to edit. `flot log STEP
+  --held` and MCP `flot_step_output` with `held: true` print what that run
+  printed, and `flot show` says how it ended.
 - `flot log STEP --proof` prints what the step's proof printed, stdout and
   stderr together, and MCP `flot_step_output` takes `proof: true`. Before,
   a refuted claim's evidence was reachable only through its receipt's digest

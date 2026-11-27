@@ -46,6 +46,11 @@ leave the change to the user. The refusal is recorded in the next run.
   with `flot_step_output` (`step`, and `stderr: true` for stderr).
 - A refuted claim's evidence is what its proof printed, not the step's
   output: read it with `flot_step_output` (`step`, `proof: true`).
+- A claim left unverified because the proof fails with the step's `held`
+  files as the revision has them means the change passes only tests it
+  changed: read that run with `flot_step_output` (`step`, `held: true`) and
+  fix the code until the original tests pass too. Change a held test only
+  when its old expectation is wrong, and say so.
 - Fix the code under test, not the flow's proof commands, the files they
   read, or what runs the checks (CI workflows, git hooks, Claude Code
   settings): that voids the evidence.

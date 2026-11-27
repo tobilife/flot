@@ -263,13 +263,14 @@ impl Server {
                         candidate: text("candidate"),
                         attempt: count("attempt"),
                     },
-                    match (flag("stderr"), flag("proof")) {
-                        (true, true) => {
-                            bail!("`stderr` and `proof` name different outputs; ask for one")
-                        }
-                        (true, false) => crate::service::Stream::Stderr,
-                        (false, true) => crate::service::Stream::Proof,
-                        (false, false) => crate::service::Stream::Stdout,
+                    match (flag("stderr"), flag("proof"), flag("held")) {
+                        (false, false, false) => crate::service::Stream::Stdout,
+                        (true, false, false) => crate::service::Stream::Stderr,
+                        (false, true, false) => crate::service::Stream::Proof,
+                        (false, false, true) => crate::service::Stream::Held,
+                        _ => bail!(
+                            "`stderr`, `proof` and `held` name different outputs; ask for one"
+                        ),
                     },
                 )?,
                 count("max_bytes").unwrap_or(DEFAULT_OBJECT_BYTES),
@@ -608,6 +609,7 @@ fn tool_catalog() -> Vec<Value> {
                 "run": { "type": "string", "description": "Run selector; defaults to latest." },
                 "stderr": { "type": "boolean", "description": "Read stderr instead of stdout." },
                 "proof": { "type": "boolean", "description": "Read what the step's proof printed (stdout and stderr together) instead." },
+                "held": { "type": "boolean", "description": "Read what the step's proof printed with its held files as the revision has them instead." },
                 "max_bytes": { "type": "integer", "minimum": 1, "description": "Inline byte ceiling; the complete object stays retrievable." }
             }),
             &["step"],
@@ -737,6 +739,19 @@ verify = "grep -q flot artifact.txt"
             json!({ "step": "write", "proof": true, "stderr": true }),
         );
         assert_eq!(both["isError"], true, "{both}");
+        let stderr = call(
+            &server,
+            "flot_step_output",
+            json!({ "step": "write", "stderr": true }),
+        );
+        assert_eq!(stderr["isError"], false, "{stderr}");
+        let held = call(
+            &server,
+            "flot_step_output",
+            json!({ "step": "write", "held": true }),
+        );
+        assert_eq!(held["isError"], true, "{held}");
+        assert!(held.to_string().contains("holds no files"), "{held}");
     }
 
     #[test]

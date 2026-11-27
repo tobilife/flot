@@ -84,6 +84,10 @@ struct Proof<'a> {
     fails_before: Option<bool>,
     /// For a receipt, the commit its proof was run before the change at, if any.
     checked_at: Option<&'a str>,
+    /// For a step, the files it holds to the revision.
+    held: Option<&'a [String]>,
+    /// For a receipt, the digest of the files its proof was held to, if any.
+    held_base: Option<&'a str>,
     /// Whether a claim was verified: only then does how it was matter.
     verified: bool,
 }
@@ -176,40 +180,103 @@ impl Baseline {
         let mut changed = self.edited(&git)?;
         changed.extend(listed(&git, &UNTRACKED)?);
         for path in &changed {
-            let target = copy.join(path);
-            let present = std::fs::symlink_metadata(&target).ok();
-            let Some(blob) = self.tree.get(path) else {
-                // A directory here is a nested repository, not a file.
-                if present.is_some_and(|meta| !meta.is_dir()) {
-                    std::fs::remove_file(&target)
-                        .with_context(|| format!("cannot remove {path}"))?;
+            self.put_back(&git, copy, path)?;
+        }
+        Ok(())
+    }
+
+    /// Put `path` in `copy` as the revision has it: its content and mode, or
+    /// removed when the revision has no such file.
+    fn put_back(&self, git: &Git, copy: &Path, path: &str) -> Result<()> {
+        let target = copy.join(path);
+        let present = std::fs::symlink_metadata(&target).ok();
+        let Some(blob) = self.tree.get(path) else {
+            // A directory here is a nested repository, not a file.
+            if present.is_some_and(|meta| !meta.is_dir()) {
+                std::fs::remove_file(&target).with_context(|| format!("cannot remove {path}"))?;
+            }
+            return Ok(());
+        };
+        // A link would let a later write land outside the copy.
+        if blob.mode == "120000" {
+            anyhow::bail!("{path} is a symbolic link at {}", self.label());
+        }
+        let bytes = git
+            .blob(&blob.id, MAX_FILE_BYTES)
+            .with_context(|| format!("cannot read {path} at {}", self.label()))?;
+        match present {
+            Some(meta) if meta.is_dir() => std::fs::remove_dir_all(&target),
+            _ => Ok(()),
+        }
+        .with_context(|| format!("cannot replace {path}"))?;
+        if let Some(parent) = target.parent() {
+            std::fs::create_dir_all(parent)
+                .with_context(|| format!("cannot create {}", parent.display()))?;
+        }
+        std::fs::write(&target, bytes).with_context(|| format!("cannot write {path}"))?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = if blob.mode == "100755" { 0o755 } else { 0o644 };
+            std::fs::set_permissions(&target, std::fs::Permissions::from_mode(mode))
+                .with_context(|| format!("cannot set the mode of {path}"))?;
+        }
+        Ok(())
+    }
+
+    /// The files at the revision that `patterns` match.
+    fn held_at<'s>(&'s self, patterns: &[String]) -> impl Iterator<Item = (&'s String, &'s Blob)> {
+        let patterns: Vec<glob::Pattern> = patterns
+            .iter()
+            .filter_map(|pattern| glob::Pattern::new(pattern).ok())
+            .collect();
+        self.tree.iter().filter(move |(path, _)| {
+            patterns
+                .iter()
+                .any(|pattern| pattern.matches_with(path, keying::match_options()))
+        })
+    }
+
+    /// The digest of the files `patterns` match at the revision: each one's
+    /// path, mode and content. A verdict on them holds while it is the same.
+    pub fn held_base(&self, patterns: &[String]) -> String {
+        let listed: String = self
+            .held_at(patterns)
+            .map(|(path, blob)| format!("{} {} {path}\n", blob.mode, blob.id))
+            .collect();
+        digest::bytes(listed.as_bytes())
+    }
+
+    /// The files `patterns` match that differ here from the revision, given
+    /// what they hold here: edited, gone, or not at the revision.
+    pub fn held_changes(&self, patterns: &[String], here: &[FileDigest]) -> Result<Vec<String>> {
+        let mut changed = BTreeSet::new();
+        let at: Vec<(&String, &Blob)> = self.held_at(patterns).collect();
+        for (path, blob) in &at {
+            let same = match here.iter().find(|file| &file.path == *path) {
+                None => false,
+                Some(file) => {
+                    self.digest(path)?.as_deref() == Some(file.digest.as_str())
+                        && (blob.mode == "100755") == file.executable
                 }
-                continue;
             };
-            // A link would let a later write land outside the copy.
-            if blob.mode == "120000" {
-                anyhow::bail!("{path} is a symbolic link at {}", self.label());
+            if !same {
+                changed.insert(path.to_string());
             }
-            let bytes = git
-                .blob(&blob.id, MAX_FILE_BYTES)
-                .with_context(|| format!("cannot read {path} at {}", self.label()))?;
-            match present {
-                Some(meta) if meta.is_dir() => std::fs::remove_dir_all(&target),
-                _ => Ok(()),
+        }
+        for file in here {
+            if !at.iter().any(|(path, _)| **path == file.path) {
+                changed.insert(file.path.clone());
             }
-            .with_context(|| format!("cannot replace {path}"))?;
-            if let Some(parent) = target.parent() {
-                std::fs::create_dir_all(parent)
-                    .with_context(|| format!("cannot create {}", parent.display()))?;
-            }
-            std::fs::write(&target, bytes).with_context(|| format!("cannot write {path}"))?;
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                let mode = if blob.mode == "100755" { 0o755 } else { 0o644 };
-                std::fs::set_permissions(&target, std::fs::Permissions::from_mode(mode))
-                    .with_context(|| format!("cannot set the mode of {path}"))?;
-            }
+        }
+        Ok(changed.into_iter().collect())
+    }
+
+    /// Put each of `paths` in `copy` as the revision has it.
+    pub fn hold(&self, copy: &Path, paths: &[String]) -> Result<()> {
+        let git = Git::open(&self.root)?;
+        for path in paths {
+            self.put_back(&git, copy, path)?;
         }
         Ok(())
     }
@@ -265,6 +332,8 @@ impl Baseline {
             files: verify_inputs,
             fails_before: Some(step.fails_before),
             checked_at: None,
+            held: Some(&step.held),
+            held_base: None,
             verified: false,
         })
     }
@@ -292,6 +361,12 @@ impl Baseline {
                 .iter()
                 .find_map(|claim| claim.before.as_ref())
                 .map(|before| before.commit.as_str()),
+            held: None,
+            held_base: identity
+                .claims
+                .iter()
+                .find_map(|claim| claim.held.as_ref())
+                .map(|held| held.base.as_str()),
             verified: identity
                 .claims
                 .iter()
@@ -343,6 +418,27 @@ impl Baseline {
                                 "its proof was run before the change at {}, not at this revision",
                                 &commit[..commit.len().min(12)]
                             ),
+                        });
+                    }
+                    None => {}
+                }
+                match proof.held {
+                    Some(declared) if declared != old.held.as_slice() => {
+                        reasons.push("its held files differ".into());
+                    }
+                    Some(_) => {}
+                    // A receipt held to the revision's files: what it
+                    // verified, it must have proven with them as they are.
+                    None if !old.held.is_empty()
+                        && proof.verified
+                        && proof.held_base != Some(self.held_base(&old.held).as_str()) =>
+                    {
+                        reasons.push(match proof.held_base {
+                            None => {
+                                "its proof was not held to the files at this revision".to_string()
+                            }
+                            Some(_) => "its proof was held to other files than this revision has"
+                                .to_string(),
                         });
                     }
                     None => {}

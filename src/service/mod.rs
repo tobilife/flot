@@ -214,6 +214,9 @@ pub enum Stream {
     Stderr,
     /// What the step's proof printed, stdout and stderr together.
     Proof,
+    /// What the step's proof printed with its `held` files as the revision
+    /// has them.
+    Held,
 }
 
 /// A stored object under a delivery budget. The complete object stays
@@ -611,6 +614,22 @@ impl Workspace {
                         .find_map(|claim| claim.reason.as_deref())
                         .map(|reason| format!(": {reason}"))
                         .unwrap_or_else(|| ": it makes no claims".into())
+                ),
+            },
+            Stream::Held => match identity
+                .claims
+                .iter()
+                .find_map(|claim| claim.held.as_ref()?.output_digest.clone())
+            {
+                Some(digest) => digest,
+                None => bail!(
+                    "step `{step}` of run {} ran no proof with held files: {}",
+                    manifest.run_id,
+                    if identity.claims.iter().any(|claim| claim.held.is_some()) {
+                        "they are here as the revision has them, so its proof already ran with them"
+                    } else {
+                        "it holds no files to a revision, or its proof did not pass first"
+                    }
                 ),
             },
         })

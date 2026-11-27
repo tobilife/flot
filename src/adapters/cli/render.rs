@@ -323,6 +323,20 @@ pub(super) fn render_detail(detail: &RunDetail) {
                         None => say!("        before the change ({commit}): stopped"),
                     }
                 }
+                if let Some(held) = &claim.held {
+                    match (held.files.is_empty(), held.exit_code) {
+                        (true, _) => say!("        held files: as the revision has them"),
+                        (false, Some(0)) => {
+                            say!("        with held files as the revision has them: passed")
+                        }
+                        (false, Some(code)) => {
+                            say!("        with held files as the revision has them: exited {code}")
+                        }
+                        (false, None) => {
+                            say!("        with held files as the revision has them: stopped")
+                        }
+                    }
+                }
             }
         }
         if matches!(step.status, StepStatus::Failed | StepStatus::Timeout) {

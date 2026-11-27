@@ -678,6 +678,75 @@ receipt is reused only if it was checked at the one the run is held to, and
 `flot verify` treats a step that drops `fails_before`, or a verified claim
 not checked at the revision, as a proof that differs.
 
+### Proofs held to the revision's tests
+
+Listing the tests in `verify_inputs` stops a change from loosening them, and
+from adding to them too. `held` keeps the tests free to edit and still holds
+the work to the ones it started from: with `held = ["tests/**"]`, once a
+step's proof passes it runs again on a copy of the work where the files the
+patterns match are as the revision has them: edited and deleted ones get
+their content and mode back, and ones the revision does not have are
+removed. The claims verify only if the proof passes there too, so a change
+that passes only the tests it loosened, deleted or replaced proves nothing;
+one that also adds tests verifies on the old ones. When the files are here
+as the revision has them, the proof already ran with them and nothing runs
+again. It needs a revision (`proofs_from` or `--proofs-from`), claims and a
+`verify` command, and is not available with `candidates`. Tests inside the
+code they test, such as Rust's `#[cfg(test)]` modules, cannot be held apart
+from it.
+
+```toml
+[flow]
+name = "slug"
+proofs_from = "main"
+
+[[step]]
+id = "fix"
+run = "sh slug.sh 'Hello World'"
+inputs = ["slug.sh"]
+claims = ["slug.sh lowercases what it is given"]
+verify = "sh tests/slug.sh"
+held = ["tests/**"]
+```
+
+Real output, after the test was loosened to `test -n "$(sh slug.sh "Hello
+World")"` instead of `slug.sh` being fixed:
+
+```text
+$ flot run
+ran      fix                  ok        11ms  claims 0v/1u/0r  receipt 6d199c749a3e
+    | Hello-World
+
+UNVERIFIED 1795777404558-31f229d0f290  root 31f229d0f290  59ms
+limitations:
+  - fix: the proof exited 1 with tests/slug.sh as main (9520bb2316a5) has it: the work passes only the versions it changed; read `flot log fix --held`; claims stay unverified
+  - proofs checked against main (9520bb2316a5)
+
+$ flot log fix --held
+slug.sh gave Hello-World
+```
+
+With `slug.sh` fixed, the test as it was, and a new `tests/case.sh`:
+
+```text
+$ flot show latest
+run 1795777404637-509d26894e7f  flow slug  root 509d26894e7f
+  fix                  ok        ran     receipt 393b4e70899c
+      + [verified] slug.sh lowercases what it is given
+        with held files as the revision has them: passed
+verdict passed  claims 1v/0u/0r  concurrency 1
+limitations:
+  - proofs checked against main (9520bb2316a5)
+```
+
+The receipt keeps the files the copy put back and that run's exit code and
+output as the claim's `held` record, with a digest of what the patterns
+match at the revision. The run on the copy counts toward the step's spend.
+A cached receipt is reused only if that digest is the same now, so a commit
+to other files keeps the verdict and one to the tests runs the proof again;
+`flot verify` treats a step whose `held` patterns changed, or a verified
+claim not held to the revision's files, as a proof that differs.
+
 ### Refusing the edit
 
 `flot guard PATH...` names the paths whose change would touch the proofs: the

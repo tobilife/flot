@@ -90,6 +90,29 @@ pub struct ClaimRecord {
     /// declares `fails_before`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub before: Option<Before>,
+    /// The proof held to the files a step declares `held`, as they are at a
+    /// revision.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub held: Option<Held>,
+}
+
+/// What a proof showed of the files a step holds to a revision: the
+/// revision's versions of them, against the work.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Held {
+    /// The digest of those files as the revision has them, their paths,
+    /// modes and contents: what a reused receipt must still match.
+    pub base: String,
+    /// The files that differ here, which the proof ran with as the revision
+    /// has them; empty when none did and the proof itself showed it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub files: Vec<String>,
+    /// How the proof ended there, when it ran.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exit_code: Option<i32>,
+    /// Digest of the proof command's combined output there, when it ran.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_digest: Option<String>,
 }
 
 /// The proof as it ran on a copy of the work with every change since a
@@ -320,6 +343,12 @@ impl Receipt {
                     .before
                     .as_ref()
                     .map(|before| before.output_digest.as_str()),
+            );
+            objects.extend(
+                claim
+                    .held
+                    .as_ref()
+                    .and_then(|held| held.output_digest.as_deref()),
             );
         }
         objects
@@ -623,6 +652,7 @@ mod tests {
                 exit_code: Some(1),
                 output_digest: before.clone(),
             }),
+            held: None,
             ..claim(ClaimStatus::Verified, Some("true"))
         });
         let receipt = Receipt::seal(body, Observed::default());
@@ -683,6 +713,7 @@ mod tests {
             verify_output_digest: None,
             reason: None,
             before: None,
+            held: None,
         }
     }
 
@@ -783,6 +814,7 @@ mod tests {
                         exit_code: Some(1),
                         output_digest: digest::bytes(b"no\n"),
                     }),
+                    held: None,
                 },
                 ClaimRecord {
                     text: "the docs say so".into(),
@@ -792,6 +824,7 @@ mod tests {
                     verify_output_digest: None,
                     reason: Some("no verify command".into()),
                     before: None,
+                    held: None,
                 },
             ],
             limitations: vec!["step declares no inputs".into()],

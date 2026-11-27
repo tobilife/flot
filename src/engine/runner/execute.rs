@@ -15,7 +15,7 @@ use crate::core::receipt::{
     ClaimRecord, ClaimStatus, FileDigest, Observed, Receipt, ReceiptIdentity, SandboxRecord,
     StepStatus, ToolIdentity,
 };
-use crate::engine::claims::{self, Proof, ProofOutcome, Red};
+use crate::engine::claims::{self, Hold, Proof, ProofOutcome, Red};
 use crate::engine::exec;
 use crate::engine::keying::{self, Facts};
 use crate::engine::sandbox;
@@ -387,6 +387,16 @@ impl Runner<'_> {
             found.spent(red_metrics, red_notes);
             claims = claims::hold_before(claims, red, &mut found.limitations);
         }
+        if !step.held.is_empty()
+            && claims
+                .iter()
+                .any(|claim| claim.status == ClaimStatus::Verified)
+        {
+            let (hold, hold_metrics, hold_notes) =
+                self.held(step, budget, options, &mut found.escaped);
+            found.spent(hold_metrics, hold_notes);
+            claims = claims::hold_held(&step.id, claims, hold, &mut found.limitations);
+        }
         found.claims = claims;
         found.escapes();
     }
@@ -593,6 +603,60 @@ impl Runner<'_> {
         })()
         .unwrap_or_else(|error| Red::Unchecked(format!("{error:#}")));
         (red, spent, notes)
+    }
+
+    /// What `step`'s proof does with its `held` files as the revision has
+    /// them: nothing to run when they are here as they are there, else it
+    /// runs on a copy of the work with them put back. That run counts as the
+    /// step's spend.
+    fn held(
+        &self,
+        step: &Step,
+        budget: ResolvedBudget,
+        options: &RunOptions,
+        escaped: &mut Vec<exec::Escaped>,
+    ) -> (Hold, Option<Metrics>, Vec<String>) {
+        let Some(baseline) = self.baseline else {
+            return (Hold::NoRevision, None, Vec::new());
+        };
+        let command = step
+            .verify
+            .as_deref()
+            .expect("a step with held files has a verify command");
+        let base = baseline.held_base(&step.held);
+        let here = keying::held_files(&self.root, &step.held, &self.digests);
+        let files = match baseline.held_changes(&step.held, &here) {
+            Ok(files) => files,
+            Err(error) => return (Hold::Unchecked(format!("{error:#}")), None, Vec::new()),
+        };
+        if files.is_empty() {
+            return (Hold::Same { base }, None, Vec::new());
+        }
+        let ran = (|| -> Result<(Proof, Option<Metrics>, Vec<String>)> {
+            let scratch = Scratch::new(self.store.root(), "held")?;
+            let copy = scratch.path.join("work");
+            keying::copy_workspace(&self.root, &copy, step).context("cannot copy the work")?;
+            baseline
+                .hold(&copy, &files)
+                .context("cannot put the held files back in the copy")?;
+            self.prove(step, command, &copy, budget, options, escaped)
+        })();
+        match ran {
+            Ok((proof, metrics, notes)) => (
+                Hold::Ran {
+                    baseline: baseline.label(),
+                    base,
+                    files,
+                    proof,
+                },
+                metrics,
+                notes
+                    .into_iter()
+                    .map(|note| format!("with the held files as the revision has them, {note}"))
+                    .collect(),
+            ),
+            Err(error) => (Hold::Unchecked(format!("{error:#}")), None, Vec::new()),
+        }
     }
 
     /// Run a proof command in `place`, the flow root or a copy of it, and

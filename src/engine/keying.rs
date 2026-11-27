@@ -781,6 +781,11 @@ fn digest_in(
     (scan.files, limitations)
 }
 
+/// What the files `patterns` match hold here, read as a proof input is.
+pub fn held_files(root: &Path, patterns: &[String], digests: &Digests) -> Vec<FileDigest> {
+    digest_in(root, None, patterns, "held file", &[], digests).0
+}
+
 pub fn step_key(flow_name: &str, step: &Step, facts: &Facts, deps: &[DepRef]) -> String {
     let mut key = serde_json::json!({
         "schema": SCHEMA_VERSION,
@@ -806,6 +811,9 @@ pub fn step_key(flow_name: &str, step: &Step, facts: &Facts, deps: &[DepRef]) ->
     }
     if step.fails_before {
         key["fails_before"] = serde_json::json!(true);
+    }
+    if !step.held.is_empty() {
+        key["held"] = serde_json::json!(step.held);
     }
     digest::canonical(&key)
 }
@@ -1062,7 +1070,7 @@ mod tests {
         );
 
         let full = step(
-            "verify = \"sh check.sh\"\nclaims = [\"out.txt holds 1\"]\nenv = { LANG = \"C\", A = \"1\" }\nallow_failure = true\noutputs = [\"out.txt\"]\ninputs = [\"src/*.txt\", \"run.sh\"]\nneeds = [\"a\"]\nmay_change = [\"notes/*\"]\nsandbox = { network = true, write = [\"out\"] }\nfails_before = true\nattempts = 3\nbudget = { timeout_secs = 5 }",
+            "verify = \"sh check.sh\"\nclaims = [\"out.txt holds 1\"]\nenv = { LANG = \"C\", A = \"1\" }\nallow_failure = true\noutputs = [\"out.txt\"]\ninputs = [\"src/*.txt\", \"run.sh\"]\nneeds = [\"a\"]\nmay_change = [\"notes/*\"]\nsandbox = { network = true, write = [\"out\"] }\nfails_before = true\nheld = [\"tests/*\"]\nattempts = 3\nbudget = { timeout_secs = 5 }",
         );
         assert_eq!(
             step_key("k", &full, &facts, &deps),
@@ -1073,7 +1081,7 @@ mod tests {
 
     const PLAIN_KEY: &str = r#"{"allow_failure":false,"claims":[],"command":"echo s","deps":[],"env":{},"flow":"k","inputs":[],"outputs":[],"schema":5,"step_id":"s","tool":{"name":"flot","schema":5,"version":"@VERSION@"},"verify":null,"verify_inputs":[]}"#;
 
-    const FULL_KEY: &str = r#"{"allow_failure":true,"claims":["out.txt holds 1"],"command":"echo s","deps":[{"receipt_id":"sha256:0eba9c324da1c0ec8fc47af90ba25ab329eeb9744993eac814bdd8da10002cee","step_id":"a"}],"env":{"A":"1","LANG":"C"},"fails_before":true,"flow":"k","inputs":[{"digest":"sha256:c117ade9ea8a00abe926dfed79297a9a3632defb97a3ffd1baf33fe92704aa0f","executable":true,"path":"run.sh"},{"digest":"sha256:ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb","path":"src/a.txt"}],"may_change":["notes/*"],"outputs":["out.txt"],"sandbox":{"network":true,"write":["out"]},"schema":5,"step_id":"s","tool":{"name":"flot","schema":5,"version":"@VERSION@"},"verify":"sh check.sh","verify_inputs":[{"digest":"sha256:a8b1f082c2590c4c3855b71427328ecab1ebb40701108a07be7b70f9c926f225","path":"check.sh"}]}"#;
+    const FULL_KEY: &str = r#"{"allow_failure":true,"claims":["out.txt holds 1"],"command":"echo s","deps":[{"receipt_id":"sha256:0eba9c324da1c0ec8fc47af90ba25ab329eeb9744993eac814bdd8da10002cee","step_id":"a"}],"env":{"A":"1","LANG":"C"},"fails_before":true,"flow":"k","held":["tests/*"],"inputs":[{"digest":"sha256:c117ade9ea8a00abe926dfed79297a9a3632defb97a3ffd1baf33fe92704aa0f","executable":true,"path":"run.sh"},{"digest":"sha256:ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb","path":"src/a.txt"}],"may_change":["notes/*"],"outputs":["out.txt"],"sandbox":{"network":true,"write":["out"]},"schema":5,"step_id":"s","tool":{"name":"flot","schema":5,"version":"@VERSION@"},"verify":"sh check.sh","verify_inputs":[{"digest":"sha256:a8b1f082c2590c4c3855b71427328ecab1ebb40701108a07be7b70f9c926f225","path":"check.sh"}]}"#;
 
     /// Over this repository's own files, enough for several threads, the
     /// files read at once get the digests, bits and order that reading them

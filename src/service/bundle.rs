@@ -216,6 +216,19 @@ pub fn exposures(bundle: &Bundle) -> Result<Vec<Exposure>> {
                     ),
                 );
             }
+            if let Some(digest) = claim
+                .held
+                .as_ref()
+                .and_then(|held| held.output_digest.as_ref())
+            {
+                places.insert(
+                    digest,
+                    format!(
+                        "step `{step}` proof of \"{}\" with the held files",
+                        claim.text
+                    ),
+                );
+            }
         }
     }
 

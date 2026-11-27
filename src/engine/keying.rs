@@ -333,14 +333,16 @@ fn candidates(
                     .is_some_and(|rules| rules.ignores(entry.path(), is_dir))
         })
         .build();
+    // The walker already knows each entry's type (of its target, since links
+    // are followed); asking the file system again costs a round trip per
+    // file, which on a network or 9p mount is most of the walk.
     Ok(walker
         .flatten()
+        .filter(|entry| entry.file_type().is_some_and(|kind| kind.is_file()))
         .map(ignore::DirEntry::into_path)
         .filter(|path| {
-            path.is_file()
-                && path
-                    .strip_prefix(root)
-                    .is_ok_and(|relative| compiled.matches_path_with(relative, match_options()))
+            path.strip_prefix(root)
+                .is_ok_and(|relative| compiled.matches_path_with(relative, match_options()))
         })
         .collect())
 }

@@ -5473,6 +5473,39 @@ fn guard_consults_every_flow_above_a_file() {
         assert_eq!(guarded.code, 2, "{}", guarded.stdout);
         guarded.has(said);
     }
+    // Wherever the binary is: a proof built on a copy of the work leaves
+    // it in the store.
+    let built = project
+        .path()
+        .join(".flot/builds/s/debug")
+        .join(flot_bin().file_name().unwrap());
+    std::fs::create_dir_all(built.parent().unwrap()).unwrap();
+    std::fs::copy(flot_bin(), &built).unwrap();
+    // Another test's child may still hold the copy open for writing for a
+    // moment after it was written (ETXTBSY on Linux).
+    let own = (0..100)
+        .find_map(|_| {
+            match Command::new(&built)
+                .args(["guard", built.to_str().unwrap()])
+                .current_dir(project.path())
+                .env("HOME", home.path())
+                .env("USERPROFILE", home.path())
+                .output()
+            {
+                Err(error) if error.kind() == std::io::ErrorKind::ExecutableFileBusy => {
+                    std::thread::sleep(std::time::Duration::from_millis(20));
+                    None
+                }
+                other => Some(other.unwrap()),
+            }
+        })
+        .expect("the copied binary starts");
+    let said = String::from_utf8_lossy(&own.stdout);
+    assert_eq!(own.status.code(), Some(2), "{said}");
+    assert!(
+        said.contains("it is the flot binary that enforces this guard"),
+        "{said}"
+    );
     let tree = flot_in(
         project.path(),
         &["guard", "--command", "rm -rf ~/.claude"],

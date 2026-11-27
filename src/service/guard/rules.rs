@@ -490,6 +490,16 @@ impl Guard {
     /// or looking below it: the name it goes by, from the flow or
     /// repository whose rule it is, and why.
     fn rule(&self, path: &Path) -> Option<(String, String)> {
+        // The binary first: it is the binary wherever it is, a flot store
+        // included, where a proof built on a copy of the work leaves it.
+        if let Some(exe) = self.exe.as_deref() {
+            if strip_base(path, exe, FOLDS_CASE).as_deref() == Some("") {
+                return Some((
+                    path.display().to_string(),
+                    "it is the flot binary that enforces this guard".to_string(),
+                ));
+            }
+        }
         for flow in &self.flows {
             if let Some(relative) = below(path, &flow.roots) {
                 if let Some(reason) = flow.evidence(&relative) {
@@ -504,18 +514,8 @@ impl Guard {
                 }
             }
         }
-        if let Some(relative) = below(path, &self.home) {
-            if let Some(reason) = user_harness(&relative) {
-                return Some((format!("~/{relative}"), reason));
-            }
-        }
-        let exe = self.exe.as_deref()?;
-        (strip_base(path, exe, FOLDS_CASE).as_deref() == Some("")).then(|| {
-            (
-                path.display().to_string(),
-                "it is the flot binary that enforces this guard".to_string(),
-            )
-        })
+        let relative = below(path, &self.home)?;
+        user_harness(&relative).map(|reason| (format!("~/{relative}"), reason))
     }
 
     /// `path` as the guard names it: as written, or else as it resolves,

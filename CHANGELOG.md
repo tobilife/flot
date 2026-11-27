@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- `flot guard` names flot's own binary as the binary that enforces the
+  guard wherever it is. A binary built by a proof on a copy of the work sits
+  in the store, and was named as evidence in the store instead.
+
 ## 0.2.11
 
 A step can hold its proof to the tests as the revision has them, a proof

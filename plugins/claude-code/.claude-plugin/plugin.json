@@ -1,6 +1,6 @@
 {
   "name": "flot",
-  "version": "0.2.10",
+  "version": "0.2.11",
   "description": "Run the project's flot flow from Claude Code and report only what its receipts prove.",
   "author": {
     "name": "tobilife",

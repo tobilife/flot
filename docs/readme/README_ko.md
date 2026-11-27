@@ -20,7 +20,7 @@
 
 <code>cargo install flot-cli</code>
 
-최신 릴리스 **0.2.10**: `flot plan`이 `always` 단계 뒤의 단계를 모두 실행할 것처럼 보여 주지 않고 재사용을 예측합니다. `flot diff`가 단계마다 바뀐 이유를 말합니다(`inputs: src/a.rs changed`, `same key, different result: exit 0 -> 1`). 시계가 뒤로 가도 run 순서가 바뀌지 않습니다 · [변경 기록](../../CHANGELOG.md)
+최신 릴리스 **0.2.11**: `held = ["tests/**"]`는 증명을 리비전의 테스트에 묶어, 스스로 느슨하게 하거나 지운 테스트만 통과하는 변경은 아무것도 증명하지 못합니다. 작업 복사본에서 돈 증명이 더 이상 작업 트리의 `cargo`에 복사본의 바이너리를 남기지 않습니다. `flot log STEP --proof`를 추가했고, WSL2의 Windows 드라이브에서 재사용만 하는 run이 6배 빨라졌습니다 · [변경 기록](../../CHANGELOG.md)
 
 </div>
 

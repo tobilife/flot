@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased
+## 0.2.11
+
+A step can hold its proof to the tests as the revision has them, a proof
+on a copy of the work no longer hands the work's `cargo` the copy's
+binaries, and reading files is faster. Found by using flot on itself.
 
 - A step with `held = ["tests/**"]` verifies only if its proof also passes
   on a copy of the work where those files are as the `proofs_from` revision
@@ -19,24 +23,20 @@
   and `flot cat`. `flot run` and `flot show` point a step with a refuted
   claim at it, and the plugin's skill tells Claude to read it.
 - Reading a project's files is faster, most on a network or 9p mount (a
-  repository on a Windows drive under WSL2): files are read several at a time,
-  and each with one round trip fewer. Measured with release builds, medians:
-  on a 2,320-file repository on `/mnt/d`, a run that reuses every step went
-  from 22.1 s to 5.9 s and `flot plan` from 9.6 s to 3.5 s; on the same
-  repository on ext4, from 261 to 120 ms and from 112 to 53 ms. Keys and
-  recorded changes are the same as before. Patterns starting in the same
-  directory share one walk of it, and git is asked for the executable bits
-  it records only when a scan found files: the same repository on `/mnt/d`
-  then takes 4.4 s, and this repository's own check 0.8 s.
-- Within one run, a file is read again only when the file system says it
-  changed since it was read: its size, inode, mode, modification time or
-  change time differ, and a rewrite that keeps the size and puts the
-  modification time back still moves the change time. A file changed after
-  the run began is read every time. On Linux and macOS; `flot plan` reads
-  every file. Measured with release builds, medians of the run's own time,
-  for a run that reuses every step: the 2,320-file repository on `/mnt/d`
-  from 4.32 to 3.51 s, on ext4 from 102 to 82 ms, and this repository's own
-  check from 758 to 693 ms.
+  repository on a Windows drive under WSL2). Files are read several at a
+  time and each with one round trip fewer, patterns starting in the same
+  directory share one walk of it, git is asked for the executable bits it
+  records only when a scan found files, and within one run a file is read
+  again only when the file system says it changed since it was read: its
+  size, inode, mode, modification time or change time differ, so a rewrite
+  that keeps the size and puts the modification time back is still seen. A
+  file changed after the run began is read every time; that reuse is on
+  Linux and macOS only, and `flot plan` reads every file. Keys and recorded
+  changes are the same as before. Release builds of 0.2.10 and 0.2.11 run
+  in turn, medians: on a 2,320-file repository on `/mnt/d`, a run that
+  reuses every step went from 21.2 s to 3.5 s and `flot plan` from 9.2 s to
+  2.0 s; on the same repository on ext4, from 256 to 82 ms and from 107 to
+  39 ms; this repository's own check from 2.1 s to 0.68 s.
 - `flot log` without a step names the steps of the latest run instead of
   only saying a step is required.
 - `flot doctor` names every proof that declares no `verify_inputs` on one

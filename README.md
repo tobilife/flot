@@ -20,7 +20,7 @@
 
 <code>cargo install flot-cli</code>
 
-Latest release **0.2.10**: `flot plan` predicts the reuse that follows an `always` probe instead of showing every later step as running; `flot diff` says why each step changed (`inputs: src/a.rs changed`, `same key, different result: exit 0 -> 1`); a clock set back no longer reorders runs · [changelog](CHANGELOG.md)
+Latest release **0.2.11**: `held = ["tests/**"]` holds a proof to the tests as the revision has them, so a change that passes only tests it loosened or deleted proves nothing; a proof on a copy of the work no longer leaves the work's `cargo` with the copy's binaries; `flot log STEP --proof`; a cached run on a Windows drive under WSL2 is 6x faster · [changelog](CHANGELOG.md)
 
 </div>
 

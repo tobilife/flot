@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- The plugin's skill tells Claude that a step still `cached` after it
+  changed a file the step depends on does not name that file in its
+  `inputs`, and that the reuse proves nothing about the change.
+
 ## 0.2.10
 
 `flot plan` predicts the reuse that follows an `always` probe, `flot diff`

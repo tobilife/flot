@@ -28,7 +28,9 @@ exited 0. Report what the receipts prove, not what you expect.
    receipt (`cached`). One with `vouched_by` was proven on another host: name
    its signer only when its `vouched` entry is `confirmed` with a
    `trusted_as` name; otherwise say the signer is not confirmed or not
-   trusted here.
+   trusted here. If you changed a file a step depends on and that step was
+   still `cached`, its `inputs` do not name the file: say so, and do not
+   count that reuse as proof of your change.
 5. Never call the work done unless the result is `passed`.
 
 ## When the hook refuses

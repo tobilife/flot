@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Reading a project's files is faster, most on a network or 9p mount (a
+  repository on a Windows drive under WSL2): files are read several at a time,
+  and each with one round trip fewer. Measured with release builds, medians:
+  on a 2,320-file repository on `/mnt/d`, a run that reuses every step went
+  from 22.1 s to 5.9 s and `flot plan` from 9.6 s to 3.5 s; on the same
+  repository on ext4, from 261 to 120 ms and from 112 to 53 ms. Keys and
+  recorded changes are the same as before.
 - `flot log` without a step names the steps of the latest run instead of
   only saying a step is required.
 - `flot doctor` names every proof that declares no `verify_inputs` on one

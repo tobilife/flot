@@ -355,9 +355,28 @@ pub fn scan_globs<E>(
     patterns: &[String],
     kind: &str,
     reach: Reach,
-    keep: impl FnMut(&[u8]) -> Result<String, E>,
+    mut keep: impl FnMut(&[u8]) -> Result<String, E>,
 ) -> Result<Scan, E> {
-    scan_in(root, None, patterns, kind, reach, true, keep)
+    scan_in(
+        root,
+        None,
+        patterns,
+        kind,
+        reach,
+        true,
+        Keep::With(&mut keep),
+    )
+}
+
+/// How a scan records each file it reads.
+enum Keep<'a, E> {
+    /// The digest of its content. Files are read several at a time: on a
+    /// network or 9p mount each read waits on a round trip, and reading one
+    /// at a time spends most of the scan waiting.
+    Digest,
+    /// What the callback returns for its bytes, one file at a time, so a
+    /// large tree is never held in memory at once.
+    With(&'a mut dyn FnMut(&[u8]) -> Result<String, E>),
 }
 
 /// [`scan_globs`] in `root`, a copy of `origin` when that is given, whose
@@ -370,9 +389,8 @@ fn scan_in<E>(
     kind: &str,
     reach: Reach,
     modes: bool,
-    mut keep: impl FnMut(&[u8]) -> Result<String, E>,
+    keep: Keep<'_, E>,
 ) -> Result<Scan, E> {
-    let mut files: BTreeMap<String, (String, bool)> = BTreeMap::new();
     let mut scan = Scan::default();
     // What a step reads is keyed as git records it where git does not trust
     // the file system; what it produces keeps the bit it was written with,
@@ -384,6 +402,11 @@ fn scan_in<E>(
     let copy = origin
         .filter(|_| reach == Reach::Tracked)
         .map(|origin| Arc::new(CopyIgnore::new(root, origin)));
+    // Each valid pattern with the files it matched, and every file once, in
+    // the order first matched.
+    let mut matches: Vec<(&String, Vec<String>)> = Vec::new();
+    let mut unique: Vec<(String, PathBuf)> = Vec::new();
+    let mut seen = std::collections::HashSet::new();
     for pattern in patterns {
         let entries = match candidates(root, pattern, reach, copy.as_ref()) {
             Ok(entries) => entries,
@@ -393,7 +416,7 @@ fn scan_in<E>(
                 continue;
             }
         };
-        let mut matched = 0usize;
+        let mut matched = Vec::new();
         for entry in entries {
             let relative = entry
                 .strip_prefix(root)
@@ -407,25 +430,43 @@ fn scan_in<E>(
             {
                 continue;
             }
-            if files.contains_key(&relative) {
-                matched += 1;
-                continue;
+            if seen.insert(relative.clone()) {
+                unique.push((relative.clone(), entry));
             }
-            match read_file(&entry) {
-                Ok((bytes, mode)) => {
-                    let executable = recorded
-                        .as_ref()
-                        .and_then(|modes| modes.get(&relative).copied())
-                        .unwrap_or(mode);
-                    files.insert(relative, (keep(&bytes)?, executable));
-                    matched += 1;
-                }
-                Err(error) => scan
-                    .problems
-                    .push(format!("{kind} `{relative}` could not be read: {error}")),
-            }
+            matched.push(relative);
         }
-        if matched == 0 {
+        matches.push((pattern, matched));
+    }
+    let read: Vec<std::io::Result<(String, bool)>> = match keep {
+        Keep::Digest => digest_all(&unique),
+        Keep::With(keep) => {
+            let mut read = Vec::with_capacity(unique.len());
+            for (_, path) in &unique {
+                read.push(match read_file(path) {
+                    Ok((bytes, mode)) => Ok((keep(&bytes)?, mode)),
+                    Err(error) => Err(error),
+                });
+            }
+            read
+        }
+    };
+    let mut files: BTreeMap<String, (String, bool)> = BTreeMap::new();
+    for ((relative, _), read) in unique.into_iter().zip(read) {
+        match read {
+            Ok((digest, mode)) => {
+                let executable = recorded
+                    .as_ref()
+                    .and_then(|modes| modes.get(&relative).copied())
+                    .unwrap_or(mode);
+                files.insert(relative, (digest, executable));
+            }
+            Err(error) => scan
+                .problems
+                .push(format!("{kind} `{relative}` could not be read: {error}")),
+        }
+    }
+    for (pattern, matched) in matches {
+        if !matched.iter().any(|relative| files.contains_key(relative)) {
             scan.unmatched.push(pattern.clone());
         }
     }
@@ -438,6 +479,50 @@ fn scan_in<E>(
         })
         .collect();
     Ok(scan)
+}
+
+/// The digest and executable bit of each file, in order, read by up to eight
+/// threads at once. Each thread holds one file at a time.
+fn digest_all(files: &[(String, PathBuf)]) -> Vec<std::io::Result<(String, bool)>> {
+    let one = |(_, path): &(String, PathBuf)| {
+        read_file(path).map(|(bytes, mode)| (digest::bytes(&bytes), mode))
+    };
+    // A thread costs more than reading a few small files.
+    let threads = std::thread::available_parallelism()
+        .map_or(1, usize::from)
+        .min(8)
+        .min(files.len() / 8)
+        .max(1);
+    if threads == 1 {
+        return files.iter().map(one).collect();
+    }
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let mut read: Vec<Option<std::io::Result<(String, bool)>>> =
+        std::iter::repeat_with(|| None).take(files.len()).collect();
+    std::thread::scope(|scope| {
+        let workers: Vec<_> = (0..threads)
+            .map(|_| {
+                scope.spawn(|| {
+                    let mut done = Vec::new();
+                    loop {
+                        let index = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        let Some(file) = files.get(index) else {
+                            return done;
+                        };
+                        done.push((index, one(file)));
+                    }
+                })
+            })
+            .collect();
+        for worker in workers {
+            for (index, result) in worker.join().expect("a digest thread does not panic") {
+                read[index] = Some(result);
+            }
+        }
+    });
+    read.into_iter()
+        .map(|result| result.expect("every file was read"))
+        .collect()
 }
 
 /// Copy the project into `dest` for one candidate of `step`: every file a
@@ -604,7 +689,7 @@ fn digest_in(
         kind,
         Reach::Tracked,
         true,
-        |bytes| Ok::<_, std::convert::Infallible>(digest::bytes(bytes)),
+        Keep::<std::convert::Infallible>::Digest,
     ) {
         Ok(scan) => scan,
         Err(never) => match never {},
@@ -676,7 +761,7 @@ pub fn snapshot(root: &Path, origin: &Path) -> Scan {
         "project file",
         Reach::Tracked,
         false,
-        |bytes| Ok::<_, std::convert::Infallible>(digest::bytes(bytes)),
+        Keep::<std::convert::Infallible>::Digest,
     )
     .unwrap_or_else(|never| match never {})
 }
@@ -925,6 +1010,23 @@ mod tests {
     const PLAIN_KEY: &str = r#"{"allow_failure":false,"claims":[],"command":"echo s","deps":[],"env":{},"flow":"k","inputs":[],"outputs":[],"schema":5,"step_id":"s","tool":{"name":"flot","schema":5,"version":"@VERSION@"},"verify":null,"verify_inputs":[]}"#;
 
     const FULL_KEY: &str = r#"{"allow_failure":true,"claims":["out.txt holds 1"],"command":"echo s","deps":[{"receipt_id":"sha256:0eba9c324da1c0ec8fc47af90ba25ab329eeb9744993eac814bdd8da10002cee","step_id":"a"}],"env":{"A":"1","LANG":"C"},"fails_before":true,"flow":"k","inputs":[{"digest":"sha256:c117ade9ea8a00abe926dfed79297a9a3632defb97a3ffd1baf33fe92704aa0f","executable":true,"path":"run.sh"},{"digest":"sha256:ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb","path":"src/a.txt"}],"may_change":["notes/*"],"outputs":["out.txt"],"sandbox":{"network":true,"write":["out"]},"schema":5,"step_id":"s","tool":{"name":"flot","schema":5,"version":"@VERSION@"},"verify":"sh check.sh","verify_inputs":[{"digest":"sha256:a8b1f082c2590c4c3855b71427328ecab1ebb40701108a07be7b70f9c926f225","path":"check.sh"}]}"#;
+
+    /// Over this repository's own files, enough for several threads, the
+    /// files read at once get the digests, bits and order that reading them
+    /// one at a time gives. The bits are the file system's, as a snapshot
+    /// reads them, not the ones git records.
+    #[test]
+    fn reading_files_at_once_records_what_reading_them_in_turn_does() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let patterns = ["src/**/*.rs".to_string(), "tests/**/*".to_string()];
+        let scan = |keep| scan_in(root, None, &patterns, "input", Reach::Tracked, false, keep);
+        let at_once = scan(Keep::<std::convert::Infallible>::Digest).unwrap();
+        let mut one = |bytes: &[u8]| Ok(digest::bytes(bytes));
+        let in_turn = scan(Keep::With(&mut one)).unwrap();
+        assert!(at_once.files.len() >= 64, "{} files", at_once.files.len());
+        assert_eq!(at_once.files, in_turn.files);
+        assert!(at_once.problems.is_empty() && at_once.unmatched.is_empty());
+    }
 
     #[test]
     fn changed_paths_reports_edits_creations_and_deletions() {

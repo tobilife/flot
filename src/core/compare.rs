@@ -118,6 +118,8 @@ pub fn diff(
 fn why(left: &ReceiptIdentity, right: &ReceiptIdentity) -> Vec<String> {
     let mut why = Vec::new();
     if left.step_key == right.step_key {
+        // What matters most first: whether it succeeded and what its claims
+        // came to; output that prints a time differs on every run.
         let mut differs = Vec::new();
         if left.exit_code != right.exit_code {
             let code = |code: Option<i32>| code.map_or("none".into(), |code| code.to_string());
@@ -127,11 +129,8 @@ fn why(left: &ReceiptIdentity, right: &ReceiptIdentity) -> Vec<String> {
                 code(right.exit_code)
             ));
         }
-        if left.stdout_digest != right.stdout_digest {
-            differs.push("stdout".into());
-        }
-        if left.stderr_digest != right.stderr_digest {
-            differs.push("stderr".into());
+        if left.claims != right.claims {
+            differs.push("claim results".into());
         }
         if left.outputs != right.outputs {
             differs.push("outputs".into());
@@ -139,8 +138,11 @@ fn why(left: &ReceiptIdentity, right: &ReceiptIdentity) -> Vec<String> {
         if left.changed != right.changed {
             differs.push("other files it changed".into());
         }
-        if left.claims != right.claims {
-            differs.push("claim results".into());
+        if left.stdout_digest != right.stdout_digest {
+            differs.push("stdout".into());
+        }
+        if left.stderr_digest != right.stderr_digest {
+            differs.push("stderr".into());
         }
         why.push(if differs.is_empty() {
             "same key, and the receipts differ otherwise".into()
@@ -416,7 +418,7 @@ mod tests {
         after.claims = vec![claim("it works", ClaimStatus::Refuted)];
         assert_eq!(
             why(&before, &after),
-            vec!["same key, different result: stdout, outputs, other files it changed, claim results"]
+            vec!["same key, different result: claim results, outputs, other files it changed, stdout"]
         );
         let mut after = before.clone();
         after.exit_code = None;

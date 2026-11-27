@@ -87,14 +87,9 @@ pub(super) fn render_plan(plan: &Plan) {
         }
         if entry.cached && !entry.assumes.is_empty() {
             say!(
-                "        ? reused if {} come{} out as last time, which running {} decides",
+                "        ? reused if {} come{} out as last time",
                 entry.assumes.join(", "),
-                if entry.assumes.len() == 1 { "s" } else { "" },
-                if entry.assumes.len() == 1 {
-                    "it"
-                } else {
-                    "them"
-                }
+                if entry.assumes.len() == 1 { "s" } else { "" }
             );
         }
         for limitation in &entry.limitations {

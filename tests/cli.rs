@@ -6184,7 +6184,7 @@ fn plan_predicts_what_follows_an_always_step_on_how_it_came_out_last_time() {
         .has("  run   toolchain")
         .has("  reuse build")
         .has("  reuse ship")
-        .has("? reused if toolchain comes out as last time, which running it decides");
+        .has("        ? reused if toolchain comes out as last time\n");
     project
         .flot(&["run"])
         .ok()

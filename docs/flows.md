@@ -141,7 +141,7 @@ flow probed (a349531adac2)
         ! runs on every run (always); the steps that need it are reused only when its receipt comes out the same, which running it decides
         ! step declares no claims; its success proves nothing
   reuse build                inputs 1   claims 1   verify `true`
-        ? reused if toolchain comes out as last time, which running it decides
+        ? reused if toolchain comes out as last time
 ```
 
 `always` is not part of the step key. It is refused with `candidates`: every

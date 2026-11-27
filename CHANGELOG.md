@@ -4,8 +4,7 @@
 
 - `flot plan` no longer shows every step after an `always` probe as running.
   It predicts on what the probe recorded last time, marks each reuse that
-  prediction makes with `? reused if toolchain comes out as last time, which
-  running it decides`, and lists the probes it rests on in `assumes` in
+  prediction makes with `? reused if toolchain comes out as last time`, and lists the probes it rests on in `assumes` in
   `--json` and over MCP. Before, a plan for this repository with nothing
   changed said all five steps would run; the run then reused four.
 - `flot diff` says why each changed step changed, read from its two receipts:

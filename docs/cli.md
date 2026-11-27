@@ -137,8 +137,9 @@ were added or were removed (five named, the rest counted), `dependencies:`
 with the steps whose receipts it built on changed, `derived by flot A -> B`,
 `claims or their proof command changed`, or, when none of those, the rest of
 the step's definition (its env, outputs or settings). The same key with a
-different receipt is `same key, different result:` and what differs: the exit
-code, stdout, stderr, outputs, other files it changed, claim results. A
+different receipt is `same key, different result:` and what differs, in this
+order: the exit code, claim results, outputs, other files it changed, stdout,
+stderr (last, since output that prints a time differs on every run). A
 receipt that is gone from the store, or whose body no longer matches its id,
 tells nothing, and the step says so. In `--json` each step has `reasons`.
 A run that selected only some steps shows `passed, partial: 1 of 2 steps`

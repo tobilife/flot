@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- `flot log STEP --proof` prints what the step's proof printed, stdout and
+  stderr together, and MCP `flot_step_output` takes `proof: true`. Before,
+  a refuted claim's evidence was reachable only through its receipt's digest
+  and `flot cat`. `flot run` and `flot show` point a step with a refuted
+  claim at it, and the plugin's skill tells Claude to read it.
 - Reading a project's files is faster, most on a network or 9p mount (a
   repository on a Windows drive under WSL2): files are read several at a time,
   and each with one round trip fewer. Measured with release builds, medians:

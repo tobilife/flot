@@ -148,6 +148,13 @@ pub(super) fn render_run(report: &RunReport) {
                 say!("    ! {line}");
             }
         }
+        if step.claims.refuted > 0 {
+            say!(
+                "    proof output: flot log {} --proof {}",
+                step.step_id,
+                report.manifest.run_id
+            );
+        }
         if step.stdout_truncated || step.stderr_truncated {
             say!(
                 "    complete output: flot log {}{} {}",
@@ -321,6 +328,13 @@ pub(super) fn render_detail(detail: &RunDetail) {
         if matches!(step.status, StepStatus::Failed | StepStatus::Timeout) {
             say!(
                 "      output: flot log {} {}",
+                step.step_id,
+                manifest.run_id
+            );
+        }
+        if step.claims.refuted > 0 {
+            say!(
+                "      proof output: flot log {} --proof {}",
                 step.step_id,
                 manifest.run_id
             );

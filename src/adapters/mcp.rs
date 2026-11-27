@@ -9,7 +9,7 @@
 use std::io::{BufRead, Write};
 use std::sync::{mpsc, Mutex};
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, bail, Result};
 use serde_json::{json, Map, Value};
 
 use crate::service::audit::Outcome;
@@ -263,7 +263,14 @@ impl Server {
                         candidate: text("candidate"),
                         attempt: count("attempt"),
                     },
-                    flag("stderr"),
+                    match (flag("stderr"), flag("proof")) {
+                        (true, true) => {
+                            bail!("`stderr` and `proof` name different outputs; ask for one")
+                        }
+                        (true, false) => crate::service::Stream::Stderr,
+                        (false, true) => crate::service::Stream::Proof,
+                        (false, false) => crate::service::Stream::Stdout,
+                    },
                 )?,
                 count("max_bytes").unwrap_or(DEFAULT_OBJECT_BYTES),
             )?)?,
@@ -593,13 +600,14 @@ fn tool_catalog() -> Vec<Value> {
         tool(
             "flot_step_output",
             Effect::Reads,
-            "Read the complete output one step of a run printed, such as the failing test log behind a trimmed preview. By default the receipt the run kept; `candidate` and `attempt` read a candidate it did not keep or an attempt that did not hold.",
+            "Read the complete output one step of a run printed, such as the failing test log behind a trimmed preview, or with `proof` what its proof printed, such as why a claim was refuted. By default the receipt the run kept; `candidate` and `attempt` read a candidate it did not keep or an attempt that did not hold.",
             json!({
                 "step": { "type": "string", "description": "Step id." },
                 "candidate": { "type": "string", "description": "Another candidate the run executed; defaults to the kept one." },
                 "attempt": { "type": "integer", "minimum": 1, "description": "Attempt number from 1; defaults to the last." },
                 "run": { "type": "string", "description": "Run selector; defaults to latest." },
                 "stderr": { "type": "boolean", "description": "Read stderr instead of stdout." },
+                "proof": { "type": "boolean", "description": "Read what the step's proof printed (stdout and stderr together) instead." },
                 "max_bytes": { "type": "integer", "minimum": 1, "description": "Inline byte ceiling; the complete object stays retrievable." }
             }),
             &["step"],
@@ -707,6 +715,28 @@ verify = "grep -q flot artifact.txt"
         assert_eq!(output["structuredContent"]["text"], "flot\n");
         let missing = call(&server, "flot_step_output", json!({ "step": "read" }));
         assert_eq!(missing["isError"], true, "{missing}");
+    }
+
+    #[test]
+    fn a_steps_proof_output_is_read_with_proof() {
+        let (_dir, server) = project(&PROVEN.replace(
+            "verify = \"grep -q flot artifact.txt\"",
+            "verify = \"echo proof says no; exit 1\"",
+        ));
+        call(&server, "flot_run", json!({}));
+        let proof = call(
+            &server,
+            "flot_step_output",
+            json!({ "step": "write", "proof": true }),
+        );
+        assert_eq!(proof["isError"], false, "{proof}");
+        assert_eq!(proof["structuredContent"]["text"], "proof says no\n");
+        let both = call(
+            &server,
+            "flot_step_output",
+            json!({ "step": "write", "proof": true, "stderr": true }),
+        );
+        assert_eq!(both["isError"], true, "{both}");
     }
 
     #[test]

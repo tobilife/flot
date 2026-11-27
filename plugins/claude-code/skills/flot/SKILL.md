@@ -44,6 +44,8 @@ leave the change to the user. The refusal is recorded in the next run.
 
 - The step's inline output keeps its first and last lines. Read all of it
   with `flot_step_output` (`step`, and `stderr: true` for stderr).
+- A refuted claim's evidence is what its proof printed, not the step's
+  output: read it with `flot_step_output` (`step`, `proof: true`).
 - Fix the code under test, not the flow's proof commands, the files they
   read, or what runs the checks (CI workflows, git hooks, Claude Code
   settings): that voids the evidence.

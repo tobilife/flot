@@ -2661,6 +2661,56 @@ run = "for i in $(seq 1 3000); do echo line $i; done; echo oops >&2; exit 1"
 }
 
 #[test]
+fn log_prints_what_a_refuted_proof_printed_and_the_run_points_at_it() {
+    let project = Project::new(
+        r#"
+[flow]
+name = "proof"
+
+[[step]]
+id = "check"
+run = "echo built"
+claims = ["the check holds"]
+verify = "echo expected 3 >&2; echo got 2; exit 1"
+
+[[step]]
+id = "later"
+run = "true"
+needs = ["check"]
+claims = ["later holds"]
+verify = "true"
+
+[[step]]
+id = "bare"
+run = "true"
+"#,
+    );
+    let run = project.flot(&["run"]);
+    assert_eq!(run.code, 1, "stderr:\n{}", run.stderr);
+    let id = run_id(&project);
+    run.has(&format!("    proof output: flot log check --proof {id}"));
+    let proof = project.flot(&["log", "check", "--proof"]);
+    proof.ok().has("expected 3\n").has("got 2\n").lacks("built");
+    project
+        .flot(&["log", "check"])
+        .ok()
+        .has("built")
+        .lacks("got 2");
+    project
+        .flot(&["show"])
+        .has(&format!("      proof output: flot log check --proof {id}"));
+    let unrun = project.flot(&["log", "later", "--proof"]);
+    assert_eq!(unrun.code, 3, "stderr:\n{}", unrun.stderr);
+    assert!(unrun.stdout.is_empty(), "{}", unrun.stdout);
+    unrun.has(&format!("step `later` of run {id} ran no proof: "));
+    project
+        .flot(&["log", "bare", "--proof"])
+        .has("ran no proof: it makes no claims");
+    let both = project.flot(&["log", "check", "--proof", "--stderr"]);
+    assert_eq!(both.code, 3, "stderr:\n{}", both.stderr);
+}
+
+#[test]
 fn a_new_store_keeps_itself_out_of_git() {
     let project = Project::new(TWO_STEPS);
     project.flot(&["run"]).ok();

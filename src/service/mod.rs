@@ -207,6 +207,15 @@ pub struct OutputOf {
     pub attempt: Option<usize>,
 }
 
+/// Which output of a step [`Workspace::step_output`] reads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Stream {
+    Stdout,
+    Stderr,
+    /// What the step's proof printed, stdout and stderr together.
+    Proof,
+}
+
 /// A stored object under a delivery budget. The complete object stays
 /// retrievable; `recovery` says how when the view is cut.
 #[derive(Debug, Clone, Serialize)]
@@ -491,8 +500,8 @@ impl Workspace {
         Ok(receipt)
     }
 
-    /// The digest of the complete output one step of a run printed: stdout,
-    /// or stderr when `stderr`. Read it with [`Workspace::object`] or
+    /// The digest of the complete output one step of a run printed, or its
+    /// proof printed, as `stream` says. Read it with [`Workspace::object`] or
     /// [`Workspace::read_object`]. By default that is the receipt the run
     /// kept; `which` can name another candidate the run executed, an earlier
     /// attempt, or both. Without a step it names the run's steps.
@@ -501,7 +510,7 @@ impl Workspace {
         run: &str,
         step: Option<&str>,
         which: &OutputOf,
-        stderr: bool,
+        stream: Stream,
     ) -> Result<String> {
         let manifest = self.store()?.resolve_run(run)?;
         let steps = || {
@@ -581,10 +590,28 @@ impl Workspace {
         } else {
             self.receipt(receipt_id)?.identity
         };
-        Ok(if stderr {
-            identity.stderr_digest
-        } else {
-            identity.stdout_digest
+        Ok(match stream {
+            Stream::Stdout => identity.stdout_digest,
+            Stream::Stderr => identity.stderr_digest,
+            // One proof command proves every claim of a step, so any claim
+            // that ran it holds its output.
+            Stream::Proof => match identity
+                .claims
+                .iter()
+                .find_map(|claim| claim.verify_output_digest.clone())
+            {
+                Some(digest) => digest,
+                None => bail!(
+                    "step `{step}` of run {} ran no proof{}",
+                    manifest.run_id,
+                    identity
+                        .claims
+                        .iter()
+                        .find_map(|claim| claim.reason.as_deref())
+                        .map(|reason| format!(": {reason}"))
+                        .unwrap_or_else(|| ": it makes no claims".into())
+                ),
+            },
         })
     }
 

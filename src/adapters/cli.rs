@@ -310,6 +310,7 @@ fn dispatch(
             step,
             run,
             stderr,
+            proof,
             candidate,
             attempt,
         } => {
@@ -318,7 +319,12 @@ fn dispatch(
                 candidate: candidate.clone(),
                 attempt: attempt.map(|number| number as usize),
             };
-            let digest = workspace.step_output(run, step.as_deref(), &which, *stderr)?;
+            let stream = match (*stderr, *proof) {
+                (true, _) => crate::service::Stream::Stderr,
+                (_, true) => crate::service::Stream::Proof,
+                _ => crate::service::Stream::Stdout,
+            };
+            let digest = workspace.step_output(run, step.as_deref(), &which, stream)?;
             std::io::stdout().write_all(&workspace.object(&digest)?)?;
             Ok(ExitCode::SUCCESS)
         }

@@ -12,7 +12,7 @@
 | `flot guard [PATH...] [--command CMD [--powershell]] [--hook] [--replay]` | name the paths whose change would touch the proofs or decide whether they are checked (CI workflows, git hooks, Claude Code settings and plugins, the flot binary), or a directory holding one, and exit 2 if any; `--command` reads a shell command line (a PowerShell one with `--powershell`) for the files it writes, the whole-tree git commands git says would change one, downloaded code piped into an interpreter and the `flot` commands that change whose evidence counts; `--hook` answers a Claude Code `PreToolUse` payload for any tool, denies a call it cannot judge where a flow is, and notes a denial in the store for the next run to record; `--replay` judges every call in Claude Code transcripts (the PATHS, by default `~/.claude/projects`) as the hook would now and lists what it would refuse ([refusing the edit](flows.md#refusing-the-edit)) |
 | `flot diff [LEFT] [RIGHT]` | step-by-step comparison by receipt identity; by default `latest~1` against `latest`; under each changed step, why, read from its two receipts ([diff](#diff)) |
 | `flot receipt ID` | one receipt as JSON (id prefix accepted) |
-| `flot log STEP [RUN] [--stderr] [--candidate NAME] [--attempt N]` | complete output one step of a run printed; by default the receipt the run kept, else another candidate it ran or an earlier attempt. Without `STEP` it names the latest run's steps (exit 3) |
+| `flot log STEP [RUN] [--stderr \| --proof] [--candidate NAME] [--attempt N]` | complete output one step of a run printed, or with `--proof` what its proof printed (stdout and stderr together); by default the receipt the run kept, else another candidate it ran or an earlier attempt. Without `STEP` it names the latest run's steps (exit 3) |
 | `flot cat DIGEST` | one stored object, byte-exact |
 | `flot runs [--limit N]` | recorded runs, newest first; imported ones are marked |
 | `flot search QUERY [--runs N] [--limit N]` | lines of recorded output, claims and limitations that contain QUERY (literal, any case), newest run first; a reused step is searched in the run that executed it, and attempts and candidates not kept are searched too |
@@ -53,7 +53,10 @@ the store holds a run that signer signed that kept the same receipt for the
 step. Otherwise the signer's key is followed by `(not trusted here)`, once
 the trust list no longer holds it, or `(not confirmed here)`, when no such
 run is here. `flot show` and `flot verify` name signers the same way.
-`flot show` points each failed step at its `flot log`.
+`flot show` points each failed step at its `flot log`. A step whose claim was
+refuted is pointed, by `flot run` and `flot show`, at what its proof printed
+(`proof output: flot log STEP --proof RUN`); the step's own output is not
+why the claim failed.
 
 ## Progress
 

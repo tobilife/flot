@@ -148,6 +148,9 @@ pub(super) enum Command {
         /// The step's stderr instead of its stdout.
         #[arg(long)]
         stderr: bool,
+        /// What the step's proof printed (stdout and stderr together) instead.
+        #[arg(long, conflicts_with = "stderr")]
+        proof: bool,
         /// Another candidate the run executed, instead of the one it kept.
         #[arg(long, value_name = "NAME")]
         candidate: Option<String>,

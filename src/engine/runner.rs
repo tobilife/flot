@@ -16,7 +16,7 @@ mod manifest;
 mod reuse;
 
 use self::execute::Unrun;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicU64;
 use std::sync::{OnceLock, RwLock};
@@ -106,6 +106,10 @@ pub struct PlanEntry {
     pub inputs: usize,
     pub outputs: Vec<String>,
     pub limitations: Vec<String>,
+    /// The `always` steps this step's key, and so its reuse, is predicted on:
+    /// the plan takes each to come out as it did last time, which only
+    /// running it can tell.
+    pub assumes: Vec<String>,
 }
 
 /// Unique metrics paths for concurrently executing steps.
@@ -290,6 +294,9 @@ impl<'a> Runner<'a> {
     pub fn plan(&self, options: &RunOptions) -> Result<Vec<PlanEntry>> {
         let order = self.selection(options)?;
         let mut receipts: HashMap<String, String> = HashMap::new();
+        // For each step whose receipt is predicted, the `always` steps that
+        // prediction rests on.
+        let mut assumed: HashMap<String, BTreeSet<String>> = HashMap::new();
         // Outputs that reusing a predicted-cached step will put back. A
         // dependent's inputs are digested as they will be once that happened.
         let mut pending: Vec<FileDigest> = Vec::new();
@@ -352,12 +359,35 @@ impl<'a> Runner<'a> {
                 }
                 None => (None, None),
             };
+            let assumes: BTreeSet<String> = step
+                .needs
+                .iter()
+                .filter_map(|need| assumed.get(need))
+                .flatten()
+                .cloned()
+                .collect();
+            // An `always` step runs, but what it recorded last time for this
+            // key is what it comes out as when nothing it probes changed:
+            // what follows it is predicted on that.
+            let reusable = match (reusable, &step_key) {
+                (None, Some(key)) if step.always && !options.force => {
+                    self.store.recall(key)?.map(|recalled| recalled.receipt)
+                }
+                (reusable, _) => reusable,
+            };
+            if reusable.is_some() {
+                let mut passed_on = assumes.clone();
+                if step.always {
+                    passed_on.insert(step_id.clone());
+                }
+                assumed.insert(step_id.clone(), passed_on);
+            }
             if step.claims.is_empty() {
                 limitations.push("step declares no claims; its success proves nothing".into());
             } else if step.verify.is_none() {
                 limitations.push("step declares claims without a verify command".into());
             }
-            let cached = reusable.is_some();
+            let cached = reusable.is_some() && !step.always;
             if let Some(receipt) = reusable {
                 pending.extend(
                     receipt
@@ -379,6 +409,7 @@ impl<'a> Runner<'a> {
                 inputs: facts.inputs.len() + facts.verify_inputs.len(),
                 outputs: step.outputs.clone(),
                 limitations,
+                assumes: assumes.into_iter().collect(),
             });
         }
         Ok(plan)

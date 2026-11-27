@@ -117,7 +117,7 @@ from the shell.
 
 | Tool | Purpose |
 |---|---|
-| `flot_plan` | predicted execution, reuse and evidence gaps; runs nothing |
+| `flot_plan` | predicted execution, reuse and evidence gaps; runs nothing; reuse that rests on an `always` step coming out as last time names it in `assumes` |
 | `flot_run` | execute and record receipts (`only`, `force`, `jobs`, `max_cost_usd`, which can only [lower the flow's own](agents.md#spend-and-the-cost-ceiling)); `result` says what to act on |
 | `flot_show` | steps, claim verdicts and limitations of a run |
 | `flot_verify` | re-authenticate a run from the store; `result` is what `flot verify` exits with |

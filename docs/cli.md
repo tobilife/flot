@@ -3,7 +3,7 @@
 | Command | Purpose |
 |---|---|
 | `flot init` | write a starter `flot.toml` in the current directory; in a clone whose `origin` names a default branch it sets `proofs_from` to it |
-| `flot plan [--only STEP] [--force] [--proofs-from REV]` | predicted execution, reuse and evidence gaps; runs nothing |
+| `flot plan [--only STEP] [--force] [--proofs-from REV]` | predicted execution, reuse and evidence gaps; runs nothing; reuse that rests on an [`always`](flows.md#steps-that-always-run) step coming out as last time is marked `?` |
 | `flot run [--only STEP] [--force] [--jobs N] [--max-cost USD] [--sign] [--proofs-from REV] [--progress WHEN]` | execute and record receipts; `--only` runs a step and what it needs, a [partial](flows.md#verdict) run; `--sign` then signs the run; `--proofs-from` holds each proof to a git revision ([proofs from a revision](flows.md#proofs-from-a-revision)); `--progress` (`auto`, `live`, `plain`, `off`) chooses how the steps are shown on stderr as they run ([progress](#progress)) |
 | `flot sign [RUN]` | sign a run executed here with the host key |
 | `flot show [RUN]` | steps, claims and limitations of a run |

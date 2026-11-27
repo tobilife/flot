@@ -530,7 +530,7 @@ fn tool_catalog() -> Vec<Value> {
         tool(
             "flot_plan",
             Effect::Reads,
-            "Show what the flow would run, what it would reuse from receipts, and which claims have no proof command. Runs nothing.",
+            "Show what the flow would run, what it would reuse from receipts, and which claims have no proof command. Runs nothing. Reuse after an `always` step is predicted on that step coming out as it did last time; such a step lists those steps in `assumes`.",
             json!({
                 "only": { "type": "string", "description": "Limit to one step and its dependencies." },
                 "force": { "type": "boolean", "description": "Ignore cached receipts." }

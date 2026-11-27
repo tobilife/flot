@@ -129,6 +129,21 @@ ran      build                ok        11ms  claims 1v/0u/0r  receipt c3d387e28
     | built
 ```
 
+`flot plan` runs nothing, so it cannot know what the probe will print. It
+predicts on what the probe recorded last time and says so on each step that
+prediction makes reused; in `--json` the step lists the probes it rests on in
+`assumes`. Real output, after one run:
+
+```text
+$ flot plan
+flow probed (a349531adac2)
+  run   toolchain            inputs 0   claims 0   no claims
+        ! runs on every run (always); the steps that need it are reused only when its receipt comes out the same, which running it decides
+        ! step declares no claims; its success proves nothing
+  reuse build                inputs 1   claims 1   verify `true`
+        ? reused if toolchain comes out as last time, which running it decides
+```
+
 `always` is not part of the step key. It is refused with `candidates`: every
 candidate would run on every run, and which one is kept could change with what
 each reported spending. With `fails_before`, the proof runs before the change

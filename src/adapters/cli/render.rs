@@ -85,6 +85,18 @@ pub(super) fn render_plan(plan: &Plan) {
         if !entry.outputs.is_empty() {
             say!("        > produces {}", entry.outputs.join(", "));
         }
+        if entry.cached && !entry.assumes.is_empty() {
+            say!(
+                "        ? reused if {} come{} out as last time, which running {} decides",
+                entry.assumes.join(", "),
+                if entry.assumes.len() == 1 { "s" } else { "" },
+                if entry.assumes.len() == 1 {
+                    "it"
+                } else {
+                    "them"
+                }
+            );
+        }
         for limitation in &entry.limitations {
             say!("        ! {limitation}");
         }

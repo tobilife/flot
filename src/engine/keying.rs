@@ -411,12 +411,12 @@ fn scan_in<E>(
                 matched += 1;
                 continue;
             }
-            match std::fs::read(&entry) {
-                Ok(bytes) => {
+            match read_file(&entry) {
+                Ok((bytes, mode)) => {
                     let executable = recorded
                         .as_ref()
                         .and_then(|modes| modes.get(&relative).copied())
-                        .unwrap_or_else(|| is_executable(&entry));
+                        .unwrap_or(mode);
                     files.insert(relative, (keep(&bytes)?, executable));
                     matched += 1;
                 }
@@ -476,6 +476,25 @@ pub fn copy_workspace(root: &Path, dest: &Path, step: &Step) -> Result<()> {
             .with_context(|| format!("cannot copy {}", relative.display()))?;
     }
     Ok(())
+}
+
+/// A file's bytes and whether anyone may execute it, both from one open
+/// handle: asking by path again costs another round trip, which on a network
+/// or 9p mount is as slow as the read.
+fn read_file(path: &Path) -> std::io::Result<(Vec<u8>, bool)> {
+    use std::io::Read;
+    let mut file = std::fs::File::open(path)?;
+    let meta = file.metadata()?;
+    #[cfg(unix)]
+    let executable = {
+        use std::os::unix::fs::PermissionsExt;
+        meta.permissions().mode() & 0o111 != 0
+    };
+    #[cfg(not(unix))]
+    let executable = false;
+    let mut bytes = Vec::with_capacity(usize::try_from(meta.len()).unwrap_or(0));
+    file.read_to_end(&mut bytes)?;
+    Ok((bytes, executable))
 }
 
 /// Whether anyone may execute the file.

@@ -81,3 +81,6 @@ inputs = [
 ]
 claims = ["the module rules and the release references hold"]
 verify = "cargo test --quiet --test architecture --test readme"
+# The tests stay as main has them: a change that passes only a test it
+# loosened or deleted proves nothing.
+held = ["tests/**"]

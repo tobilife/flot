@@ -84,3 +84,28 @@ verify = "cargo test --quiet --test architecture --test readme"
 # The tests stay as main has them: a change that passes only a test it
 # loosened or deleted proves nothing.
 held = ["tests/**"]
+
+# The tests catch every mutant cargo-mutants makes of the code changed since
+# main, or a person allowed it in mutants.allow.toml with a reason. The diff
+# is of the files git tracks: a new file counts once it is added.
+[[step]]
+id = "mutants"
+run = "cargo mutants --version"
+needs = ["unit", "cli", "rules"]
+inputs = ["src/**/*.rs", "tests/**/*", "Cargo.toml", "Cargo.lock", "plugins/claude-code/**/*"]
+claims = ["the tests catch every mutant of the code changed since main"]
+verify = "cargo mutants --version"
+
+[step.mutants]
+run = '''
+git diff "$FLOT_PROOFS_FROM" -- src > "$FLOT_MUTANTS_DIR/changes.diff"
+if [ -s "$FLOT_MUTANTS_DIR/changes.diff" ]; then
+  cargo mutants --in-diff "$FLOT_MUTANTS_DIR/changes.diff" --exclude-re "tests::" -j 4 --timeout 300 -o "$FLOT_MUTANTS_DIR"
+else
+  # No code changed: a report of no mutants.
+  mkdir "$FLOT_MUTANTS_DIR/mutants.out"
+  echo '{"schemaVersion": "1", "thresholds": {"high": 80, "low": 60}, "files": {}}' > "$FLOT_MUTANTS_DIR/mutants.out/outcomes.json"
+fi
+'''
+report = "mutants.out/outcomes.json"
+allow = "mutants.allow.toml"

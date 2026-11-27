@@ -47,6 +47,10 @@ jobs:
           toolchain: ${{ steps.rust.outputs.toolchain }}
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+      # The self-check's `mutants` step tests the proofs against mutants.
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-mutants
       - run: cargo build --locked && echo "$PWD/target/debug" >> "$GITHUB_PATH"
       # Runs a trusted developer signed and pushed are reused, not executed
       # again. The signers come from the base branch: a pull request must not

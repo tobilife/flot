@@ -3959,6 +3959,18 @@ fn held_project() -> Project {
 fn a_proof_that_passes_only_with_tests_the_work_changed_proves_nothing() {
     // A weakened test passes here and fails as the revision has it.
     let weakened = held_project();
+    // A cargo build shared with the work would hand the work the copy's
+    // binaries: the copy builds in a place of its own.
+    let shared = HELD.replace(
+        "budget =",
+        "env = { CARGO_TARGET_DIR = \"/shared\", CARGO_BUILD_BUILD_DIR = \"/shared\" }\nbudget =",
+    );
+    weakened.write("flot.toml", &shared);
+    weakened.write(
+        "tests/a-target.sh",
+        "echo \"builds in $CARGO_TARGET_DIR and $CARGO_BUILD_BUILD_DIR\"\n",
+    );
+    commit(weakened.path(), "show where cargo builds");
     weakened.write("tests/check.sh", "true\n");
     let run = weakened.flot(&["run"]);
     assert_eq!(run.code, 2, "{}", run.stdout);
@@ -3966,7 +3978,15 @@ fn a_proof_that_passes_only_with_tests_the_work_changed_proves_nothing() {
         .has(") has it: the work passes only the versions it changed")
         .has("the work passes only the versions it changed; read `flot log s --held`");
     let held = weakened.flot(&["log", "s", "--held"]);
-    held.ok().has("app.txt is not fixed");
+    let builds = weakened.path().join(".flot/builds/s");
+    held.ok().has("app.txt is not fixed").has(&format!(
+        "builds in {} and {}",
+        builds.display(),
+        builds.display()
+    ));
+    weakened
+        .flot(&["log", "s", "--proof"])
+        .has("builds in /shared and /shared");
     weakened
         .flot(&["show", "latest"])
         .has("reason: the proof exited 1 with tests/check.sh as main (")

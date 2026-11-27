@@ -684,6 +684,16 @@ impl Runner<'_> {
                     parent.to_string_lossy().into_owned(),
                 );
             }
+            // Nor may cargo build it where the work builds, as a shared
+            // CARGO_TARGET_DIR would have it: cargo goes by its sources' times
+            // and paths relative to the package, so the work's next build
+            // would take the copy's binaries for its own. Each step's copies
+            // build in one place of their own, one after another, every copy
+            // newer than the last one's build.
+            let builds = self.store.root().join("builds").join(&step.id);
+            for name in ["CARGO_TARGET_DIR", "CARGO_BUILD_BUILD_DIR"] {
+                env.insert(name.into(), builds.to_string_lossy().into_owned());
+            }
         }
         let lines = options.progress.lines(&step.id, true);
         let verification = exec::run_confined(

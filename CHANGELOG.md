@@ -8,6 +8,11 @@
   replaced proves nothing, while the tests stay free to edit. `flot log STEP
   --held` and MCP `flot_step_output` with `held: true` print what that run
   printed, and `flot show` says how it ended.
+- A proof run on a copy of the work, for `fails_before` or `held`, builds
+  Rust in `.flot/builds/STEP` instead of in a `CARGO_TARGET_DIR` it shares
+  with the work. Before, the work's next `cargo` run could take the copy's
+  binaries, built from other sources at a path that no longer exists, as
+  its own. `flot gc` removes these directories.
 - `flot log STEP --proof` prints what the step's proof printed, stdout and
   stderr together, and MCP `flot_step_output` takes `proof: true`. Before,
   a refuted claim's evidence was reachable only through its receipt's digest

@@ -747,6 +747,12 @@ to other files keeps the verdict and one to the tests runs the proof again;
 `flot verify` treats a step whose `held` patterns changed, or a verified
 claim not held to the revision's files, as a proof that differs.
 
+A proof in a copy builds Rust in a directory of its own, `.flot/builds/STEP`
+(`CARGO_TARGET_DIR` and `CARGO_BUILD_BUILD_DIR` are set to it, whatever the
+step's environment says): sharing the work's build directory would leave the
+work's next `cargo` run with the binaries built from the copy. `flot gc`
+removes these directories; the next copy builds again.
+
 ### Refusing the edit
 
 `flot guard PATH...` names the paths whose change would touch the proofs: the

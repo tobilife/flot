@@ -790,8 +790,15 @@ impl Store {
                 }
             }
         }
-        // No run holds the lock, so nothing in tmp/ is in use.
+        // No run holds the lock, so nothing in tmp/ is in use, nor any
+        // build a proof made in a copy of the work, which the next one makes
+        // again.
         if !dry_run {
+            let builds = self.root.join("builds");
+            if builds.exists() {
+                fs::remove_dir_all(&builds)
+                    .with_context(|| format!("cannot remove {}", builds.display()))?;
+            }
             if let Ok(entries) = fs::read_dir(self.root.join("tmp")) {
                 for entry in entries.flatten() {
                     let path = entry.path();
@@ -1068,7 +1075,12 @@ mod tests {
             .remember(&digest::bytes(b"k"), &receipt.receipt_id, &[])
             .unwrap();
 
+        let build = store.root().join("builds/s/debug");
+        fs::create_dir_all(&build).unwrap();
+        fs::write(build.join("tool"), b"built").unwrap();
+
         let report = store.gc(false).unwrap();
+        assert!(!store.root().join("builds").exists());
         assert_eq!(report.removed_receipts, 1);
         assert_eq!(report.removed_objects, 1);
         assert_eq!(report.removed_cache, 1);
@@ -1080,7 +1092,9 @@ mod tests {
     fn gc_dry_run_reports_without_deleting() {
         let (_dir, store) = store();
         let orphan = store.put_bytes(b"orphan").unwrap();
+        fs::create_dir_all(store.root().join("builds/s")).unwrap();
         let report = store.gc(true).unwrap();
+        assert!(store.root().join("builds/s").exists());
         assert!(report.dry_run);
         assert_eq!(report.removed_objects, 1);
         assert!(store.has_object(&orphan), "a dry run must not delete");

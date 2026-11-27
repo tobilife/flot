@@ -441,6 +441,7 @@ impl<'a> Runner<'a> {
         // Held until the manifest is written: until then nothing names this
         // run's receipts, and gc must not collect them.
         let _lock = self.store.lock(false)?;
+        self.store.prune_builds();
         let started_at_ms = exec::now_ms();
         let started = std::time::Instant::now();
         options.progress.emit(|| Event::RunStarted {

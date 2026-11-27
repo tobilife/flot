@@ -31,6 +31,12 @@ pub const STORE_DIR: &str = ".flot";
 /// What the guard refused, one JSON line each, until a run records it.
 const REFUSALS: &str = "refusals.jsonl";
 
+/// Where proofs on copies of the work build, under the store.
+const BUILDS: &str = "builds";
+
+/// How long the copies' build is kept after a proof last used it.
+const BUILDS_KEPT: std::time::Duration = std::time::Duration::from_secs(7 * 24 * 60 * 60);
+
 /// Layout and record format of a store. A store written in another format is
 /// refused whole, with how to start over, rather than read half-right: flot
 /// does not migrate evidence, because a migrated receipt is not what was
@@ -105,6 +111,27 @@ pub struct StoreLock {
     _file: fs::File,
 }
 
+/// The directory every proof on a copy of the work builds in, held by one
+/// proof at a time, in this flot or another: one build for all of them, so
+/// dependencies are built and kept once. Released when dropped, which marks
+/// when it was last used.
+pub struct Builds {
+    dir: PathBuf,
+    file: fs::File,
+}
+
+impl Builds {
+    pub fn dir(&self) -> &Path {
+        &self.dir
+    }
+}
+
+impl Drop for Builds {
+    fn drop(&mut self) {
+        let _ = self.file.set_modified(std::time::SystemTime::now());
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Store {
     root: PathBuf,
@@ -164,68 +191,66 @@ impl Store {
     /// exclusive for gc, which fails at once rather than wait for a run.
     pub fn lock(&self, exclusive: bool) -> Result<StoreLock> {
         self.ensure()?;
-        let path = self.root.join("lock");
-        let file = fs::OpenOptions::new()
-            .create(true)
-            .truncate(false)
-            .write(true)
-            .open(&path)
-            .with_context(|| format!("cannot open {}", path.display()))?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::io::AsRawFd;
-            let operation = if exclusive {
-                libc::LOCK_EX | libc::LOCK_NB
-            } else {
-                libc::LOCK_SH
-            };
-            if unsafe { libc::flock(file.as_raw_fd(), operation) } != 0 {
-                let error = std::io::Error::last_os_error();
-                if error.kind() == std::io::ErrorKind::WouldBlock {
-                    return Err(fault::environment(
-                        "the store is in use by a running flot; try again when it finishes",
-                    ));
-                }
-                return Err(error).context("cannot lock the store");
-            }
+        let file = open_lock(&self.root.join("lock"))?;
+        match lock_file(&file, exclusive, !exclusive) {
+            Ok(true) => Ok(StoreLock { _file: file }),
+            Ok(false) => Err(fault::environment(
+                "the store is in use by a running flot; try again when it finishes",
+            )),
+            Err(error) => Err(error).context("cannot lock the store"),
         }
-        #[cfg(windows)]
-        {
-            use std::os::windows::io::AsRawHandle;
-            use windows_sys::Win32::Foundation::{ERROR_LOCK_VIOLATION, HANDLE};
-            use windows_sys::Win32::Storage::FileSystem::{
-                LockFileEx, LOCKFILE_EXCLUSIVE_LOCK, LOCKFILE_FAIL_IMMEDIATELY,
-            };
-            let flags = if exclusive {
-                LOCKFILE_EXCLUSIVE_LOCK | LOCKFILE_FAIL_IMMEDIATELY
-            } else {
-                0
-            };
-            let mut overlapped = unsafe { std::mem::zeroed() };
-            // The whole file; the lock goes when the handle closes.
-            let locked = unsafe {
-                LockFileEx(
-                    file.as_raw_handle() as HANDLE,
-                    flags,
-                    0,
-                    u32::MAX,
-                    u32::MAX,
-                    &mut overlapped,
-                )
-            };
-            if locked == 0 {
-                let error = std::io::Error::last_os_error();
-                if error.raw_os_error() == Some(ERROR_LOCK_VIOLATION as i32) {
-                    return Err(fault::environment(
-                        "the store is in use by a running flot; try again when it finishes",
-                    ));
-                }
-                return Err(error).context("cannot lock the store");
+    }
+
+    /// Take the directory proofs on copies of the work build in, waiting
+    /// while another proof holds it until `stopped` says to give up.
+    pub fn builds(&self, stopped: &dyn Fn() -> bool) -> Result<Builds> {
+        self.ensure()?;
+        let root = self.root.join(BUILDS);
+        fs::create_dir_all(&root).with_context(|| format!("cannot create {}", root.display()))?;
+        let file = open_lock(&root.join("lock"))?;
+        while !lock_file(&file, true, false).context("cannot lock the copies' build")? {
+            if stopped() {
+                bail!("the run stopped while another proof built in a copy of the work");
             }
+            std::thread::sleep(std::time::Duration::from_millis(50));
         }
-        #[cfg(not(any(unix, windows)))]
-        let _ = exclusive;
-        Ok(StoreLock { _file: file })
+        Ok(Builds {
+            dir: root.join("copies"),
+            file,
+        })
+    }
+
+    /// Remove builds no proof will use: those of another layout, and the
+    /// copies' build once no proof has used it for [`BUILDS_KEPT`]. Nothing is
+    /// removed while a proof holds it. A build that cannot be removed now is
+    /// tried again next time.
+    pub fn prune_builds(&self) {
+        let root = self.root.join(BUILDS);
+        let Ok(entries) = fs::read_dir(&root) else {
+            return;
+        };
+        let Ok(file) = open_lock(&root.join("lock")) else {
+            return;
+        };
+        if !matches!(lock_file(&file, true, false), Ok(true)) {
+            return;
+        }
+        let stale = file
+            .metadata()
+            .and_then(|meta| meta.modified())
+            .is_ok_and(|used| used.elapsed().is_ok_and(|age| age > BUILDS_KEPT));
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            if name == "lock" || (name == "copies" && !stale) {
+                continue;
+            }
+            let path = entry.path();
+            let _ = if path.is_dir() {
+                fs::remove_dir_all(&path)
+            } else {
+                fs::remove_file(&path)
+            };
+        }
     }
 
     pub fn root(&self) -> &Path {
@@ -872,6 +897,79 @@ pub struct GcReport {
 /// share a temporary file and tear each other's bytes.
 static WRITE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
+/// A lock file, created if it is not there yet.
+fn open_lock(path: &Path) -> Result<fs::File> {
+    fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(path)
+        .with_context(|| format!("cannot open {}", path.display()))
+}
+
+/// Lock all of `file`, exclusively or shared, until it is closed. Without
+/// `wait`, a lock another holder keeps is `Ok(false)` at once. Each open file
+/// is a holder of its own, also within one process.
+fn lock_file(file: &fs::File, exclusive: bool, wait: bool) -> std::io::Result<bool> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::io::AsRawFd;
+        let mut operation = if exclusive {
+            libc::LOCK_EX
+        } else {
+            libc::LOCK_SH
+        };
+        if !wait {
+            operation |= libc::LOCK_NB;
+        }
+        if unsafe { libc::flock(file.as_raw_fd(), operation) } != 0 {
+            let error = std::io::Error::last_os_error();
+            if error.kind() == std::io::ErrorKind::WouldBlock {
+                return Ok(false);
+            }
+            return Err(error);
+        }
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::io::AsRawHandle;
+        use windows_sys::Win32::Foundation::{ERROR_LOCK_VIOLATION, HANDLE};
+        use windows_sys::Win32::Storage::FileSystem::{
+            LockFileEx, LOCKFILE_EXCLUSIVE_LOCK, LOCKFILE_FAIL_IMMEDIATELY,
+        };
+        let mut flags = if exclusive {
+            LOCKFILE_EXCLUSIVE_LOCK
+        } else {
+            0
+        };
+        if !wait {
+            flags |= LOCKFILE_FAIL_IMMEDIATELY;
+        }
+        let mut overlapped = unsafe { std::mem::zeroed() };
+        // The whole file; the lock goes when the handle closes.
+        let locked = unsafe {
+            LockFileEx(
+                file.as_raw_handle() as HANDLE,
+                flags,
+                0,
+                u32::MAX,
+                u32::MAX,
+                &mut overlapped,
+            )
+        };
+        if locked == 0 {
+            let error = std::io::Error::last_os_error();
+            if error.raw_os_error() == Some(ERROR_LOCK_VIOLATION as i32) {
+                return Ok(false);
+            }
+            return Err(error);
+        }
+    }
+    #[cfg(not(any(unix, windows)))]
+    let _ = (file, exclusive, wait);
+    Ok(true)
+}
+
 fn write_atomic(path: &Path, data: &[u8]) -> Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
@@ -1063,6 +1161,66 @@ mod tests {
         tampered.identity.status = StepStatus::Failed;
         let err = store.put_receipt(&tampered).unwrap_err();
         assert!(err.to_string().contains("does not match its body"), "{err}");
+    }
+
+    #[test]
+    fn one_proof_at_a_time_builds_in_the_copies_build() {
+        let (_dir, store) = store();
+        let held = store.builds(&|| false).unwrap();
+        assert_eq!(held.dir(), store.root().join("builds/copies"));
+        // Another holder, in this process or another, waits until told to stop.
+        let error = store.builds(&|| true).err().unwrap().to_string();
+        assert!(error.contains("another proof built"), "{error}");
+        let waited = std::time::Instant::now();
+        std::thread::scope(|scope| {
+            scope.spawn(|| {
+                std::thread::sleep(std::time::Duration::from_millis(300));
+                drop(held);
+            });
+            store.builds(&|| false).unwrap();
+        });
+        assert!(waited.elapsed() >= std::time::Duration::from_millis(300));
+    }
+
+    #[test]
+    fn a_run_removes_builds_no_proof_will_use() {
+        let (_dir, store) = store();
+        let builds = store.root().join("builds");
+        let used = |ago: u64| {
+            fs::File::options()
+                .write(true)
+                .open(builds.join("lock"))
+                .unwrap()
+                .set_modified(
+                    std::time::SystemTime::now() - std::time::Duration::from_secs(ago * 86_400),
+                )
+                .unwrap();
+        };
+        drop(store.builds(&|| false).unwrap());
+        fs::create_dir_all(builds.join("copies/debug")).unwrap();
+        fs::create_dir_all(builds.join("cli/debug")).unwrap();
+
+        // Another layout's build goes at once; one used last week stays.
+        used(6);
+        store.prune_builds();
+        assert!(!builds.join("cli").exists());
+        assert!(builds.join("copies/debug").exists());
+
+        // Held by a proof, even an old one stays.
+        used(8);
+        let held = store.builds(&|| false).unwrap();
+        used(8);
+        store.prune_builds();
+        assert!(builds.join("copies/debug").exists());
+        drop(held);
+
+        // Released, it was used just now.
+        store.prune_builds();
+        assert!(builds.join("copies/debug").exists());
+        used(8);
+        store.prune_builds();
+        assert!(!builds.join("copies").exists());
+        assert!(builds.join("lock").exists());
     }
 
     #[test]

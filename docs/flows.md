@@ -747,11 +747,20 @@ to other files keeps the verdict and one to the tests runs the proof again;
 `flot verify` treats a step whose `held` patterns changed, or a verified
 claim not held to the revision's files, as a proof that differs.
 
-A proof in a copy builds Rust in a directory of its own, `.flot/builds/STEP`
-(`CARGO_TARGET_DIR` and `CARGO_BUILD_BUILD_DIR` are set to it, whatever the
-step's environment says): sharing the work's build directory would leave the
-work's next `cargo` run with the binaries built from the copy. `flot gc`
-removes these directories; the next copy builds again.
+Proofs in copies build Rust in one directory of their own,
+`.flot/builds/copies` (`CARGO_TARGET_DIR` and `CARGO_BUILD_BUILD_DIR` are set
+to it, whatever the step's environment says): sharing the work's build
+directory would leave the work's next `cargo` run with the binaries built
+from the copy. One proof at a time holds it, in this run or another, from
+making its copy to its last command, so every file of a copy is newer than
+what was built there before and dependencies are built once for every step.
+It is built without debug info and incremental compilation
+(`CARGO_PROFILE_DEV_DEBUG`, `CARGO_PROFILE_TEST_DEBUG` and
+`CARGO_INCREMENTAL` are `0` unless the step sets them), which only a debugger
+or a rebuild of the same copy would use. On flot itself, with `rules` and
+`cli` held, the copies' builds take 260 MB where one directory per step took
+1,621 MB. `flot run` removes it once no proof has used it for seven
+days, and `flot gc` at once; the next copy builds again.
 
 ### Refusing the edit
 

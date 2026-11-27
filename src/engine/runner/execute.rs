@@ -19,6 +19,7 @@ use crate::engine::claims::{self, Hold, Proof, ProofOutcome, Red};
 use crate::engine::exec;
 use crate::engine::keying::{self, Facts};
 use crate::engine::sandbox;
+use crate::store::Builds;
 
 use super::{Keyed, RunOptions, Runner, METRICS_SEQUENCE};
 
@@ -431,7 +432,7 @@ impl Runner<'_> {
         match self.prove(
             step,
             command,
-            &self.root,
+            Place::Work,
             budget,
             options,
             &mut found.escaped,
@@ -567,7 +568,7 @@ impl Runner<'_> {
             .expect("a step with fails_before has a verify command");
         let mut spent: Option<Metrics> = None;
         let mut notes = Vec::new();
-        let mut prove = |place: &Path| -> Result<Proof> {
+        let mut prove = |place: Place| -> Result<Proof> {
             let (proof, metrics, proof_notes) =
                 self.prove(step, command, place, budget, options, escaped)?;
             spent = match (spent.take(), metrics) {
@@ -582,10 +583,9 @@ impl Runner<'_> {
             Ok(proof)
         };
         let red = (|| -> Result<Red> {
-            let scratch = Scratch::new(self.store.root(), "before")?;
-            let copy = scratch.path.join("work");
-            keying::copy_workspace(&self.root, &copy, step).context("cannot copy the work")?;
-            let green = prove(&copy)?;
+            let builds = self.store.builds(&|| options.stop.is_set())?;
+            let copy = self.copy(step, &builds, "before")?;
+            let green = prove(Place::Copy(&copy))?;
             if green.timed_out || green.exit_code != Some(0) {
                 return Ok(Red::CopyFails {
                     exit_code: green.exit_code,
@@ -593,12 +593,12 @@ impl Runner<'_> {
                 });
             }
             baseline
-                .undo(&copy)
+                .undo(copy.dir())
                 .context("cannot undo the changes in the copy")?;
             Ok(Red::Ran {
                 baseline: baseline.label(),
                 commit: baseline.commit.clone(),
-                proof: prove(&copy)?,
+                proof: prove(Place::Copy(&copy))?,
             })
         })()
         .unwrap_or_else(|error| Red::Unchecked(format!("{error:#}")));
@@ -633,13 +633,12 @@ impl Runner<'_> {
             return (Hold::Same { base }, None, Vec::new());
         }
         let ran = (|| -> Result<(Proof, Option<Metrics>, Vec<String>)> {
-            let scratch = Scratch::new(self.store.root(), "held")?;
-            let copy = scratch.path.join("work");
-            keying::copy_workspace(&self.root, &copy, step).context("cannot copy the work")?;
+            let builds = self.store.builds(&|| options.stop.is_set())?;
+            let copy = self.copy(step, &builds, "held")?;
             baseline
-                .hold(&copy, &files)
+                .hold(copy.dir(), &files)
                 .context("cannot put the held files back in the copy")?;
-            self.prove(step, command, &copy, budget, options, escaped)
+            self.prove(step, command, Place::Copy(&copy), budget, options, escaped)
         })();
         match ran {
             Ok((proof, metrics, notes)) => (
@@ -659,6 +658,21 @@ impl Runner<'_> {
         }
     }
 
+    /// A copy of the work for `step`'s proof, in a directory named for what
+    /// it is for, `kind`. It is made while `builds` is held, so every file in
+    /// it is newer than anything built there before, and a build that goes by
+    /// times builds it whole.
+    fn copy<'b>(&self, step: &Step, builds: &'b Builds, kind: &str) -> Result<WorkCopy<'b>> {
+        let scratch = Scratch::new(self.store.root(), kind)?;
+        let copy = WorkCopy {
+            dir: scratch.path.join("work"),
+            builds,
+            _scratch: scratch,
+        };
+        keying::copy_workspace(&self.root, copy.dir(), step).context("cannot copy the work")?;
+        Ok(copy)
+    }
+
     /// Run a proof command in `place`, the flow root or a copy of it, and
     /// keep its combined output as evidence. A proof can spend too, an agent
     /// asked to review for instance, so it reports through its own
@@ -669,32 +683,45 @@ impl Runner<'_> {
         &self,
         step: &Step,
         command: &str,
-        place: &Path,
+        place: Place,
         budget: ResolvedBudget,
         options: &RunOptions,
         escaped: &mut Vec<exec::Escaped>,
     ) -> Result<(Proof, Option<Metrics>, Vec<String>)> {
         let (mut env, metrics_path) = self.metered_env(step)?;
-        if place != self.root {
-            // A copy has no `.git` and sits inside the store: git must not
-            // find the real repository above it.
-            if let Some(parent) = place.parent() {
-                env.insert(
-                    "GIT_CEILING_DIRECTORIES".into(),
-                    parent.to_string_lossy().into_owned(),
-                );
+        let place = match place {
+            Place::Work => self.root.as_path(),
+            Place::Copy(copy) => {
+                // A copy has no `.git` and sits inside the store: git must
+                // not find the real repository above it.
+                if let Some(parent) = copy.dir().parent() {
+                    env.insert(
+                        "GIT_CEILING_DIRECTORIES".into(),
+                        parent.to_string_lossy().into_owned(),
+                    );
+                }
+                // Nor may cargo build it where the work builds, as a shared
+                // CARGO_TARGET_DIR would have it: cargo goes by its sources'
+                // times and paths relative to the package, so the work's
+                // next build would take the copy's binaries for its own.
+                // Every copy builds in one place, held by one at a time, and
+                // without what only a debugger or the next edit of the same
+                // files would use, unless the step asks for it: debug info
+                // is most of a build's size, and a copy is never edited.
+                let builds = copy.builds.dir().to_string_lossy().into_owned();
+                for name in ["CARGO_TARGET_DIR", "CARGO_BUILD_BUILD_DIR"] {
+                    env.insert(name.into(), builds.clone());
+                }
+                for name in [
+                    "CARGO_PROFILE_DEV_DEBUG",
+                    "CARGO_PROFILE_TEST_DEBUG",
+                    "CARGO_INCREMENTAL",
+                ] {
+                    env.entry(name.into()).or_insert_with(|| "0".into());
+                }
+                copy.dir()
             }
-            // Nor may cargo build it where the work builds, as a shared
-            // CARGO_TARGET_DIR would have it: cargo goes by its sources' times
-            // and paths relative to the package, so the work's next build
-            // would take the copy's binaries for its own. Each step's copies
-            // build in one place of their own, one after another, every copy
-            // newer than the last one's build.
-            let builds = self.store.root().join("builds").join(&step.id);
-            for name in ["CARGO_TARGET_DIR", "CARGO_BUILD_BUILD_DIR"] {
-                env.insert(name.into(), builds.to_string_lossy().into_owned());
-            }
-        }
+        };
         let lines = options.progress.lines(&step.id, true);
         let verification = exec::run_confined(
             command,
@@ -1010,6 +1037,28 @@ fn read_metrics(path: &Path) -> (Option<Metrics>, Vec<String>) {
 }
 
 static SCRATCH_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+/// Where a proof runs.
+enum Place<'a> {
+    /// In the work itself.
+    Work,
+    /// In a copy of it.
+    Copy(&'a WorkCopy<'a>),
+}
+
+/// A copy of the work, which exists only while the build its proofs use is
+/// held, and is removed when it is done with.
+struct WorkCopy<'b> {
+    dir: PathBuf,
+    builds: &'b Builds,
+    _scratch: Scratch,
+}
+
+impl WorkCopy<'_> {
+    fn dir(&self) -> &Path {
+        &self.dir
+    }
+}
 
 /// A directory in the store's `tmp` for one confined execution or one copy
 /// of the work, removed when it is done with.

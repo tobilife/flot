@@ -3960,20 +3960,25 @@ fn a_proof_that_passes_only_with_tests_the_work_changed_proves_nothing() {
     // A weakened test passes here and fails as the revision has it.
     let weakened = held_project();
     // A cargo build shared with the work would hand the work the copy's
-    // binaries: the copy builds in a place of its own.
+    // binaries: the copy builds in a place of its own, without debug info
+    // unless the step asks for it.
     let shared = HELD.replace(
         "budget =",
-        "env = { CARGO_TARGET_DIR = \"/shared\", CARGO_BUILD_BUILD_DIR = \"/shared\" }\nbudget =",
+        "env = { CARGO_TARGET_DIR = \"/shared\", CARGO_BUILD_BUILD_DIR = \"/shared\", CARGO_INCREMENTAL = \"1\" }\nbudget =",
     );
     weakened.write("flot.toml", &shared);
     weakened.write(
         "tests/a-target.sh",
-        "echo \"builds in $CARGO_TARGET_DIR and $CARGO_BUILD_BUILD_DIR\" | tr '\\\\' /\n",
+        "echo \"builds in $CARGO_TARGET_DIR and $CARGO_BUILD_BUILD_DIR\" | tr '\\\\' /\n\
+         echo \"debug $CARGO_PROFILE_DEV_DEBUG $CARGO_PROFILE_TEST_DEBUG incremental $CARGO_INCREMENTAL\"\n",
     );
     commit(weakened.path(), "show where cargo builds");
     weakened.write("tests/check.sh", "true\n");
+    // Each step's own build, as copies made them before: no proof uses it.
+    weakened.write(".flot/builds/s/debug/flot", "built\n");
     let run = weakened.flot(&["run"]);
     assert_eq!(run.code, 2, "{}", run.stdout);
+    assert!(!weakened.path().join(".flot/builds/s").exists());
     run.has("the proof exited 1 with tests/check.sh as main (")
         .has(") has it: the work passes only the versions it changed")
         .has("the work passes only the versions it changed; read `flot log s --held`");
@@ -3982,11 +3987,12 @@ fn a_proof_that_passes_only_with_tests_the_work_changed_proves_nothing() {
     // short name on Windows.
     held.ok()
         .has("app.txt is not fixed")
-        .has("/.flot/builds/s and ");
+        .has("/.flot/builds/copies and ")
+        .has("debug 0 0 incremental 1");
     assert!(
         held.stdout
             .lines()
-            .any(|line| line.starts_with("builds in ") && line.ends_with("/.flot/builds/s")),
+            .any(|line| line.starts_with("builds in ") && line.ends_with("/.flot/builds/copies")),
         "{}",
         held.stdout
     );

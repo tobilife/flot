@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Proofs on copies of the work, for `fails_before` or `held`, build Rust in
+  one directory, `.flot/builds/copies`, held by one proof at a time, instead
+  of one per step, and without debug info or incremental compilation unless
+  the step's environment asks for them. On flot itself, with two steps held,
+  the copies' builds take 260 MB instead of 1,621 MB, and a run after an
+  edit to the tests went from 69 to 58 s (medians of four). `flot run` removes it once no proof has used it for seven days, and
+  removes the per-step directories earlier versions made.
 - A copy of the work is written when it is made. On Windows, and on macOS,
   where a copy is a clone, a copied file kept its modification time, so
   `cargo` in a copy could take a file older than its last build there for

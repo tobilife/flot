@@ -30,6 +30,10 @@
   run had been stopped. Times under 0.1 s are in milliseconds (`16ms`, not
   `0.0s`). docs/cli.md says what the time covers: the whole step, proof and
   flot's checks included, so more than the command's time in the summary.
+- The plugin's skill tells Claude that a run passing after a failure with
+  nothing changed is a flaky step, not a fix (`flot_diff` says `same key,
+  different result`), and that a step not run is reported by the dependency
+  that failed. A test fails if the skill names an MCP tool flot does not have.
 
 ## 0.2.9
 

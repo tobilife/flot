@@ -45,7 +45,13 @@ leave the change to the user. The refusal is recorded in the next run.
 - Fix the code under test, not the flow's proof commands, the files they
   read, or what runs the checks (CI workflows, git hooks, Claude Code
   settings): that voids the evidence.
+- A step that did not run says why (`not run: dependency lint (failed) did
+  not hold`): report the dependency that failed, not the skipped step.
 - Run `flot_run` again after the fix.
+- If a run passes after one failed and you changed nothing, the failure was
+  not fixed: `flot_diff` between the two says `same key, different result`
+  for that step. Report the step as flaky, with what differed, and run
+  `flot flaky` if the user wants the history. Never call it fixed.
 
 ## Never without being asked
 

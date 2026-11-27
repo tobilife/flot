@@ -740,6 +740,30 @@ verify = "grep -q flot artifact.txt"
     }
 
     #[test]
+    fn every_tool_the_plugin_skill_names_is_one_the_server_lists() {
+        let (_dir, server) = project(PROVEN);
+        let response = server.handle(&request("tools/list", json!({}))).unwrap();
+        let listed: Vec<&str> = response["result"]["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|entry| entry["name"].as_str().unwrap())
+            .collect();
+        let skill = include_str!("../../plugins/claude-code/skills/flot/SKILL.md");
+        let named: Vec<&str> = skill
+            .split(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+            .filter(|word| word.starts_with("flot_"))
+            .collect();
+        assert!(named.contains(&"flot_run"), "{named:?}");
+        for name in named {
+            assert!(
+                listed.contains(&name),
+                "the skill names {name}, which is not a tool"
+            );
+        }
+    }
+
+    #[test]
     fn only_running_the_flow_is_announced_as_having_effects() {
         let (_dir, server) = project(PROVEN);
         let response = server.handle(&request("tools/list", json!({}))).unwrap();

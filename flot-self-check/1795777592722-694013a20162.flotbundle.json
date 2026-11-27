@@ -1,0 +1,2468 @@
+{
+  "schema": 4,
+  "flot_version": "0.2.10",
+  "run": {
+    "run_id": "1795777592722-694013a20162",
+    "flow": "flot-self-check",
+    "flow_digest": "sha256:e3536e38f23f34abd2201dad261b5d8c99d7268e4b58c566dfb5405cadd699a0",
+    "root_digest": "sha256:694013a2016259e17b8f59e3b76fcca793eccf8a6e116945b6d8cce2a68a7914",
+    "verdict": "passed",
+    "steps": [
+      {
+        "step_id": "toolchain",
+        "receipt_id": "sha256:ac8c426f2dc21778f2e8a2dc2fbc37e97e37358adfc638cc39541d7c2935a694",
+        "status": "ok",
+        "cached": false,
+        "claims": {
+          "verified": 0,
+          "unverified": 0,
+          "refuted": 0
+        },
+        "observed_digest": "sha256:413df07886da998439574d56bd47e2c85b0c30a61a559033b97cafd5ed42200a"
+      },
+      {
+        "step_id": "format",
+        "receipt_id": "sha256:d33ba4ed068d2612ecc1d673c66bec424c6b798f22996ee5ffc4a17d7080716c",
+        "status": "ok",
+        "cached": false,
+        "claims": {
+          "verified": 1,
+          "unverified": 0,
+          "refuted": 0
+        },
+        "observed_digest": "sha256:32c4a4ba181afd251220e764b96a14cce9abcb40c512fac4e42965b6a0f8988a"
+      },
+      {
+        "step_id": "build",
+        "receipt_id": "sha256:c5ac67ae656cdeeeb41c4b569e748e75cd64b0c4d8c1c3b82647739d95d371af",
+        "status": "ok",
+        "cached": false,
+        "claims": {
+          "verified": 1,
+          "unverified": 0,
+          "refuted": 0
+        },
+        "observed_digest": "sha256:d23c146a3b1623ba9134191b718610dcdc7357abed92ade727f0d1c4635b1afb"
+      },
+      {
+        "step_id": "cli",
+        "receipt_id": "sha256:ece346550249c5ca36a2dfd1796041837a2583b10f11ece1bcf6eab4a6e7e176",
+        "status": "ok",
+        "cached": false,
+        "claims": {
+          "verified": 1,
+          "unverified": 0,
+          "refuted": 0
+        },
+        "observed_digest": "sha256:8c3faffce6e542ef23fdd9f5f2ff2d9bcc32fff138f52767988964b3f134e03b"
+      },
+      {
+        "step_id": "lint",
+        "receipt_id": "sha256:31b1e914f56f3b75c249c0dad42bb0e5c094086ab9913b608af97cce56b48b7b",
+        "status": "ok",
+        "cached": false,
+        "claims": {
+          "verified": 1,
+          "unverified": 0,
+          "refuted": 0
+        },
+        "observed_digest": "sha256:2017405a5442d1ef248600680631998811ecb11f709eaa97a94d433f522e3bc0"
+      },
+      {
+        "step_id": "rules",
+        "receipt_id": "sha256:b0de6cdeee27bbd9e479d2f4ff261628a4c1e5a6bdddfa082c6e6820c3a8aa93",
+        "status": "ok",
+        "cached": false,
+        "claims": {
+          "verified": 1,
+          "unverified": 0,
+          "refuted": 0
+        },
+        "observed_digest": "sha256:4de1b5a0f3911cd87c90f0c088c7b8d2844451a235d23adc9a560d3d6c1e7512"
+      },
+      {
+        "step_id": "unit",
+        "receipt_id": "sha256:90b575b13e7996b0549504163885e6ba582a27bc97a6086282e08a4cad4bec76",
+        "status": "ok",
+        "cached": false,
+        "claims": {
+          "verified": 1,
+          "unverified": 0,
+          "refuted": 0
+        },
+        "observed_digest": "sha256:fc7d44f4666a56536388c844f4b2612f7315760effb50b085845bdc1b0fc2fea"
+      }
+    ],
+    "claims": {
+      "verified": 6,
+      "unverified": 0,
+      "refuted": 0
+    },
+    "limitations": [
+      "proofs checked against origin/main (f66e62e746e1)"
+    ],
+    "max_parallel": 1,
+    "spend": {
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "cost_micro_usd": 0,
+      "reporting_steps": 0,
+      "silent_steps": 7,
+      "unpriced_steps": 0,
+      "reused_cost_micro_usd": 0
+    },
+    "max_cost_micro_usd": null,
+    "started_at_ms": 1795777592722,
+    "duration_ms": 27622,
+    "flot_version": "0.2.10"
+  },
+  "receipts": [
+    {
+      "receipt_id": "sha256:ac8c426f2dc21778f2e8a2dc2fbc37e97e37358adfc638cc39541d7c2935a694",
+      "identity": {
+        "flow": "flot-self-check",
+        "step_id": "toolchain",
+        "step_key": "sha256:d189bb08e5e866ed9bd473e644f4d65748fd4333cfbc8833867ea0e1df7f8e30",
+        "command": "rustc -vV && cargo -V",
+        "status": "ok",
+        "exit_code": 0,
+        "stdout_digest": "sha256:1bb0bb55c9ce0742e66ba0ed1e0d9eeb980f6b019e02be13ba44b3624216006e",
+        "stderr_digest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "inputs": [],
+        "verify_inputs": [],
+        "outputs": [],
+        "deps": [],
+        "claims": [],
+        "limitations": [],
+        "tool": {
+          "name": "flot",
+          "version": "0.2.10",
+          "schema": 5
+        }
+      },
+      "observed": {
+        "started_at_ms": 1795777592824,
+        "duration_ms": 52,
+        "host_os": "linux",
+        "stdout_inline": "rustc 1.100.0 (0ef1bc386 2026-11-09)\nbinary: rustc\ncommit-hash: 0ef1bc386059596dada8fb65b50425aab2ea637a\ncommit-date: 2026-11-09\nhost: x86_64-unknown-linux-gnu\nrelease: 1.100.0\nLLVM version: 23.1.5\ncargo 1.100.0 (3acc79c0c 2026-11-05)\n",
+        "stdout_truncated": false,
+        "stderr_inline": "",
+        "stderr_truncated": false,
+        "stdout_bytes": 235,
+        "stderr_bytes": 0,
+        "metrics": null,
+        "metrics_notes": []
+      }
+    },
+    {
+      "receipt_id": "sha256:d33ba4ed068d2612ecc1d673c66bec424c6b798f22996ee5ffc4a17d7080716c",
+      "identity": {
+        "flow": "flot-self-check",
+        "step_id": "format",
+        "step_key": "sha256:1e84a65b79e9625dd60b7a5c1a63347d0ba24242a35bfe2696224adb306c057c",
+        "command": "cargo fmt --check",
+        "status": "ok",
+        "exit_code": 0,
+        "stdout_digest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_digest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "inputs": [
+          {
+            "path": "src/adapters/cli.rs",
+            "digest": "sha256:38b05649a6e42e8a5cea16b3330d2d14beaa0eb2b1eb88e8cf295e861dc73d65"
+          },
+          {
+            "path": "src/adapters/cli/args.rs",
+            "digest": "sha256:f853e69ea995990cd127672c6fd64479a6bccb7557050ee088ddbc1fdca36c22"
+          },
+          {
+            "path": "src/adapters/cli/hook.rs",
+            "digest": "sha256:e9784fe89b18aeab74d47e9b2391cc07173233810258d3ccf2a15eeca3abfee4"
+          },
+          {
+            "path": "src/adapters/cli/progress.rs",
+            "digest": "sha256:4917b62c9347aa12ce779b4910c90be5e70e467000b7892186e002d82edd203d"
+          },
+          {
+            "path": "src/adapters/cli/render.rs",
+            "digest": "sha256:f132eac35428cf57d283c7458ef572ef11879d6bcc43733e18993b0d67651920"
+          },
+          {
+            "path": "src/adapters/cli/replay.rs",
+            "digest": "sha256:b3ec9208f378739c55ff0d7b0386723b3e1934a4856094c957b483ab33dc0b6d"
+          },
+          {
+            "path": "src/adapters/mcp.rs",
+            "digest": "sha256:7dd8fb942c2e1be1c38b893811ffed6dd6afe24fa9bfc9e47644331018aafd3f"
+          },
+          {
+            "path": "src/adapters/mod.rs",
+            "digest": "sha256:2305acb0c4b63bc1bfc993a31ecba153c2b95c99141052fb97f8aac9651990ed"
+          },
+          {
+            "path": "src/core/attest.rs",
+            "digest": "sha256:9601aea26aa9580a757ce735f29b377726f8b526c9fd170f5aa3dd1aeaed769a"
+          },
+          {
+            "path": "src/core/compare.rs",
+            "digest": "sha256:ecb1b5a6428eb73c9a842c5f544eb4875ded68c29439fb2960989e9802fec730"
+          },
+          {
+            "path": "src/core/digest.rs",
+            "digest": "sha256:77a2cac92908ad8d96c783eeec2fae68a8e739b3ea907415f8d3b0773c01221e"
+          },
+          {
+            "path": "src/core/fault.rs",
+            "digest": "sha256:0a35676337719eec6005c3f203b5364a702941ed73e0b17a37bfde1cd7cc2f42"
+          },
+          {
+            "path": "src/core/flow.rs",
+            "digest": "sha256:9e493115aa2cb5cc4c63d92047fc205a5308483e29589facc5b462341a35fd00"
+          },
+          {
+            "path": "src/core/metrics.rs",
+            "digest": "sha256:ba809d9be9c3d532205a7efd6ce6c48a51ec0a7b203a4fa64d42a37c44f4cb0c"
+          },
+          {
+            "path": "src/core/mod.rs",
+            "digest": "sha256:589ab4a890d5b6d158fe51766fd9a19a66ce1ac93c28b32299bb870f40830cb2"
+          },
+          {
+            "path": "src/core/powershell.rs",
+            "digest": "sha256:898ec20f9727e75aab9a9f4381a0b2556704dbaec11634beac48a6062c36b650"
+          },
+          {
+            "path": "src/core/powershell/cmdlets.rs",
+            "digest": "sha256:486897ee176a05e67e280e5b5d1f87db7e57a4cbf7f7a383fc9d7a290f05235a"
+          },
+          {
+            "path": "src/core/powershell/lex.rs",
+            "digest": "sha256:53225bc6044d478a4481d06183146c9a1d4c0f0f93f62be5eaeac1b546ae9971"
+          },
+          {
+            "path": "src/core/powershell/paths.rs",
+            "digest": "sha256:1d2c57f6bf30a06e826650f826fb0b9218dfb86c802bf3b89a4cdd064c293b79"
+          },
+          {
+            "path": "src/core/powershell/read.rs",
+            "digest": "sha256:e4ecf1e773156495bcc89d0a428db82886e318a742db036645d21b604b2e275b"
+          },
+          {
+            "path": "src/core/powershell/run.rs",
+            "digest": "sha256:756827a0fd561c95662e9d34edd50dca3c5b36933e0b4f52d0a2fde5dfad2e0c"
+          },
+          {
+            "path": "src/core/powershell/vars.rs",
+            "digest": "sha256:99efd88130168c65a9f911bd84c3a5cc87b2c4b22427ba57e8618b3601d15887"
+          },
+          {
+            "path": "src/core/preview.rs",
+            "digest": "sha256:138baf01021f6f021f10b55f8359522fb30ca96e5ed14d3f71a71baad6cd004f"
+          },
+          {
+            "path": "src/core/reading.rs",
+            "digest": "sha256:790a11b8487f18883b45ffd050e1952a1f875f8fd16d917b105864fce2b40e94"
+          },
+          {
+            "path": "src/core/receipt.rs",
+            "digest": "sha256:90bbce77df527ad07517b294b2d0ef299e6454ab6d77f6ed4aba3ba9cf466049"
+          },
+          {
+            "path": "src/core/receipt/check.rs",
+            "digest": "sha256:67feffb916f4c47758fc4a350dcaf40175d3ba571eace239fa72d6f3ed5dd855"
+          },
+          {
+            "path": "src/core/secrets.rs",
+            "digest": "sha256:4e5d7348efed10e01c61a331c79a50c191bb833a485757d5ffeb6f9a580a91ac"
+          },
+          {
+            "path": "src/core/shell.rs",
+            "digest": "sha256:345672369dc6cb889ee6fae88998a681ebd3ce3bc67ed3266418af8981840d86"
+          },
+          {
+            "path": "src/core/shell/command.rs",
+            "digest": "sha256:49f92ed16365e2de6144cfaaa349f722b11a6ff2fa3bf727916b6006815604b4"
+          },
+          {
+            "path": "src/core/shell/lex.rs",
+            "digest": "sha256:d527f98bbe25e568d1dcaa4f1b2ca16e575d11a015f949dab1ececadc0520597"
+          },
+          {
+            "path": "src/core/shell/paths.rs",
+            "digest": "sha256:696060793cd64adbe2a21c58f6aaeb9900f8092d428ae8104cf4164a998b906c"
+          },
+          {
+            "path": "src/core/shell/read.rs",
+            "digest": "sha256:4be3aec5674f5a9adb81d225ae01c605a5094048ddb7feb2e2b421753407ee05"
+          },
+          {
+            "path": "src/core/shell/run.rs",
+            "digest": "sha256:469feb3ac49ed25674f619dce38308a36d9d628e1d3fc01997cbd1edc1cb2eec"
+          },
+          {
+            "path": "src/core/shell/substitution.rs",
+            "digest": "sha256:3780dd51e6ca87e57839b7165d42ce8e3df2d5db453f5be87c38574d6488c966"
+          },
+          {
+            "path": "src/core/shell/tables.rs",
+            "digest": "sha256:80e25a8ad0e7361d17c86c85e10fad0f207c8f123b75ca1c06fdb36a77bb2f7b"
+          },
+          {
+            "path": "src/core/shell/vars.rs",
+            "digest": "sha256:3fb0faa03a191935c06d6e83d379399cd66188ddc4c66f8017265de1b5b71cf8"
+          },
+          {
+            "path": "src/core/shell/writers.rs",
+            "digest": "sha256:45c5a36567b031fe4c0c63239cf1428aca6cd90e4b85c5b103c6276e2b05b50a"
+          },
+          {
+            "path": "src/engine/baseline.rs",
+            "digest": "sha256:24084516bb14f36f4ea229a7e9803aba4270e484fa4ee8e6255860b60bc06d1a"
+          },
+          {
+            "path": "src/engine/claims.rs",
+            "digest": "sha256:9db6637693707852bd6f91ff07429b3088b75b692f8a4cd61b575ba850bade7e"
+          },
+          {
+            "path": "src/engine/exec.rs",
+            "digest": "sha256:79f4f876e2e986cdc00d1760dc13715fe79481b28f1a405749eb8868b1b408f2"
+          },
+          {
+            "path": "src/engine/exec/escape.rs",
+            "digest": "sha256:de2f1bdc8aad89c1b0a079a200509a4bb6fb7a10302a9d26881811f81f6c6006"
+          },
+          {
+            "path": "src/engine/exec/escape/linux.rs",
+            "digest": "sha256:beef1413c300ee81e2319a32e13459e5b6336bf0ac02a527dd3e04613d8718e9"
+          },
+          {
+            "path": "src/engine/exec/escape/macos.rs",
+            "digest": "sha256:fe587e65ef9ca5f0534102ffadce7d49ba8107e795d9db37cffa8c0b354e0332"
+          },
+          {
+            "path": "src/engine/exec/job.rs",
+            "digest": "sha256:1556079af4ebf54d78f607ee1ba065340af8561bdd00fa5d16beff3f80c51c23"
+          },
+          {
+            "path": "src/engine/git.rs",
+            "digest": "sha256:be64199bc3e7bc6cda052bf3e2eca2d3e73b54e4fafe5239f561cfadc9034173"
+          },
+          {
+            "path": "src/engine/keying.rs",
+            "digest": "sha256:bf78bacbe99585c986b0fc6a7ab3aa1c54d9c6b6ae19755a2b176926f138fae5"
+          },
+          {
+            "path": "src/engine/keying/digests.rs",
+            "digest": "sha256:cfb0fc36d882ece1e84cbd7aa74528bec3a67a6b6a017cd59f860d0c4eebc40d"
+          },
+          {
+            "path": "src/engine/mod.rs",
+            "digest": "sha256:913b7667b19580a67eec32c098517e852597b4cca12d7b43ff84c8763d4e403e"
+          },
+          {
+            "path": "src/engine/progress.rs",
+            "digest": "sha256:7ec89149f0aa9d9624b2b347829a374e76cb1eeab07482645695d6b601bc5f31"
+          },
+          {
+            "path": "src/engine/runner.rs",
+            "digest": "sha256:9bee82411e94aab90d49d1926259cb63936bb85ee19278c1dd005ae1232ca3d9"
+          },
+          {
+            "path": "src/engine/runner/attempts.rs",
+            "digest": "sha256:d0eabd0421af3800c6fb84580f5cdf0e3488f581164e2f164150f1e99f0366c0"
+          },
+          {
+            "path": "src/engine/runner/candidates.rs",
+            "digest": "sha256:23861c7144622d362f1981b63d69181a21e6fbee06600b860f0cce78efbfa30d"
+          },
+          {
+            "path": "src/engine/runner/execute.rs",
+            "digest": "sha256:c7df2d2b12439b2bac32cdb2742a9fe36c3dd8c8f1178d8b5aa4ec1c87c10a1c"
+          },
+          {
+            "path": "src/engine/runner/manifest.rs",
+            "digest": "sha256:c43655194f4bc98f7a6fc0d4834aeb91af99e01267ef3017cad079cc931e81f0"
+          },
+          {
+            "path": "src/engine/runner/reuse.rs",
+            "digest": "sha256:2aa028ac10b961c5b0685915fb628d68670353d1f4b50a01a14c832adde70b52"
+          },
+          {
+            "path": "src/engine/sandbox.rs",
+            "digest": "sha256:cfa19456c472d2d3528aaa7d93f072e6b59f19f1379f6a10a119c87cad7099c8"
+          },
+          {
+            "path": "src/engine/scheduler.rs",
+            "digest": "sha256:61793c339544dd259738b4dd0aa1292557c2bd109eb810a5b38dafec16d86d22"
+          },
+          {
+            "path": "src/lib.rs",
+            "digest": "sha256:c477511aad556e416ef2e1fedee887a663dcb66372a50c6a4ac39aa92f0e9cb9"
+          },
+          {
+            "path": "src/main.rs",
+            "digest": "sha256:426249f89a22bf66be9d41e21f558c4efa193000a5e3cbdaa2ff98b52578eb82"
+          },
+          {
+            "path": "src/service/audit.rs",
+            "digest": "sha256:d00c3f6a3101bdea7a3569bff0e4216bc8dc257c7523767051ecb1c199b2b2d0"
+          },
+          {
+            "path": "src/service/bundle.rs",
+            "digest": "sha256:7e0d2e649d02b7affc20f4c0196afbd742855ea57921f788f8a3e4a4a60f9225"
+          },
+          {
+            "path": "src/service/doctor.rs",
+            "digest": "sha256:f88c5cc5b243ede844ee99d5ec06af9017bb13d5799810e074db76c520aa17a7"
+          },
+          {
+            "path": "src/service/flaky.rs",
+            "digest": "sha256:ea7521eb4a1ffc4ab148724ad5c5d185fb7cb9734b9f7aeb108610dde3ca2a11"
+          },
+          {
+            "path": "src/service/guard.rs",
+            "digest": "sha256:180b8dbb0ce001718b78d34aba046b4c418f3b350d70b3b8469eef947e51f03e"
+          },
+          {
+            "path": "src/service/guard/expand.rs",
+            "digest": "sha256:eaa7f195797eb4c2c211ed72d1b71405128282a57cd85876cf0710192594739f"
+          },
+          {
+            "path": "src/service/guard/git.rs",
+            "digest": "sha256:10bfe7d3a4a06d306abc948557f1eff196c22a03c1b0ace00e2c99c91f7f2a8b"
+          },
+          {
+            "path": "src/service/guard/judge.rs",
+            "digest": "sha256:20332393527ab6e06fe8d288d6921f8d0e46ac9dc97f758e9efec69290e360e6"
+          },
+          {
+            "path": "src/service/guard/paths.rs",
+            "digest": "sha256:b2f9932b3aa042f5775a6e81c06ec9861209754f844a73334e901441af7e5ebc"
+          },
+          {
+            "path": "src/service/guard/rules.rs",
+            "digest": "sha256:eca014080aaaf46eadeabdeb9ca582f59e9b71c42bad29f9af29c04a35700d78"
+          },
+          {
+            "path": "src/service/guard/verbs.rs",
+            "digest": "sha256:3925a6747de1e7e4e035795ffaaa461ed0d41db6458045347c9a7daab728c7c7"
+          },
+          {
+            "path": "src/service/keys.rs",
+            "digest": "sha256:d61271815e9b311dcae85a18722709ebabcd5654a7907cff532ca835212b6d0b"
+          },
+          {
+            "path": "src/service/mod.rs",
+            "digest": "sha256:605a47937ab4053eb94160b779e254a4b3f632bd1ccd1e6b7c110c507e30532c"
+          },
+          {
+            "path": "src/service/search.rs",
+            "digest": "sha256:c5ca5d3fad372393309c2591e2f63f809319ad3e752e1b50d586db8d66e8d436"
+          },
+          {
+            "path": "src/service/share.rs",
+            "digest": "sha256:63f27be8ee57e035886c1aafccccc50a1e3da59c1882bfde0385654ff426c573"
+          },
+          {
+            "path": "src/store.rs",
+            "digest": "sha256:498054262848d79244df99def325d03163b0277b5c1a9d7fcd3a53c001a112a7"
+          },
+          {
+            "path": "tests/architecture.rs",
+            "digest": "sha256:368111288b9fa9d575dc31f4c2fc12c5643e4d94c56ac186033cf204c95e5c80"
+          },
+          {
+            "path": "tests/cli.rs",
+            "digest": "sha256:aa6f579104d8deeb5d54465bf7fb542c15ff6e59ae8f23e3a75ecf379b97ed50"
+          },
+          {
+            "path": "tests/guard_corpus.rs",
+            "digest": "sha256:88fdade2a37ebe7f93b71e522f5af8f195991ed08ab7fbbc7ddbfe5b3e5bb2bb"
+          },
+          {
+            "path": "tests/readme.rs",
+            "digest": "sha256:0d3a9f6987dfd48c749f612581642b1e23f24b26b22cc3e3a9148b50eced8fa9"
+          }
+        ],
+        "verify_inputs": [],
+        "outputs": [],
+        "deps": [
+          {
+            "step_id": "toolchain",
+            "receipt_id": "sha256:ac8c426f2dc21778f2e8a2dc2fbc37e97e37358adfc638cc39541d7c2935a694"
+          }
+        ],
+        "claims": [
+          {
+            "text": "every source file is rustfmt-clean",
+            "status": "verified",
+            "verify_command": "cargo fmt --check",
+            "verify_exit": 0,
+            "verify_output_digest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "reason": null
+          }
+        ],
+        "limitations": [],
+        "tool": {
+          "name": "flot",
+          "version": "0.2.10",
+          "schema": 5
+        }
+      },
+      "observed": {
+        "started_at_ms": 1795777593123,
+        "duration_ms": 505,
+        "host_os": "linux",
+        "stdout_inline": "",
+        "stdout_truncated": false,
+        "stderr_inline": "",
+        "stderr_truncated": false,
+        "stdout_bytes": 0,
+        "stderr_bytes": 0,
+        "metrics": null,
+        "metrics_notes": []
+      }
+    },
+    {
+      "receipt_id": "sha256:c5ac67ae656cdeeeb41c4b569e748e75cd64b0c4d8c1c3b82647739d95d371af",
+      "identity": {
+        "flow": "flot-self-check",
+        "step_id": "build",
+        "step_key": "sha256:32af1a3fd1a075aede15174241d1d5b2cc5aadbdb0fe919219febe5ae9ec8bba",
+        "command": "cargo build --all-targets",
+        "status": "ok",
+        "exit_code": 0,
+        "stdout_digest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_digest": "sha256:c945e7dc4ca260791c741843a563a2b97995c9c57c5ccf033eb69f12070870ef",
+        "inputs": [
+          {
+            "path": "Cargo.lock",
+            "digest": "sha256:bb3c0b7a974af6fc966aadeaae98921f93bf1e64ae1db90b922c62d9915fc1d6"
+          },
+          {
+            "path": "Cargo.toml",
+            "digest": "sha256:69c230a18b3b6a4673e4589efbcbbde739df57d57db5354b053b158293c4f4ad"
+          },
+          {
+            "path": "src/adapters/cli.rs",
+            "digest": "sha256:38b05649a6e42e8a5cea16b3330d2d14beaa0eb2b1eb88e8cf295e861dc73d65"
+          },
+          {
+            "path": "src/adapters/cli/args.rs",
+            "digest": "sha256:f853e69ea995990cd127672c6fd64479a6bccb7557050ee088ddbc1fdca36c22"
+          },
+          {
+            "path": "src/adapters/cli/hook.rs",
+            "digest": "sha256:e9784fe89b18aeab74d47e9b2391cc07173233810258d3ccf2a15eeca3abfee4"
+          },
+          {
+            "path": "src/adapters/cli/progress.rs",
+            "digest": "sha256:4917b62c9347aa12ce779b4910c90be5e70e467000b7892186e002d82edd203d"
+          },
+          {
+            "path": "src/adapters/cli/render.rs",
+            "digest": "sha256:f132eac35428cf57d283c7458ef572ef11879d6bcc43733e18993b0d67651920"
+          },
+          {
+            "path": "src/adapters/cli/replay.rs",
+            "digest": "sha256:b3ec9208f378739c55ff0d7b0386723b3e1934a4856094c957b483ab33dc0b6d"
+          },
+          {
+            "path": "src/adapters/mcp.rs",
+            "digest": "sha256:7dd8fb942c2e1be1c38b893811ffed6dd6afe24fa9bfc9e47644331018aafd3f"
+          },
+          {
+            "path": "src/adapters/mod.rs",
+            "digest": "sha256:2305acb0c4b63bc1bfc993a31ecba153c2b95c99141052fb97f8aac9651990ed"
+          },
+          {
+            "path": "src/core/attest.rs",
+            "digest": "sha256:9601aea26aa9580a757ce735f29b377726f8b526c9fd170f5aa3dd1aeaed769a"
+          },
+          {
+            "path": "src/core/compare.rs",
+            "digest": "sha256:ecb1b5a6428eb73c9a842c5f544eb4875ded68c29439fb2960989e9802fec730"
+          },
+          {
+            "path": "src/core/digest.rs",
+            "digest": "sha256:77a2cac92908ad8d96c783eeec2fae68a8e739b3ea907415f8d3b0773c01221e"
+          },
+          {
+            "path": "src/core/fault.rs",
+            "digest": "sha256:0a35676337719eec6005c3f203b5364a702941ed73e0b17a37bfde1cd7cc2f42"
+          },
+          {
+            "path": "src/core/flow.rs",
+            "digest": "sha256:9e493115aa2cb5cc4c63d92047fc205a5308483e29589facc5b462341a35fd00"
+          },
+          {
+            "path": "src/core/metrics.rs",
+            "digest": "sha256:ba809d9be9c3d532205a7efd6ce6c48a51ec0a7b203a4fa64d42a37c44f4cb0c"
+          },
+          {
+            "path": "src/core/mod.rs",
+            "digest": "sha256:589ab4a890d5b6d158fe51766fd9a19a66ce1ac93c28b32299bb870f40830cb2"
+          },
+          {
+            "path": "src/core/powershell.rs",
+            "digest": "sha256:898ec20f9727e75aab9a9f4381a0b2556704dbaec11634beac48a6062c36b650"
+          },
+          {
+            "path": "src/core/powershell/cmdlets.rs",
+            "digest": "sha256:486897ee176a05e67e280e5b5d1f87db7e57a4cbf7f7a383fc9d7a290f05235a"
+          },
+          {
+            "path": "src/core/powershell/lex.rs",
+            "digest": "sha256:53225bc6044d478a4481d06183146c9a1d4c0f0f93f62be5eaeac1b546ae9971"
+          },
+          {
+            "path": "src/core/powershell/paths.rs",
+            "digest": "sha256:1d2c57f6bf30a06e826650f826fb0b9218dfb86c802bf3b89a4cdd064c293b79"
+          },
+          {
+            "path": "src/core/powershell/read.rs",
+            "digest": "sha256:e4ecf1e773156495bcc89d0a428db82886e318a742db036645d21b604b2e275b"
+          },
+          {
+            "path": "src/core/powershell/run.rs",
+            "digest": "sha256:756827a0fd561c95662e9d34edd50dca3c5b36933e0b4f52d0a2fde5dfad2e0c"
+          },
+          {
+            "path": "src/core/powershell/vars.rs",
+            "digest": "sha256:99efd88130168c65a9f911bd84c3a5cc87b2c4b22427ba57e8618b3601d15887"
+          },
+          {
+            "path": "src/core/preview.rs",
+            "digest": "sha256:138baf01021f6f021f10b55f8359522fb30ca96e5ed14d3f71a71baad6cd004f"
+          },
+          {
+            "path": "src/core/reading.rs",
+            "digest": "sha256:790a11b8487f18883b45ffd050e1952a1f875f8fd16d917b105864fce2b40e94"
+          },
+          {
+            "path": "src/core/receipt.rs",
+            "digest": "sha256:90bbce77df527ad07517b294b2d0ef299e6454ab6d77f6ed4aba3ba9cf466049"
+          },
+          {
+            "path": "src/core/receipt/check.rs",
+            "digest": "sha256:67feffb916f4c47758fc4a350dcaf40175d3ba571eace239fa72d6f3ed5dd855"
+          },
+          {
+            "path": "src/core/secrets.rs",
+            "digest": "sha256:4e5d7348efed10e01c61a331c79a50c191bb833a485757d5ffeb6f9a580a91ac"
+          },
+          {
+            "path": "src/core/shell.rs",
+            "digest": "sha256:345672369dc6cb889ee6fae88998a681ebd3ce3bc67ed3266418af8981840d86"
+          },
+          {
+            "path": "src/core/shell/command.rs",
+            "digest": "sha256:49f92ed16365e2de6144cfaaa349f722b11a6ff2fa3bf727916b6006815604b4"
+          },
+          {
+            "path": "src/core/shell/lex.rs",
+            "digest": "sha256:d527f98bbe25e568d1dcaa4f1b2ca16e575d11a015f949dab1ececadc0520597"
+          },
+          {
+            "path": "src/core/shell/paths.rs",
+            "digest": "sha256:696060793cd64adbe2a21c58f6aaeb9900f8092d428ae8104cf4164a998b906c"
+          },
+          {
+            "path": "src/core/shell/read.rs",
+            "digest": "sha256:4be3aec5674f5a9adb81d225ae01c605a5094048ddb7feb2e2b421753407ee05"
+          },
+          {
+            "path": "src/core/shell/run.rs",
+            "digest": "sha256:469feb3ac49ed25674f619dce38308a36d9d628e1d3fc01997cbd1edc1cb2eec"
+          },
+          {
+            "path": "src/core/shell/substitution.rs",
+            "digest": "sha256:3780dd51e6ca87e57839b7165d42ce8e3df2d5db453f5be87c38574d6488c966"
+          },
+          {
+            "path": "src/core/shell/tables.rs",
+            "digest": "sha256:80e25a8ad0e7361d17c86c85e10fad0f207c8f123b75ca1c06fdb36a77bb2f7b"
+          },
+          {
+            "path": "src/core/shell/vars.rs",
+            "digest": "sha256:3fb0faa03a191935c06d6e83d379399cd66188ddc4c66f8017265de1b5b71cf8"
+          },
+          {
+            "path": "src/core/shell/writers.rs",
+            "digest": "sha256:45c5a36567b031fe4c0c63239cf1428aca6cd90e4b85c5b103c6276e2b05b50a"
+          },
+          {
+            "path": "src/engine/baseline.rs",
+            "digest": "sha256:24084516bb14f36f4ea229a7e9803aba4270e484fa4ee8e6255860b60bc06d1a"
+          },
+          {
+            "path": "src/engine/claims.rs",
+            "digest": "sha256:9db6637693707852bd6f91ff07429b3088b75b692f8a4cd61b575ba850bade7e"
+          },
+          {
+            "path": "src/engine/exec.rs",
+            "digest": "sha256:79f4f876e2e986cdc00d1760dc13715fe79481b28f1a405749eb8868b1b408f2"
+          },
+          {
+            "path": "src/engine/exec/escape.rs",
+            "digest": "sha256:de2f1bdc8aad89c1b0a079a200509a4bb6fb7a10302a9d26881811f81f6c6006"
+          },
+          {
+            "path": "src/engine/exec/escape/linux.rs",
+            "digest": "sha256:beef1413c300ee81e2319a32e13459e5b6336bf0ac02a527dd3e04613d8718e9"
+          },
+          {
+            "path": "src/engine/exec/escape/macos.rs",
+            "digest": "sha256:fe587e65ef9ca5f0534102ffadce7d49ba8107e795d9db37cffa8c0b354e0332"
+          },
+          {
+            "path": "src/engine/exec/job.rs",
+            "digest": "sha256:1556079af4ebf54d78f607ee1ba065340af8561bdd00fa5d16beff3f80c51c23"
+          },
+          {
+            "path": "src/engine/git.rs",
+            "digest": "sha256:be64199bc3e7bc6cda052bf3e2eca2d3e73b54e4fafe5239f561cfadc9034173"
+          },
+          {
+            "path": "src/engine/keying.rs",
+            "digest": "sha256:bf78bacbe99585c986b0fc6a7ab3aa1c54d9c6b6ae19755a2b176926f138fae5"
+          },
+          {
+            "path": "src/engine/keying/digests.rs",
+            "digest": "sha256:cfb0fc36d882ece1e84cbd7aa74528bec3a67a6b6a017cd59f860d0c4eebc40d"
+          },
+          {
+            "path": "src/engine/mod.rs",
+            "digest": "sha256:913b7667b19580a67eec32c098517e852597b4cca12d7b43ff84c8763d4e403e"
+          },
+          {
+            "path": "src/engine/progress.rs",
+            "digest": "sha256:7ec89149f0aa9d9624b2b347829a374e76cb1eeab07482645695d6b601bc5f31"
+          },
+          {
+            "path": "src/engine/runner.rs",
+            "digest": "sha256:9bee82411e94aab90d49d1926259cb63936bb85ee19278c1dd005ae1232ca3d9"
+          },
+          {
+            "path": "src/engine/runner/attempts.rs",
+            "digest": "sha256:d0eabd0421af3800c6fb84580f5cdf0e3488f581164e2f164150f1e99f0366c0"
+          },
+          {
+            "path": "src/engine/runner/candidates.rs",
+            "digest": "sha256:23861c7144622d362f1981b63d69181a21e6fbee06600b860f0cce78efbfa30d"
+          },
+          {
+            "path": "src/engine/runner/execute.rs",
+            "digest": "sha256:c7df2d2b12439b2bac32cdb2742a9fe36c3dd8c8f1178d8b5aa4ec1c87c10a1c"
+          },
+          {
+            "path": "src/engine/runner/manifest.rs",
+            "digest": "sha256:c43655194f4bc98f7a6fc0d4834aeb91af99e01267ef3017cad079cc931e81f0"
+          },
+          {
+            "path": "src/engine/runner/reuse.rs",
+            "digest": "sha256:2aa028ac10b961c5b0685915fb628d68670353d1f4b50a01a14c832adde70b52"
+          },
+          {
+            "path": "src/engine/sandbox.rs",
+            "digest": "sha256:cfa19456c472d2d3528aaa7d93f072e6b59f19f1379f6a10a119c87cad7099c8"
+          },
+          {
+            "path": "src/engine/scheduler.rs",
+            "digest": "sha256:61793c339544dd259738b4dd0aa1292557c2bd109eb810a5b38dafec16d86d22"
+          },
+          {
+            "path": "src/lib.rs",
+            "digest": "sha256:c477511aad556e416ef2e1fedee887a663dcb66372a50c6a4ac39aa92f0e9cb9"
+          },
+          {
+            "path": "src/main.rs",
+            "digest": "sha256:426249f89a22bf66be9d41e21f558c4efa193000a5e3cbdaa2ff98b52578eb82"
+          },
+          {
+            "path": "src/service/audit.rs",
+            "digest": "sha256:d00c3f6a3101bdea7a3569bff0e4216bc8dc257c7523767051ecb1c199b2b2d0"
+          },
+          {
+            "path": "src/service/bundle.rs",
+            "digest": "sha256:7e0d2e649d02b7affc20f4c0196afbd742855ea57921f788f8a3e4a4a60f9225"
+          },
+          {
+            "path": "src/service/doctor.rs",
+            "digest": "sha256:f88c5cc5b243ede844ee99d5ec06af9017bb13d5799810e074db76c520aa17a7"
+          },
+          {
+            "path": "src/service/flaky.rs",
+            "digest": "sha256:ea7521eb4a1ffc4ab148724ad5c5d185fb7cb9734b9f7aeb108610dde3ca2a11"
+          },
+          {
+            "path": "src/service/guard.rs",
+            "digest": "sha256:180b8dbb0ce001718b78d34aba046b4c418f3b350d70b3b8469eef947e51f03e"
+          },
+          {
+            "path": "src/service/guard/expand.rs",
+            "digest": "sha256:eaa7f195797eb4c2c211ed72d1b71405128282a57cd85876cf0710192594739f"
+          },
+          {
+            "path": "src/service/guard/git.rs",
+            "digest": "sha256:10bfe7d3a4a06d306abc948557f1eff196c22a03c1b0ace00e2c99c91f7f2a8b"
+          },
+          {
+            "path": "src/service/guard/judge.rs",
+            "digest": "sha256:20332393527ab6e06fe8d288d6921f8d0e46ac9dc97f758e9efec69290e360e6"
+          },
+          {
+            "path": "src/service/guard/paths.rs",
+            "digest": "sha256:b2f9932b3aa042f5775a6e81c06ec9861209754f844a73334e901441af7e5ebc"
+          },
+          {
+            "path": "src/service/guard/rules.rs",
+            "digest": "sha256:eca014080aaaf46eadeabdeb9ca582f59e9b71c42bad29f9af29c04a35700d78"
+          },
+          {
+            "path": "src/service/guard/verbs.rs",
+            "digest": "sha256:3925a6747de1e7e4e035795ffaaa461ed0d41db6458045347c9a7daab728c7c7"
+          },
+          {
+            "path": "src/service/keys.rs",
+            "digest": "sha256:d61271815e9b311dcae85a18722709ebabcd5654a7907cff532ca835212b6d0b"
+          },
+          {
+            "path": "src/service/mod.rs",
+            "digest": "sha256:605a47937ab4053eb94160b779e254a4b3f632bd1ccd1e6b7c110c507e30532c"
+          },
+          {
+            "path": "src/service/search.rs",
+            "digest": "sha256:c5ca5d3fad372393309c2591e2f63f809319ad3e752e1b50d586db8d66e8d436"
+          },
+          {
+            "path": "src/service/share.rs",
+            "digest": "sha256:63f27be8ee57e035886c1aafccccc50a1e3da59c1882bfde0385654ff426c573"
+          },
+          {
+            "path": "src/store.rs",
+            "digest": "sha256:498054262848d79244df99def325d03163b0277b5c1a9d7fcd3a53c001a112a7"
+          },
+          {
+            "path": "tests/architecture.rs",
+            "digest": "sha256:368111288b9fa9d575dc31f4c2fc12c5643e4d94c56ac186033cf204c95e5c80"
+          },
+          {
+            "path": "tests/cli.rs",
+            "digest": "sha256:aa6f579104d8deeb5d54465bf7fb542c15ff6e59ae8f23e3a75ecf379b97ed50"
+          },
+          {
+            "path": "tests/guard_corpus.rs",
+            "digest": "sha256:88fdade2a37ebe7f93b71e522f5af8f195991ed08ab7fbbc7ddbfe5b3e5bb2bb"
+          },
+          {
+            "path": "tests/readme.rs",
+            "digest": "sha256:0d3a9f6987dfd48c749f612581642b1e23f24b26b22cc3e3a9148b50eced8fa9"
+          }
+        ],
+        "verify_inputs": [],
+        "outputs": [],
+        "deps": [
+          {
+            "step_id": "format",
+            "receipt_id": "sha256:d33ba4ed068d2612ecc1d673c66bec424c6b798f22996ee5ffc4a17d7080716c"
+          },
+          {
+            "step_id": "toolchain",
+            "receipt_id": "sha256:ac8c426f2dc21778f2e8a2dc2fbc37e97e37358adfc638cc39541d7c2935a694"
+          }
+        ],
+        "claims": [
+          {
+            "text": "the library, binary and test targets compile",
+            "status": "verified",
+            "verify_command": "cargo build --all-targets --quiet",
+            "verify_exit": 0,
+            "verify_output_digest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "reason": null
+          }
+        ],
+        "limitations": [],
+        "tool": {
+          "name": "flot",
+          "version": "0.2.10",
+          "schema": 5
+        }
+      },
+      "observed": {
+        "started_at_ms": 1795777594490,
+        "duration_ms": 1601,
+        "host_os": "linux",
+        "stdout_inline": "",
+        "stdout_truncated": false,
+        "stderr_inline": "    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.54s\n",
+        "stderr_truncated": false,
+        "stdout_bytes": 0,
+        "stderr_bytes": 72,
+        "metrics": null,
+        "metrics_notes": []
+      }
+    },
+    {
+      "receipt_id": "sha256:ece346550249c5ca36a2dfd1796041837a2583b10f11ece1bcf6eab4a6e7e176",
+      "identity": {
+        "flow": "flot-self-check",
+        "step_id": "cli",
+        "step_key": "sha256:c13a0382fe965c5f112e19e5cbc88338022b1019ecff014c5608f56ab15bc554",
+        "command": "cargo test --no-run --test cli --test guard_corpus",
+        "status": "ok",
+        "exit_code": 0,
+        "stdout_digest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_digest": "sha256:7549a79728a05c17a6e7cf1f3490c9dc900867428a22094df7e043be4a47e13c",
+        "inputs": [
+          {
+            "path": "Cargo.toml",
+            "digest": "sha256:69c230a18b3b6a4673e4589efbcbbde739df57d57db5354b053b158293c4f4ad"
+          },
+          {
+            "path": "plugins/claude-code/.claude-plugin/plugin.json",
+            "digest": "sha256:ecab34f962989fe6517ca33032339ef84c936ebb349db686a9ac5073beb0c648"
+          },
+          {
+            "path": "plugins/claude-code/.mcp.json",
+            "digest": "sha256:82589d4a867ee4dfcf96bdf0f7a227ebad0c59b9ebb0d7aaead6c922648a2588"
+          },
+          {
+            "path": "plugins/claude-code/hooks/hooks.json",
+            "digest": "sha256:2df2b5ce3f930b58692ef76224be7793d2edd9b96b073d5703a7d88886fb019b"
+          },
+          {
+            "path": "plugins/claude-code/skills/flot/SKILL.md",
+            "digest": "sha256:7534ee8f4906d904782f7b1ccfd6e00e5bfa80e3a1374f422d26cbbe06d96dcd"
+          },
+          {
+            "path": "src/adapters/cli.rs",
+            "digest": "sha256:38b05649a6e42e8a5cea16b3330d2d14beaa0eb2b1eb88e8cf295e861dc73d65"
+          },
+          {
+            "path": "src/adapters/cli/args.rs",
+            "digest": "sha256:f853e69ea995990cd127672c6fd64479a6bccb7557050ee088ddbc1fdca36c22"
+          },
+          {
+            "path": "src/adapters/cli/hook.rs",
+            "digest": "sha256:e9784fe89b18aeab74d47e9b2391cc07173233810258d3ccf2a15eeca3abfee4"
+          },
+          {
+            "path": "src/adapters/cli/progress.rs",
+            "digest": "sha256:4917b62c9347aa12ce779b4910c90be5e70e467000b7892186e002d82edd203d"
+          },
+          {
+            "path": "src/adapters/cli/render.rs",
+            "digest": "sha256:f132eac35428cf57d283c7458ef572ef11879d6bcc43733e18993b0d67651920"
+          },
+          {
+            "path": "src/adapters/cli/replay.rs",
+            "digest": "sha256:b3ec9208f378739c55ff0d7b0386723b3e1934a4856094c957b483ab33dc0b6d"
+          },
+          {
+            "path": "src/adapters/mcp.rs",
+            "digest": "sha256:7dd8fb942c2e1be1c38b893811ffed6dd6afe24fa9bfc9e47644331018aafd3f"
+          },
+          {
+            "path": "src/adapters/mod.rs",
+            "digest": "sha256:2305acb0c4b63bc1bfc993a31ecba153c2b95c99141052fb97f8aac9651990ed"
+          },
+          {
+            "path": "src/core/attest.rs",
+            "digest": "sha256:9601aea26aa9580a757ce735f29b377726f8b526c9fd170f5aa3dd1aeaed769a"
+          },
+          {
+            "path": "src/core/compare.rs",
+            "digest": "sha256:ecb1b5a6428eb73c9a842c5f544eb4875ded68c29439fb2960989e9802fec730"
+          },
+          {
+            "path": "src/core/digest.rs",
+            "digest": "sha256:77a2cac92908ad8d96c783eeec2fae68a8e739b3ea907415f8d3b0773c01221e"
+          },
+          {
+            "path": "src/core/fault.rs",
+            "digest": "sha256:0a35676337719eec6005c3f203b5364a702941ed73e0b17a37bfde1cd7cc2f42"
+          },
+          {
+            "path": "src/core/flow.rs",
+            "digest": "sha256:9e493115aa2cb5cc4c63d92047fc205a5308483e29589facc5b462341a35fd00"
+          },
+          {
+            "path": "src/core/metrics.rs",
+            "digest": "sha256:ba809d9be9c3d532205a7efd6ce6c48a51ec0a7b203a4fa64d42a37c44f4cb0c"
+          },
+          {
+            "path": "src/core/mod.rs",
+            "digest": "sha256:589ab4a890d5b6d158fe51766fd9a19a66ce1ac93c28b32299bb870f40830cb2"
+          },
+          {
+            "path": "src/core/powershell.rs",
+            "digest": "sha256:898ec20f9727e75aab9a9f4381a0b2556704dbaec11634beac48a6062c36b650"
+          },
+          {
+            "path": "src/core/powershell/cmdlets.rs",
+            "digest": "sha256:486897ee176a05e67e280e5b5d1f87db7e57a4cbf7f7a383fc9d7a290f05235a"
+          },
+          {
+            "path": "src/core/powershell/lex.rs",
+            "digest": "sha256:53225bc6044d478a4481d06183146c9a1d4c0f0f93f62be5eaeac1b546ae9971"
+          },
+          {
+            "path": "src/core/powershell/paths.rs",
+            "digest": "sha256:1d2c57f6bf30a06e826650f826fb0b9218dfb86c802bf3b89a4cdd064c293b79"
+          },
+          {
+            "path": "src/core/powershell/read.rs",
+            "digest": "sha256:e4ecf1e773156495bcc89d0a428db82886e318a742db036645d21b604b2e275b"
+          },
+          {
+            "path": "src/core/powershell/run.rs",
+            "digest": "sha256:756827a0fd561c95662e9d34edd50dca3c5b36933e0b4f52d0a2fde5dfad2e0c"
+          },
+          {
+            "path": "src/core/powershell/vars.rs",
+            "digest": "sha256:99efd88130168c65a9f911bd84c3a5cc87b2c4b22427ba57e8618b3601d15887"
+          },
+          {
+            "path": "src/core/preview.rs",
+            "digest": "sha256:138baf01021f6f021f10b55f8359522fb30ca96e5ed14d3f71a71baad6cd004f"
+          },
+          {
+            "path": "src/core/reading.rs",
+            "digest": "sha256:790a11b8487f18883b45ffd050e1952a1f875f8fd16d917b105864fce2b40e94"
+          },
+          {
+            "path": "src/core/receipt.rs",
+            "digest": "sha256:90bbce77df527ad07517b294b2d0ef299e6454ab6d77f6ed4aba3ba9cf466049"
+          },
+          {
+            "path": "src/core/receipt/check.rs",
+            "digest": "sha256:67feffb916f4c47758fc4a350dcaf40175d3ba571eace239fa72d6f3ed5dd855"
+          },
+          {
+            "path": "src/core/secrets.rs",
+            "digest": "sha256:4e5d7348efed10e01c61a331c79a50c191bb833a485757d5ffeb6f9a580a91ac"
+          },
+          {
+            "path": "src/core/shell.rs",
+            "digest": "sha256:345672369dc6cb889ee6fae88998a681ebd3ce3bc67ed3266418af8981840d86"
+          },
+          {
+            "path": "src/core/shell/command.rs",
+            "digest": "sha256:49f92ed16365e2de6144cfaaa349f722b11a6ff2fa3bf727916b6006815604b4"
+          },
+          {
+            "path": "src/core/shell/lex.rs",
+            "digest": "sha256:d527f98bbe25e568d1dcaa4f1b2ca16e575d11a015f949dab1ececadc0520597"
+          },
+          {
+            "path": "src/core/shell/paths.rs",
+            "digest": "sha256:696060793cd64adbe2a21c58f6aaeb9900f8092d428ae8104cf4164a998b906c"
+          },
+          {
+            "path": "src/core/shell/read.rs",
+            "digest": "sha256:4be3aec5674f5a9adb81d225ae01c605a5094048ddb7feb2e2b421753407ee05"
+          },
+          {
+            "path": "src/core/shell/run.rs",
+            "digest": "sha256:469feb3ac49ed25674f619dce38308a36d9d628e1d3fc01997cbd1edc1cb2eec"
+          },
+          {
+            "path": "src/core/shell/substitution.rs",
+            "digest": "sha256:3780dd51e6ca87e57839b7165d42ce8e3df2d5db453f5be87c38574d6488c966"
+          },
+          {
+            "path": "src/core/shell/tables.rs",
+            "digest": "sha256:80e25a8ad0e7361d17c86c85e10fad0f207c8f123b75ca1c06fdb36a77bb2f7b"
+          },
+          {
+            "path": "src/core/shell/vars.rs",
+            "digest": "sha256:3fb0faa03a191935c06d6e83d379399cd66188ddc4c66f8017265de1b5b71cf8"
+          },
+          {
+            "path": "src/core/shell/writers.rs",
+            "digest": "sha256:45c5a36567b031fe4c0c63239cf1428aca6cd90e4b85c5b103c6276e2b05b50a"
+          },
+          {
+            "path": "src/engine/baseline.rs",
+            "digest": "sha256:24084516bb14f36f4ea229a7e9803aba4270e484fa4ee8e6255860b60bc06d1a"
+          },
+          {
+            "path": "src/engine/claims.rs",
+            "digest": "sha256:9db6637693707852bd6f91ff07429b3088b75b692f8a4cd61b575ba850bade7e"
+          },
+          {
+            "path": "src/engine/exec.rs",
+            "digest": "sha256:79f4f876e2e986cdc00d1760dc13715fe79481b28f1a405749eb8868b1b408f2"
+          },
+          {
+            "path": "src/engine/exec/escape.rs",
+            "digest": "sha256:de2f1bdc8aad89c1b0a079a200509a4bb6fb7a10302a9d26881811f81f6c6006"
+          },
+          {
+            "path": "src/engine/exec/escape/linux.rs",
+            "digest": "sha256:beef1413c300ee81e2319a32e13459e5b6336bf0ac02a527dd3e04613d8718e9"
+          },
+          {
+            "path": "src/engine/exec/escape/macos.rs",
+            "digest": "sha256:fe587e65ef9ca5f0534102ffadce7d49ba8107e795d9db37cffa8c0b354e0332"
+          },
+          {
+            "path": "src/engine/exec/job.rs",
+            "digest": "sha256:1556079af4ebf54d78f607ee1ba065340af8561bdd00fa5d16beff3f80c51c23"
+          },
+          {
+            "path": "src/engine/git.rs",
+            "digest": "sha256:be64199bc3e7bc6cda052bf3e2eca2d3e73b54e4fafe5239f561cfadc9034173"
+          },
+          {
+            "path": "src/engine/keying.rs",
+            "digest": "sha256:bf78bacbe99585c986b0fc6a7ab3aa1c54d9c6b6ae19755a2b176926f138fae5"
+          },
+          {
+            "path": "src/engine/keying/digests.rs",
+            "digest": "sha256:cfb0fc36d882ece1e84cbd7aa74528bec3a67a6b6a017cd59f860d0c4eebc40d"
+          },
+          {
+            "path": "src/engine/mod.rs",
+            "digest": "sha256:913b7667b19580a67eec32c098517e852597b4cca12d7b43ff84c8763d4e403e"
+          },
+          {
+            "path": "src/engine/progress.rs",
+            "digest": "sha256:7ec89149f0aa9d9624b2b347829a374e76cb1eeab07482645695d6b601bc5f31"
+          },
+          {
+            "path": "src/engine/runner.rs",
+            "digest": "sha256:9bee82411e94aab90d49d1926259cb63936bb85ee19278c1dd005ae1232ca3d9"
+          },
+          {
+            "path": "src/engine/runner/attempts.rs",
+            "digest": "sha256:d0eabd0421af3800c6fb84580f5cdf0e3488f581164e2f164150f1e99f0366c0"
+          },
+          {
+            "path": "src/engine/runner/candidates.rs",
+            "digest": "sha256:23861c7144622d362f1981b63d69181a21e6fbee06600b860f0cce78efbfa30d"
+          },
+          {
+            "path": "src/engine/runner/execute.rs",
+            "digest": "sha256:c7df2d2b12439b2bac32cdb2742a9fe36c3dd8c8f1178d8b5aa4ec1c87c10a1c"
+          },
+          {
+            "path": "src/engine/runner/manifest.rs",
+            "digest": "sha256:c43655194f4bc98f7a6fc0d4834aeb91af99e01267ef3017cad079cc931e81f0"
+          },
+          {
+            "path": "src/engine/runner/reuse.rs",
+            "digest": "sha256:2aa028ac10b961c5b0685915fb628d68670353d1f4b50a01a14c832adde70b52"
+          },
+          {
+            "path": "src/engine/sandbox.rs",
+            "digest": "sha256:cfa19456c472d2d3528aaa7d93f072e6b59f19f1379f6a10a119c87cad7099c8"
+          },
+          {
+            "path": "src/engine/scheduler.rs",
+            "digest": "sha256:61793c339544dd259738b4dd0aa1292557c2bd109eb810a5b38dafec16d86d22"
+          },
+          {
+            "path": "src/lib.rs",
+            "digest": "sha256:c477511aad556e416ef2e1fedee887a663dcb66372a50c6a4ac39aa92f0e9cb9"
+          },
+          {
+            "path": "src/main.rs",
+            "digest": "sha256:426249f89a22bf66be9d41e21f558c4efa193000a5e3cbdaa2ff98b52578eb82"
+          },
+          {
+            "path": "src/service/audit.rs",
+            "digest": "sha256:d00c3f6a3101bdea7a3569bff0e4216bc8dc257c7523767051ecb1c199b2b2d0"
+          },
+          {
+            "path": "src/service/bundle.rs",
+            "digest": "sha256:7e0d2e649d02b7affc20f4c0196afbd742855ea57921f788f8a3e4a4a60f9225"
+          },
+          {
+            "path": "src/service/doctor.rs",
+            "digest": "sha256:f88c5cc5b243ede844ee99d5ec06af9017bb13d5799810e074db76c520aa17a7"
+          },
+          {
+            "path": "src/service/flaky.rs",
+            "digest": "sha256:ea7521eb4a1ffc4ab148724ad5c5d185fb7cb9734b9f7aeb108610dde3ca2a11"
+          },
+          {
+            "path": "src/service/guard.rs",
+            "digest": "sha256:180b8dbb0ce001718b78d34aba046b4c418f3b350d70b3b8469eef947e51f03e"
+          },
+          {
+            "path": "src/service/guard/expand.rs",
+            "digest": "sha256:eaa7f195797eb4c2c211ed72d1b71405128282a57cd85876cf0710192594739f"
+          },
+          {
+            "path": "src/service/guard/git.rs",
+            "digest": "sha256:10bfe7d3a4a06d306abc948557f1eff196c22a03c1b0ace00e2c99c91f7f2a8b"
+          },
+          {
+            "path": "src/service/guard/judge.rs",
+            "digest": "sha256:20332393527ab6e06fe8d288d6921f8d0e46ac9dc97f758e9efec69290e360e6"
+          },
+          {
+            "path": "src/service/guard/paths.rs",
+            "digest": "sha256:b2f9932b3aa042f5775a6e81c06ec9861209754f844a73334e901441af7e5ebc"
+          },
+          {
+            "path": "src/service/guard/rules.rs",
+            "digest": "sha256:eca014080aaaf46eadeabdeb9ca582f59e9b71c42bad29f9af29c04a35700d78"
+          },
+          {
+            "path": "src/service/guard/verbs.rs",
+            "digest": "sha256:3925a6747de1e7e4e035795ffaaa461ed0d41db6458045347c9a7daab728c7c7"
+          },
+          {
+            "path": "src/service/keys.rs",
+            "digest": "sha256:d61271815e9b311dcae85a18722709ebabcd5654a7907cff532ca835212b6d0b"
+          },
+          {
+            "path": "src/service/mod.rs",
+            "digest": "sha256:605a47937ab4053eb94160b779e254a4b3f632bd1ccd1e6b7c110c507e30532c"
+          },
+          {
+            "path": "src/service/search.rs",
+            "digest": "sha256:c5ca5d3fad372393309c2591e2f63f809319ad3e752e1b50d586db8d66e8d436"
+          },
+          {
+            "path": "src/service/share.rs",
+            "digest": "sha256:63f27be8ee57e035886c1aafccccc50a1e3da59c1882bfde0385654ff426c573"
+          },
+          {
+            "path": "src/store.rs",
+            "digest": "sha256:498054262848d79244df99def325d03163b0277b5c1a9d7fcd3a53c001a112a7"
+          },
+          {
+            "path": "tests/cli.rs",
+            "digest": "sha256:aa6f579104d8deeb5d54465bf7fb542c15ff6e59ae8f23e3a75ecf379b97ed50"
+          },
+          {
+            "path": "tests/guard_corpus.rs",
+            "digest": "sha256:88fdade2a37ebe7f93b71e522f5af8f195991ed08ab7fbbc7ddbfe5b3e5bb2bb"
+          },
+          {
+            "path": "tests/guard_corpus.toml",
+            "digest": "sha256:5affaf64e1a6cd9c5fe459283e88d07727c014d10ce9daaae28164e7373da092"
+          }
+        ],
+        "verify_inputs": [],
+        "outputs": [],
+        "deps": [
+          {
+            "step_id": "build",
+            "receipt_id": "sha256:c5ac67ae656cdeeeb41c4b569e748e75cd64b0c4d8c1c3b82647739d95d371af"
+          },
+          {
+            "step_id": "toolchain",
+            "receipt_id": "sha256:ac8c426f2dc21778f2e8a2dc2fbc37e97e37358adfc638cc39541d7c2935a694"
+          }
+        ],
+        "claims": [
+          {
+            "text": "the end-to-end CLI suite passes",
+            "status": "verified",
+            "verify_command": "cargo test --quiet --test cli --test guard_corpus",
+            "verify_exit": 0,
+            "verify_output_digest": "sha256:3081f11931a81fb3136f2a795d2c3f4201d346c5e663cda4d9c91f0f8636fba2",
+            "reason": null
+          }
+        ],
+        "limitations": [],
+        "tool": {
+          "name": "flot",
+          "version": "0.2.10",
+          "schema": 5
+        }
+      },
+      "observed": {
+        "started_at_ms": 1795777598011,
+        "duration_ms": 1510,
+        "host_os": "linux",
+        "stdout_inline": "",
+        "stdout_truncated": false,
+        "stderr_inline": "    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.47s\n  Executable tests/cli.rs (target/debug/build/flot-cli/7ec197d0592d5e95/out/cli-7ec197d0592d5e95)\n  Executable tests/guard_corpus.rs (target/debug/build/flot-cli/02760306abf2dd3c/out/guard_corpus-02760306abf2dd3c)\n",
+        "stderr_truncated": false,
+        "stdout_bytes": 0,
+        "stderr_bytes": 287,
+        "metrics": null,
+        "metrics_notes": []
+      }
+    },
+    {
+      "receipt_id": "sha256:31b1e914f56f3b75c249c0dad42bb0e5c094086ab9913b608af97cce56b48b7b",
+      "identity": {
+        "flow": "flot-self-check",
+        "step_id": "lint",
+        "step_key": "sha256:c0d658aa93439bfbd9b210cc7fd2b1d36d252b0ad8fb29b6056cc36f5cd47012",
+        "command": "cargo clippy --all-targets -- -D warnings",
+        "status": "ok",
+        "exit_code": 0,
+        "stdout_digest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_digest": "sha256:c7048746a3f77a944968f5ad8605470257a2b4d5452e5c859559905b0b972b44",
+        "inputs": [
+          {
+            "path": "src/adapters/cli.rs",
+            "digest": "sha256:38b05649a6e42e8a5cea16b3330d2d14beaa0eb2b1eb88e8cf295e861dc73d65"
+          },
+          {
+            "path": "src/adapters/cli/args.rs",
+            "digest": "sha256:f853e69ea995990cd127672c6fd64479a6bccb7557050ee088ddbc1fdca36c22"
+          },
+          {
+            "path": "src/adapters/cli/hook.rs",
+            "digest": "sha256:e9784fe89b18aeab74d47e9b2391cc07173233810258d3ccf2a15eeca3abfee4"
+          },
+          {
+            "path": "src/adapters/cli/progress.rs",
+            "digest": "sha256:4917b62c9347aa12ce779b4910c90be5e70e467000b7892186e002d82edd203d"
+          },
+          {
+            "path": "src/adapters/cli/render.rs",
+            "digest": "sha256:f132eac35428cf57d283c7458ef572ef11879d6bcc43733e18993b0d67651920"
+          },
+          {
+            "path": "src/adapters/cli/replay.rs",
+            "digest": "sha256:b3ec9208f378739c55ff0d7b0386723b3e1934a4856094c957b483ab33dc0b6d"
+          },
+          {
+            "path": "src/adapters/mcp.rs",
+            "digest": "sha256:7dd8fb942c2e1be1c38b893811ffed6dd6afe24fa9bfc9e47644331018aafd3f"
+          },
+          {
+            "path": "src/adapters/mod.rs",
+            "digest": "sha256:2305acb0c4b63bc1bfc993a31ecba153c2b95c99141052fb97f8aac9651990ed"
+          },
+          {
+            "path": "src/core/attest.rs",
+            "digest": "sha256:9601aea26aa9580a757ce735f29b377726f8b526c9fd170f5aa3dd1aeaed769a"
+          },
+          {
+            "path": "src/core/compare.rs",
+            "digest": "sha256:ecb1b5a6428eb73c9a842c5f544eb4875ded68c29439fb2960989e9802fec730"
+          },
+          {
+            "path": "src/core/digest.rs",
+            "digest": "sha256:77a2cac92908ad8d96c783eeec2fae68a8e739b3ea907415f8d3b0773c01221e"
+          },
+          {
+            "path": "src/core/fault.rs",
+            "digest": "sha256:0a35676337719eec6005c3f203b5364a702941ed73e0b17a37bfde1cd7cc2f42"
+          },
+          {
+            "path": "src/core/flow.rs",
+            "digest": "sha256:9e493115aa2cb5cc4c63d92047fc205a5308483e29589facc5b462341a35fd00"
+          },
+          {
+            "path": "src/core/metrics.rs",
+            "digest": "sha256:ba809d9be9c3d532205a7efd6ce6c48a51ec0a7b203a4fa64d42a37c44f4cb0c"
+          },
+          {
+            "path": "src/core/mod.rs",
+            "digest": "sha256:589ab4a890d5b6d158fe51766fd9a19a66ce1ac93c28b32299bb870f40830cb2"
+          },
+          {
+            "path": "src/core/powershell.rs",
+            "digest": "sha256:898ec20f9727e75aab9a9f4381a0b2556704dbaec11634beac48a6062c36b650"
+          },
+          {
+            "path": "src/core/powershell/cmdlets.rs",
+            "digest": "sha256:486897ee176a05e67e280e5b5d1f87db7e57a4cbf7f7a383fc9d7a290f05235a"
+          },
+          {
+            "path": "src/core/powershell/lex.rs",
+            "digest": "sha256:53225bc6044d478a4481d06183146c9a1d4c0f0f93f62be5eaeac1b546ae9971"
+          },
+          {
+            "path": "src/core/powershell/paths.rs",
+            "digest": "sha256:1d2c57f6bf30a06e826650f826fb0b9218dfb86c802bf3b89a4cdd064c293b79"
+          },
+          {
+            "path": "src/core/powershell/read.rs",
+            "digest": "sha256:e4ecf1e773156495bcc89d0a428db82886e318a742db036645d21b604b2e275b"
+          },
+          {
+            "path": "src/core/powershell/run.rs",
+            "digest": "sha256:756827a0fd561c95662e9d34edd50dca3c5b36933e0b4f52d0a2fde5dfad2e0c"
+          },
+          {
+            "path": "src/core/powershell/vars.rs",
+            "digest": "sha256:99efd88130168c65a9f911bd84c3a5cc87b2c4b22427ba57e8618b3601d15887"
+          },
+          {
+            "path": "src/core/preview.rs",
+            "digest": "sha256:138baf01021f6f021f10b55f8359522fb30ca96e5ed14d3f71a71baad6cd004f"
+          },
+          {
+            "path": "src/core/reading.rs",
+            "digest": "sha256:790a11b8487f18883b45ffd050e1952a1f875f8fd16d917b105864fce2b40e94"
+          },
+          {
+            "path": "src/core/receipt.rs",
+            "digest": "sha256:90bbce77df527ad07517b294b2d0ef299e6454ab6d77f6ed4aba3ba9cf466049"
+          },
+          {
+            "path": "src/core/receipt/check.rs",
+            "digest": "sha256:67feffb916f4c47758fc4a350dcaf40175d3ba571eace239fa72d6f3ed5dd855"
+          },
+          {
+            "path": "src/core/secrets.rs",
+            "digest": "sha256:4e5d7348efed10e01c61a331c79a50c191bb833a485757d5ffeb6f9a580a91ac"
+          },
+          {
+            "path": "src/core/shell.rs",
+            "digest": "sha256:345672369dc6cb889ee6fae88998a681ebd3ce3bc67ed3266418af8981840d86"
+          },
+          {
+            "path": "src/core/shell/command.rs",
+            "digest": "sha256:49f92ed16365e2de6144cfaaa349f722b11a6ff2fa3bf727916b6006815604b4"
+          },
+          {
+            "path": "src/core/shell/lex.rs",
+            "digest": "sha256:d527f98bbe25e568d1dcaa4f1b2ca16e575d11a015f949dab1ececadc0520597"
+          },
+          {
+            "path": "src/core/shell/paths.rs",
+            "digest": "sha256:696060793cd64adbe2a21c58f6aaeb9900f8092d428ae8104cf4164a998b906c"
+          },
+          {
+            "path": "src/core/shell/read.rs",
+            "digest": "sha256:4be3aec5674f5a9adb81d225ae01c605a5094048ddb7feb2e2b421753407ee05"
+          },
+          {
+            "path": "src/core/shell/run.rs",
+            "digest": "sha256:469feb3ac49ed25674f619dce38308a36d9d628e1d3fc01997cbd1edc1cb2eec"
+          },
+          {
+            "path": "src/core/shell/substitution.rs",
+            "digest": "sha256:3780dd51e6ca87e57839b7165d42ce8e3df2d5db453f5be87c38574d6488c966"
+          },
+          {
+            "path": "src/core/shell/tables.rs",
+            "digest": "sha256:80e25a8ad0e7361d17c86c85e10fad0f207c8f123b75ca1c06fdb36a77bb2f7b"
+          },
+          {
+            "path": "src/core/shell/vars.rs",
+            "digest": "sha256:3fb0faa03a191935c06d6e83d379399cd66188ddc4c66f8017265de1b5b71cf8"
+          },
+          {
+            "path": "src/core/shell/writers.rs",
+            "digest": "sha256:45c5a36567b031fe4c0c63239cf1428aca6cd90e4b85c5b103c6276e2b05b50a"
+          },
+          {
+            "path": "src/engine/baseline.rs",
+            "digest": "sha256:24084516bb14f36f4ea229a7e9803aba4270e484fa4ee8e6255860b60bc06d1a"
+          },
+          {
+            "path": "src/engine/claims.rs",
+            "digest": "sha256:9db6637693707852bd6f91ff07429b3088b75b692f8a4cd61b575ba850bade7e"
+          },
+          {
+            "path": "src/engine/exec.rs",
+            "digest": "sha256:79f4f876e2e986cdc00d1760dc13715fe79481b28f1a405749eb8868b1b408f2"
+          },
+          {
+            "path": "src/engine/exec/escape.rs",
+            "digest": "sha256:de2f1bdc8aad89c1b0a079a200509a4bb6fb7a10302a9d26881811f81f6c6006"
+          },
+          {
+            "path": "src/engine/exec/escape/linux.rs",
+            "digest": "sha256:beef1413c300ee81e2319a32e13459e5b6336bf0ac02a527dd3e04613d8718e9"
+          },
+          {
+            "path": "src/engine/exec/escape/macos.rs",
+            "digest": "sha256:fe587e65ef9ca5f0534102ffadce7d49ba8107e795d9db37cffa8c0b354e0332"
+          },
+          {
+            "path": "src/engine/exec/job.rs",
+            "digest": "sha256:1556079af4ebf54d78f607ee1ba065340af8561bdd00fa5d16beff3f80c51c23"
+          },
+          {
+            "path": "src/engine/git.rs",
+            "digest": "sha256:be64199bc3e7bc6cda052bf3e2eca2d3e73b54e4fafe5239f561cfadc9034173"
+          },
+          {
+            "path": "src/engine/keying.rs",
+            "digest": "sha256:bf78bacbe99585c986b0fc6a7ab3aa1c54d9c6b6ae19755a2b176926f138fae5"
+          },
+          {
+            "path": "src/engine/keying/digests.rs",
+            "digest": "sha256:cfb0fc36d882ece1e84cbd7aa74528bec3a67a6b6a017cd59f860d0c4eebc40d"
+          },
+          {
+            "path": "src/engine/mod.rs",
+            "digest": "sha256:913b7667b19580a67eec32c098517e852597b4cca12d7b43ff84c8763d4e403e"
+          },
+          {
+            "path": "src/engine/progress.rs",
+            "digest": "sha256:7ec89149f0aa9d9624b2b347829a374e76cb1eeab07482645695d6b601bc5f31"
+          },
+          {
+            "path": "src/engine/runner.rs",
+            "digest": "sha256:9bee82411e94aab90d49d1926259cb63936bb85ee19278c1dd005ae1232ca3d9"
+          },
+          {
+            "path": "src/engine/runner/attempts.rs",
+            "digest": "sha256:d0eabd0421af3800c6fb84580f5cdf0e3488f581164e2f164150f1e99f0366c0"
+          },
+          {
+            "path": "src/engine/runner/candidates.rs",
+            "digest": "sha256:23861c7144622d362f1981b63d69181a21e6fbee06600b860f0cce78efbfa30d"
+          },
+          {
+            "path": "src/engine/runner/execute.rs",
+            "digest": "sha256:c7df2d2b12439b2bac32cdb2742a9fe36c3dd8c8f1178d8b5aa4ec1c87c10a1c"
+          },
+          {
+            "path": "src/engine/runner/manifest.rs",
+            "digest": "sha256:c43655194f4bc98f7a6fc0d4834aeb91af99e01267ef3017cad079cc931e81f0"
+          },
+          {
+            "path": "src/engine/runner/reuse.rs",
+            "digest": "sha256:2aa028ac10b961c5b0685915fb628d68670353d1f4b50a01a14c832adde70b52"
+          },
+          {
+            "path": "src/engine/sandbox.rs",
+            "digest": "sha256:cfa19456c472d2d3528aaa7d93f072e6b59f19f1379f6a10a119c87cad7099c8"
+          },
+          {
+            "path": "src/engine/scheduler.rs",
+            "digest": "sha256:61793c339544dd259738b4dd0aa1292557c2bd109eb810a5b38dafec16d86d22"
+          },
+          {
+            "path": "src/lib.rs",
+            "digest": "sha256:c477511aad556e416ef2e1fedee887a663dcb66372a50c6a4ac39aa92f0e9cb9"
+          },
+          {
+            "path": "src/main.rs",
+            "digest": "sha256:426249f89a22bf66be9d41e21f558c4efa193000a5e3cbdaa2ff98b52578eb82"
+          },
+          {
+            "path": "src/service/audit.rs",
+            "digest": "sha256:d00c3f6a3101bdea7a3569bff0e4216bc8dc257c7523767051ecb1c199b2b2d0"
+          },
+          {
+            "path": "src/service/bundle.rs",
+            "digest": "sha256:7e0d2e649d02b7affc20f4c0196afbd742855ea57921f788f8a3e4a4a60f9225"
+          },
+          {
+            "path": "src/service/doctor.rs",
+            "digest": "sha256:f88c5cc5b243ede844ee99d5ec06af9017bb13d5799810e074db76c520aa17a7"
+          },
+          {
+            "path": "src/service/flaky.rs",
+            "digest": "sha256:ea7521eb4a1ffc4ab148724ad5c5d185fb7cb9734b9f7aeb108610dde3ca2a11"
+          },
+          {
+            "path": "src/service/guard.rs",
+            "digest": "sha256:180b8dbb0ce001718b78d34aba046b4c418f3b350d70b3b8469eef947e51f03e"
+          },
+          {
+            "path": "src/service/guard/expand.rs",
+            "digest": "sha256:eaa7f195797eb4c2c211ed72d1b71405128282a57cd85876cf0710192594739f"
+          },
+          {
+            "path": "src/service/guard/git.rs",
+            "digest": "sha256:10bfe7d3a4a06d306abc948557f1eff196c22a03c1b0ace00e2c99c91f7f2a8b"
+          },
+          {
+            "path": "src/service/guard/judge.rs",
+            "digest": "sha256:20332393527ab6e06fe8d288d6921f8d0e46ac9dc97f758e9efec69290e360e6"
+          },
+          {
+            "path": "src/service/guard/paths.rs",
+            "digest": "sha256:b2f9932b3aa042f5775a6e81c06ec9861209754f844a73334e901441af7e5ebc"
+          },
+          {
+            "path": "src/service/guard/rules.rs",
+            "digest": "sha256:eca014080aaaf46eadeabdeb9ca582f59e9b71c42bad29f9af29c04a35700d78"
+          },
+          {
+            "path": "src/service/guard/verbs.rs",
+            "digest": "sha256:3925a6747de1e7e4e035795ffaaa461ed0d41db6458045347c9a7daab728c7c7"
+          },
+          {
+            "path": "src/service/keys.rs",
+            "digest": "sha256:d61271815e9b311dcae85a18722709ebabcd5654a7907cff532ca835212b6d0b"
+          },
+          {
+            "path": "src/service/mod.rs",
+            "digest": "sha256:605a47937ab4053eb94160b779e254a4b3f632bd1ccd1e6b7c110c507e30532c"
+          },
+          {
+            "path": "src/service/search.rs",
+            "digest": "sha256:c5ca5d3fad372393309c2591e2f63f809319ad3e752e1b50d586db8d66e8d436"
+          },
+          {
+            "path": "src/service/share.rs",
+            "digest": "sha256:63f27be8ee57e035886c1aafccccc50a1e3da59c1882bfde0385654ff426c573"
+          },
+          {
+            "path": "src/store.rs",
+            "digest": "sha256:498054262848d79244df99def325d03163b0277b5c1a9d7fcd3a53c001a112a7"
+          },
+          {
+            "path": "tests/architecture.rs",
+            "digest": "sha256:368111288b9fa9d575dc31f4c2fc12c5643e4d94c56ac186033cf204c95e5c80"
+          },
+          {
+            "path": "tests/cli.rs",
+            "digest": "sha256:aa6f579104d8deeb5d54465bf7fb542c15ff6e59ae8f23e3a75ecf379b97ed50"
+          },
+          {
+            "path": "tests/guard_corpus.rs",
+            "digest": "sha256:88fdade2a37ebe7f93b71e522f5af8f195991ed08ab7fbbc7ddbfe5b3e5bb2bb"
+          },
+          {
+            "path": "tests/readme.rs",
+            "digest": "sha256:0d3a9f6987dfd48c749f612581642b1e23f24b26b22cc3e3a9148b50eced8fa9"
+          }
+        ],
+        "verify_inputs": [],
+        "outputs": [],
+        "deps": [
+          {
+            "step_id": "build",
+            "receipt_id": "sha256:c5ac67ae656cdeeeb41c4b569e748e75cd64b0c4d8c1c3b82647739d95d371af"
+          },
+          {
+            "step_id": "toolchain",
+            "receipt_id": "sha256:ac8c426f2dc21778f2e8a2dc2fbc37e97e37358adfc638cc39541d7c2935a694"
+          }
+        ],
+        "claims": [
+          {
+            "text": "clippy reports no warnings on any target",
+            "status": "verified",
+            "verify_command": "cargo clippy --all-targets -- -D warnings",
+            "verify_exit": 0,
+            "verify_output_digest": "sha256:c7048746a3f77a944968f5ad8605470257a2b4d5452e5c859559905b0b972b44",
+            "reason": null
+          }
+        ],
+        "limitations": [],
+        "tool": {
+          "name": "flot",
+          "version": "0.2.10",
+          "schema": 5
+        }
+      },
+      "observed": {
+        "started_at_ms": 1795777605648,
+        "duration_ms": 1480,
+        "host_os": "linux",
+        "stdout_inline": "",
+        "stdout_truncated": false,
+        "stderr_inline": "    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.42s\n",
+        "stderr_truncated": false,
+        "stdout_bytes": 0,
+        "stderr_bytes": 72,
+        "metrics": null,
+        "metrics_notes": []
+      }
+    },
+    {
+      "receipt_id": "sha256:b0de6cdeee27bbd9e479d2f4ff261628a4c1e5a6bdddfa082c6e6820c3a8aa93",
+      "identity": {
+        "flow": "flot-self-check",
+        "step_id": "rules",
+        "step_key": "sha256:30ead57141a7cf76987d4563fd8a9508ab1302dd45e1822cc7428be15c191057",
+        "command": "cargo test --no-run --test architecture --test readme",
+        "status": "ok",
+        "exit_code": 0,
+        "stdout_digest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_digest": "sha256:9b91bee0be90e925eb29dad91902a4cffa2dc2d25ccc96a1d12ccf1288b2f3ca",
+        "inputs": [
+          {
+            "path": ".claude-plugin/marketplace.json",
+            "digest": "sha256:b044ca8fe8b2fd7d65245b1bb899461fe50027c0d67903215888c56253e99a85"
+          },
+          {
+            "path": ".github/workflows/ci.yml",
+            "digest": "sha256:cac90aee0e27902c9232b42314f7b205747ebc33fb3aaf9c192ed3165f60c8fd"
+          },
+          {
+            "path": ".github/workflows/release.yml",
+            "digest": "sha256:e86c819bc81ff461ffa79726b59883e0d358be1456e0682e959aee54901ffd4a"
+          },
+          {
+            "path": "Cargo.toml",
+            "digest": "sha256:69c230a18b3b6a4673e4589efbcbbde739df57d57db5354b053b158293c4f4ad"
+          },
+          {
+            "path": "README.md",
+            "digest": "sha256:32253c2cdbe549e46d8b3de1ca899e9fad04439a19e16a17ffac777a40a4d688"
+          },
+          {
+            "path": "action.yml",
+            "digest": "sha256:77ea24924f7dd0e8a3572a6f220e1f270cf16bcbe5c44b571a97d879e4c9342b"
+          },
+          {
+            "path": "docs/ci.md",
+            "digest": "sha256:39d171840f32a7258424ea8bdd1b52d188e41f38a3e391488e055998930787cb"
+          },
+          {
+            "path": "docs/readme/README_ko.md",
+            "digest": "sha256:5f55568994d8228c094e635b966a5381e1d72d34d1894393e8fcb1810b87561d"
+          },
+          {
+            "path": "docs/readme/README_zh.md",
+            "digest": "sha256:680a94ab401cdfba0068434b3aac862b0ebe272c83a0036e5898b131b7b4b0e2"
+          },
+          {
+            "path": "flot.toml",
+            "digest": "sha256:85c17e45d2d0e3b54003f082dacdd1749dfaef9205c135b9cccfe8a6700f8bc7"
+          },
+          {
+            "path": "plugins/claude-code/.claude-plugin/plugin.json",
+            "digest": "sha256:ecab34f962989fe6517ca33032339ef84c936ebb349db686a9ac5073beb0c648"
+          },
+          {
+            "path": "rust-toolchain.toml",
+            "digest": "sha256:041d2d5868eab49be87ddb994040b18b83bd438dd741f5f0c7191b8def08c00f"
+          },
+          {
+            "path": "src/adapters/cli.rs",
+            "digest": "sha256:38b05649a6e42e8a5cea16b3330d2d14beaa0eb2b1eb88e8cf295e861dc73d65"
+          },
+          {
+            "path": "src/adapters/cli/args.rs",
+            "digest": "sha256:f853e69ea995990cd127672c6fd64479a6bccb7557050ee088ddbc1fdca36c22"
+          },
+          {
+            "path": "src/adapters/cli/hook.rs",
+            "digest": "sha256:e9784fe89b18aeab74d47e9b2391cc07173233810258d3ccf2a15eeca3abfee4"
+          },
+          {
+            "path": "src/adapters/cli/progress.rs",
+            "digest": "sha256:4917b62c9347aa12ce779b4910c90be5e70e467000b7892186e002d82edd203d"
+          },
+          {
+            "path": "src/adapters/cli/render.rs",
+            "digest": "sha256:f132eac35428cf57d283c7458ef572ef11879d6bcc43733e18993b0d67651920"
+          },
+          {
+            "path": "src/adapters/cli/replay.rs",
+            "digest": "sha256:b3ec9208f378739c55ff0d7b0386723b3e1934a4856094c957b483ab33dc0b6d"
+          },
+          {
+            "path": "src/adapters/mcp.rs",
+            "digest": "sha256:7dd8fb942c2e1be1c38b893811ffed6dd6afe24fa9bfc9e47644331018aafd3f"
+          },
+          {
+            "path": "src/adapters/mod.rs",
+            "digest": "sha256:2305acb0c4b63bc1bfc993a31ecba153c2b95c99141052fb97f8aac9651990ed"
+          },
+          {
+            "path": "src/core/attest.rs",
+            "digest": "sha256:9601aea26aa9580a757ce735f29b377726f8b526c9fd170f5aa3dd1aeaed769a"
+          },
+          {
+            "path": "src/core/compare.rs",
+            "digest": "sha256:ecb1b5a6428eb73c9a842c5f544eb4875ded68c29439fb2960989e9802fec730"
+          },
+          {
+            "path": "src/core/digest.rs",
+            "digest": "sha256:77a2cac92908ad8d96c783eeec2fae68a8e739b3ea907415f8d3b0773c01221e"
+          },
+          {
+            "path": "src/core/fault.rs",
+            "digest": "sha256:0a35676337719eec6005c3f203b5364a702941ed73e0b17a37bfde1cd7cc2f42"
+          },
+          {
+            "path": "src/core/flow.rs",
+            "digest": "sha256:9e493115aa2cb5cc4c63d92047fc205a5308483e29589facc5b462341a35fd00"
+          },
+          {
+            "path": "src/core/metrics.rs",
+            "digest": "sha256:ba809d9be9c3d532205a7efd6ce6c48a51ec0a7b203a4fa64d42a37c44f4cb0c"
+          },
+          {
+            "path": "src/core/mod.rs",
+            "digest": "sha256:589ab4a890d5b6d158fe51766fd9a19a66ce1ac93c28b32299bb870f40830cb2"
+          },
+          {
+            "path": "src/core/powershell.rs",
+            "digest": "sha256:898ec20f9727e75aab9a9f4381a0b2556704dbaec11634beac48a6062c36b650"
+          },
+          {
+            "path": "src/core/powershell/cmdlets.rs",
+            "digest": "sha256:486897ee176a05e67e280e5b5d1f87db7e57a4cbf7f7a383fc9d7a290f05235a"
+          },
+          {
+            "path": "src/core/powershell/lex.rs",
+            "digest": "sha256:53225bc6044d478a4481d06183146c9a1d4c0f0f93f62be5eaeac1b546ae9971"
+          },
+          {
+            "path": "src/core/powershell/paths.rs",
+            "digest": "sha256:1d2c57f6bf30a06e826650f826fb0b9218dfb86c802bf3b89a4cdd064c293b79"
+          },
+          {
+            "path": "src/core/powershell/read.rs",
+            "digest": "sha256:e4ecf1e773156495bcc89d0a428db82886e318a742db036645d21b604b2e275b"
+          },
+          {
+            "path": "src/core/powershell/run.rs",
+            "digest": "sha256:756827a0fd561c95662e9d34edd50dca3c5b36933e0b4f52d0a2fde5dfad2e0c"
+          },
+          {
+            "path": "src/core/powershell/vars.rs",
+            "digest": "sha256:99efd88130168c65a9f911bd84c3a5cc87b2c4b22427ba57e8618b3601d15887"
+          },
+          {
+            "path": "src/core/preview.rs",
+            "digest": "sha256:138baf01021f6f021f10b55f8359522fb30ca96e5ed14d3f71a71baad6cd004f"
+          },
+          {
+            "path": "src/core/reading.rs",
+            "digest": "sha256:790a11b8487f18883b45ffd050e1952a1f875f8fd16d917b105864fce2b40e94"
+          },
+          {
+            "path": "src/core/receipt.rs",
+            "digest": "sha256:90bbce77df527ad07517b294b2d0ef299e6454ab6d77f6ed4aba3ba9cf466049"
+          },
+          {
+            "path": "src/core/receipt/check.rs",
+            "digest": "sha256:67feffb916f4c47758fc4a350dcaf40175d3ba571eace239fa72d6f3ed5dd855"
+          },
+          {
+            "path": "src/core/secrets.rs",
+            "digest": "sha256:4e5d7348efed10e01c61a331c79a50c191bb833a485757d5ffeb6f9a580a91ac"
+          },
+          {
+            "path": "src/core/shell.rs",
+            "digest": "sha256:345672369dc6cb889ee6fae88998a681ebd3ce3bc67ed3266418af8981840d86"
+          },
+          {
+            "path": "src/core/shell/command.rs",
+            "digest": "sha256:49f92ed16365e2de6144cfaaa349f722b11a6ff2fa3bf727916b6006815604b4"
+          },
+          {
+            "path": "src/core/shell/lex.rs",
+            "digest": "sha256:d527f98bbe25e568d1dcaa4f1b2ca16e575d11a015f949dab1ececadc0520597"
+          },
+          {
+            "path": "src/core/shell/paths.rs",
+            "digest": "sha256:696060793cd64adbe2a21c58f6aaeb9900f8092d428ae8104cf4164a998b906c"
+          },
+          {
+            "path": "src/core/shell/read.rs",
+            "digest": "sha256:4be3aec5674f5a9adb81d225ae01c605a5094048ddb7feb2e2b421753407ee05"
+          },
+          {
+            "path": "src/core/shell/run.rs",
+            "digest": "sha256:469feb3ac49ed25674f619dce38308a36d9d628e1d3fc01997cbd1edc1cb2eec"
+          },
+          {
+            "path": "src/core/shell/substitution.rs",
+            "digest": "sha256:3780dd51e6ca87e57839b7165d42ce8e3df2d5db453f5be87c38574d6488c966"
+          },
+          {
+            "path": "src/core/shell/tables.rs",
+            "digest": "sha256:80e25a8ad0e7361d17c86c85e10fad0f207c8f123b75ca1c06fdb36a77bb2f7b"
+          },
+          {
+            "path": "src/core/shell/vars.rs",
+            "digest": "sha256:3fb0faa03a191935c06d6e83d379399cd66188ddc4c66f8017265de1b5b71cf8"
+          },
+          {
+            "path": "src/core/shell/writers.rs",
+            "digest": "sha256:45c5a36567b031fe4c0c63239cf1428aca6cd90e4b85c5b103c6276e2b05b50a"
+          },
+          {
+            "path": "src/engine/baseline.rs",
+            "digest": "sha256:24084516bb14f36f4ea229a7e9803aba4270e484fa4ee8e6255860b60bc06d1a"
+          },
+          {
+            "path": "src/engine/claims.rs",
+            "digest": "sha256:9db6637693707852bd6f91ff07429b3088b75b692f8a4cd61b575ba850bade7e"
+          },
+          {
+            "path": "src/engine/exec.rs",
+            "digest": "sha256:79f4f876e2e986cdc00d1760dc13715fe79481b28f1a405749eb8868b1b408f2"
+          },
+          {
+            "path": "src/engine/exec/escape.rs",
+            "digest": "sha256:de2f1bdc8aad89c1b0a079a200509a4bb6fb7a10302a9d26881811f81f6c6006"
+          },
+          {
+            "path": "src/engine/exec/escape/linux.rs",
+            "digest": "sha256:beef1413c300ee81e2319a32e13459e5b6336bf0ac02a527dd3e04613d8718e9"
+          },
+          {
+            "path": "src/engine/exec/escape/macos.rs",
+            "digest": "sha256:fe587e65ef9ca5f0534102ffadce7d49ba8107e795d9db37cffa8c0b354e0332"
+          },
+          {
+            "path": "src/engine/exec/job.rs",
+            "digest": "sha256:1556079af4ebf54d78f607ee1ba065340af8561bdd00fa5d16beff3f80c51c23"
+          },
+          {
+            "path": "src/engine/git.rs",
+            "digest": "sha256:be64199bc3e7bc6cda052bf3e2eca2d3e73b54e4fafe5239f561cfadc9034173"
+          },
+          {
+            "path": "src/engine/keying.rs",
+            "digest": "sha256:bf78bacbe99585c986b0fc6a7ab3aa1c54d9c6b6ae19755a2b176926f138fae5"
+          },
+          {
+            "path": "src/engine/keying/digests.rs",
+            "digest": "sha256:cfb0fc36d882ece1e84cbd7aa74528bec3a67a6b6a017cd59f860d0c4eebc40d"
+          },
+          {
+            "path": "src/engine/mod.rs",
+            "digest": "sha256:913b7667b19580a67eec32c098517e852597b4cca12d7b43ff84c8763d4e403e"
+          },
+          {
+            "path": "src/engine/progress.rs",
+            "digest": "sha256:7ec89149f0aa9d9624b2b347829a374e76cb1eeab07482645695d6b601bc5f31"
+          },
+          {
+            "path": "src/engine/runner.rs",
+            "digest": "sha256:9bee82411e94aab90d49d1926259cb63936bb85ee19278c1dd005ae1232ca3d9"
+          },
+          {
+            "path": "src/engine/runner/attempts.rs",
+            "digest": "sha256:d0eabd0421af3800c6fb84580f5cdf0e3488f581164e2f164150f1e99f0366c0"
+          },
+          {
+            "path": "src/engine/runner/candidates.rs",
+            "digest": "sha256:23861c7144622d362f1981b63d69181a21e6fbee06600b860f0cce78efbfa30d"
+          },
+          {
+            "path": "src/engine/runner/execute.rs",
+            "digest": "sha256:c7df2d2b12439b2bac32cdb2742a9fe36c3dd8c8f1178d8b5aa4ec1c87c10a1c"
+          },
+          {
+            "path": "src/engine/runner/manifest.rs",
+            "digest": "sha256:c43655194f4bc98f7a6fc0d4834aeb91af99e01267ef3017cad079cc931e81f0"
+          },
+          {
+            "path": "src/engine/runner/reuse.rs",
+            "digest": "sha256:2aa028ac10b961c5b0685915fb628d68670353d1f4b50a01a14c832adde70b52"
+          },
+          {
+            "path": "src/engine/sandbox.rs",
+            "digest": "sha256:cfa19456c472d2d3528aaa7d93f072e6b59f19f1379f6a10a119c87cad7099c8"
+          },
+          {
+            "path": "src/engine/scheduler.rs",
+            "digest": "sha256:61793c339544dd259738b4dd0aa1292557c2bd109eb810a5b38dafec16d86d22"
+          },
+          {
+            "path": "src/lib.rs",
+            "digest": "sha256:c477511aad556e416ef2e1fedee887a663dcb66372a50c6a4ac39aa92f0e9cb9"
+          },
+          {
+            "path": "src/main.rs",
+            "digest": "sha256:426249f89a22bf66be9d41e21f558c4efa193000a5e3cbdaa2ff98b52578eb82"
+          },
+          {
+            "path": "src/service/audit.rs",
+            "digest": "sha256:d00c3f6a3101bdea7a3569bff0e4216bc8dc257c7523767051ecb1c199b2b2d0"
+          },
+          {
+            "path": "src/service/bundle.rs",
+            "digest": "sha256:7e0d2e649d02b7affc20f4c0196afbd742855ea57921f788f8a3e4a4a60f9225"
+          },
+          {
+            "path": "src/service/doctor.rs",
+            "digest": "sha256:f88c5cc5b243ede844ee99d5ec06af9017bb13d5799810e074db76c520aa17a7"
+          },
+          {
+            "path": "src/service/flaky.rs",
+            "digest": "sha256:ea7521eb4a1ffc4ab148724ad5c5d185fb7cb9734b9f7aeb108610dde3ca2a11"
+          },
+          {
+            "path": "src/service/guard.rs",
+            "digest": "sha256:180b8dbb0ce001718b78d34aba046b4c418f3b350d70b3b8469eef947e51f03e"
+          },
+          {
+            "path": "src/service/guard/expand.rs",
+            "digest": "sha256:eaa7f195797eb4c2c211ed72d1b71405128282a57cd85876cf0710192594739f"
+          },
+          {
+            "path": "src/service/guard/git.rs",
+            "digest": "sha256:10bfe7d3a4a06d306abc948557f1eff196c22a03c1b0ace00e2c99c91f7f2a8b"
+          },
+          {
+            "path": "src/service/guard/judge.rs",
+            "digest": "sha256:20332393527ab6e06fe8d288d6921f8d0e46ac9dc97f758e9efec69290e360e6"
+          },
+          {
+            "path": "src/service/guard/paths.rs",
+            "digest": "sha256:b2f9932b3aa042f5775a6e81c06ec9861209754f844a73334e901441af7e5ebc"
+          },
+          {
+            "path": "src/service/guard/rules.rs",
+            "digest": "sha256:eca014080aaaf46eadeabdeb9ca582f59e9b71c42bad29f9af29c04a35700d78"
+          },
+          {
+            "path": "src/service/guard/verbs.rs",
+            "digest": "sha256:3925a6747de1e7e4e035795ffaaa461ed0d41db6458045347c9a7daab728c7c7"
+          },
+          {
+            "path": "src/service/keys.rs",
+            "digest": "sha256:d61271815e9b311dcae85a18722709ebabcd5654a7907cff532ca835212b6d0b"
+          },
+          {
+            "path": "src/service/mod.rs",
+            "digest": "sha256:605a47937ab4053eb94160b779e254a4b3f632bd1ccd1e6b7c110c507e30532c"
+          },
+          {
+            "path": "src/service/search.rs",
+            "digest": "sha256:c5ca5d3fad372393309c2591e2f63f809319ad3e752e1b50d586db8d66e8d436"
+          },
+          {
+            "path": "src/service/share.rs",
+            "digest": "sha256:63f27be8ee57e035886c1aafccccc50a1e3da59c1882bfde0385654ff426c573"
+          },
+          {
+            "path": "src/store.rs",
+            "digest": "sha256:498054262848d79244df99def325d03163b0277b5c1a9d7fcd3a53c001a112a7"
+          },
+          {
+            "path": "tests/architecture.rs",
+            "digest": "sha256:368111288b9fa9d575dc31f4c2fc12c5643e4d94c56ac186033cf204c95e5c80"
+          },
+          {
+            "path": "tests/readme.rs",
+            "digest": "sha256:0d3a9f6987dfd48c749f612581642b1e23f24b26b22cc3e3a9148b50eced8fa9"
+          }
+        ],
+        "verify_inputs": [],
+        "outputs": [],
+        "deps": [
+          {
+            "step_id": "build",
+            "receipt_id": "sha256:c5ac67ae656cdeeeb41c4b569e748e75cd64b0c4d8c1c3b82647739d95d371af"
+          },
+          {
+            "step_id": "toolchain",
+            "receipt_id": "sha256:ac8c426f2dc21778f2e8a2dc2fbc37e97e37358adfc638cc39541d7c2935a694"
+          }
+        ],
+        "claims": [
+          {
+            "text": "the module rules and the release references hold",
+            "status": "verified",
+            "verify_command": "cargo test --quiet --test architecture --test readme",
+            "verify_exit": 0,
+            "verify_output_digest": "sha256:ec86da87da6e979a6510dbc9b8b3032f25c86b2684514eef4bf10d1a8e0efcc4",
+            "reason": null
+          }
+        ],
+        "limitations": [],
+        "tool": {
+          "name": "flot",
+          "version": "0.2.10",
+          "schema": 5
+        }
+      },
+      "observed": {
+        "started_at_ms": 1795777608967,
+        "duration_ms": 1540,
+        "host_os": "linux",
+        "stdout_inline": "",
+        "stdout_truncated": false,
+        "stderr_inline": "    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.49s\n  Executable tests/architecture.rs (target/debug/build/flot-cli/90e79526def382e6/out/architecture-90e79526def382e6)\n  Executable tests/readme.rs (target/debug/build/flot-cli/8aca9ab1624c8e48/out/readme-8aca9ab1624c8e48)\n",
+        "stderr_truncated": false,
+        "stdout_bytes": 0,
+        "stderr_bytes": 293,
+        "metrics": null,
+        "metrics_notes": []
+      }
+    },
+    {
+      "receipt_id": "sha256:90b575b13e7996b0549504163885e6ba582a27bc97a6086282e08a4cad4bec76",
+      "identity": {
+        "flow": "flot-self-check",
+        "step_id": "unit",
+        "step_key": "sha256:dbf47a97ea09e5d09ec4dd91fafd21554aac04bf98a43e8a99b9be8ed0679040",
+        "command": "cargo test --no-run --lib --bins",
+        "status": "ok",
+        "exit_code": 0,
+        "stdout_digest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_digest": "sha256:8e3cf6a5cb929dd8c865974e817d5c1fcb67490de53582a0f1caeda51ae14c90",
+        "inputs": [
+          {
+            "path": "Cargo.toml",
+            "digest": "sha256:69c230a18b3b6a4673e4589efbcbbde739df57d57db5354b053b158293c4f4ad"
+          },
+          {
+            "path": "plugins/claude-code/skills/flot/SKILL.md",
+            "digest": "sha256:7534ee8f4906d904782f7b1ccfd6e00e5bfa80e3a1374f422d26cbbe06d96dcd"
+          },
+          {
+            "path": "src/adapters/cli.rs",
+            "digest": "sha256:38b05649a6e42e8a5cea16b3330d2d14beaa0eb2b1eb88e8cf295e861dc73d65"
+          },
+          {
+            "path": "src/adapters/cli/args.rs",
+            "digest": "sha256:f853e69ea995990cd127672c6fd64479a6bccb7557050ee088ddbc1fdca36c22"
+          },
+          {
+            "path": "src/adapters/cli/hook.rs",
+            "digest": "sha256:e9784fe89b18aeab74d47e9b2391cc07173233810258d3ccf2a15eeca3abfee4"
+          },
+          {
+            "path": "src/adapters/cli/progress.rs",
+            "digest": "sha256:4917b62c9347aa12ce779b4910c90be5e70e467000b7892186e002d82edd203d"
+          },
+          {
+            "path": "src/adapters/cli/render.rs",
+            "digest": "sha256:f132eac35428cf57d283c7458ef572ef11879d6bcc43733e18993b0d67651920"
+          },
+          {
+            "path": "src/adapters/cli/replay.rs",
+            "digest": "sha256:b3ec9208f378739c55ff0d7b0386723b3e1934a4856094c957b483ab33dc0b6d"
+          },
+          {
+            "path": "src/adapters/mcp.rs",
+            "digest": "sha256:7dd8fb942c2e1be1c38b893811ffed6dd6afe24fa9bfc9e47644331018aafd3f"
+          },
+          {
+            "path": "src/adapters/mod.rs",
+            "digest": "sha256:2305acb0c4b63bc1bfc993a31ecba153c2b95c99141052fb97f8aac9651990ed"
+          },
+          {
+            "path": "src/core/attest.rs",
+            "digest": "sha256:9601aea26aa9580a757ce735f29b377726f8b526c9fd170f5aa3dd1aeaed769a"
+          },
+          {
+            "path": "src/core/compare.rs",
+            "digest": "sha256:ecb1b5a6428eb73c9a842c5f544eb4875ded68c29439fb2960989e9802fec730"
+          },
+          {
+            "path": "src/core/digest.rs",
+            "digest": "sha256:77a2cac92908ad8d96c783eeec2fae68a8e739b3ea907415f8d3b0773c01221e"
+          },
+          {
+            "path": "src/core/fault.rs",
+            "digest": "sha256:0a35676337719eec6005c3f203b5364a702941ed73e0b17a37bfde1cd7cc2f42"
+          },
+          {
+            "path": "src/core/flow.rs",
+            "digest": "sha256:9e493115aa2cb5cc4c63d92047fc205a5308483e29589facc5b462341a35fd00"
+          },
+          {
+            "path": "src/core/metrics.rs",
+            "digest": "sha256:ba809d9be9c3d532205a7efd6ce6c48a51ec0a7b203a4fa64d42a37c44f4cb0c"
+          },
+          {
+            "path": "src/core/mod.rs",
+            "digest": "sha256:589ab4a890d5b6d158fe51766fd9a19a66ce1ac93c28b32299bb870f40830cb2"
+          },
+          {
+            "path": "src/core/powershell.rs",
+            "digest": "sha256:898ec20f9727e75aab9a9f4381a0b2556704dbaec11634beac48a6062c36b650"
+          },
+          {
+            "path": "src/core/powershell/cmdlets.rs",
+            "digest": "sha256:486897ee176a05e67e280e5b5d1f87db7e57a4cbf7f7a383fc9d7a290f05235a"
+          },
+          {
+            "path": "src/core/powershell/lex.rs",
+            "digest": "sha256:53225bc6044d478a4481d06183146c9a1d4c0f0f93f62be5eaeac1b546ae9971"
+          },
+          {
+            "path": "src/core/powershell/paths.rs",
+            "digest": "sha256:1d2c57f6bf30a06e826650f826fb0b9218dfb86c802bf3b89a4cdd064c293b79"
+          },
+          {
+            "path": "src/core/powershell/read.rs",
+            "digest": "sha256:e4ecf1e773156495bcc89d0a428db82886e318a742db036645d21b604b2e275b"
+          },
+          {
+            "path": "src/core/powershell/run.rs",
+            "digest": "sha256:756827a0fd561c95662e9d34edd50dca3c5b36933e0b4f52d0a2fde5dfad2e0c"
+          },
+          {
+            "path": "src/core/powershell/vars.rs",
+            "digest": "sha256:99efd88130168c65a9f911bd84c3a5cc87b2c4b22427ba57e8618b3601d15887"
+          },
+          {
+            "path": "src/core/preview.rs",
+            "digest": "sha256:138baf01021f6f021f10b55f8359522fb30ca96e5ed14d3f71a71baad6cd004f"
+          },
+          {
+            "path": "src/core/reading.rs",
+            "digest": "sha256:790a11b8487f18883b45ffd050e1952a1f875f8fd16d917b105864fce2b40e94"
+          },
+          {
+            "path": "src/core/receipt.rs",
+            "digest": "sha256:90bbce77df527ad07517b294b2d0ef299e6454ab6d77f6ed4aba3ba9cf466049"
+          },
+          {
+            "path": "src/core/receipt/check.rs",
+            "digest": "sha256:67feffb916f4c47758fc4a350dcaf40175d3ba571eace239fa72d6f3ed5dd855"
+          },
+          {
+            "path": "src/core/secrets.rs",
+            "digest": "sha256:4e5d7348efed10e01c61a331c79a50c191bb833a485757d5ffeb6f9a580a91ac"
+          },
+          {
+            "path": "src/core/shell.rs",
+            "digest": "sha256:345672369dc6cb889ee6fae88998a681ebd3ce3bc67ed3266418af8981840d86"
+          },
+          {
+            "path": "src/core/shell/command.rs",
+            "digest": "sha256:49f92ed16365e2de6144cfaaa349f722b11a6ff2fa3bf727916b6006815604b4"
+          },
+          {
+            "path": "src/core/shell/lex.rs",
+            "digest": "sha256:d527f98bbe25e568d1dcaa4f1b2ca16e575d11a015f949dab1ececadc0520597"
+          },
+          {
+            "path": "src/core/shell/paths.rs",
+            "digest": "sha256:696060793cd64adbe2a21c58f6aaeb9900f8092d428ae8104cf4164a998b906c"
+          },
+          {
+            "path": "src/core/shell/read.rs",
+            "digest": "sha256:4be3aec5674f5a9adb81d225ae01c605a5094048ddb7feb2e2b421753407ee05"
+          },
+          {
+            "path": "src/core/shell/run.rs",
+            "digest": "sha256:469feb3ac49ed25674f619dce38308a36d9d628e1d3fc01997cbd1edc1cb2eec"
+          },
+          {
+            "path": "src/core/shell/substitution.rs",
+            "digest": "sha256:3780dd51e6ca87e57839b7165d42ce8e3df2d5db453f5be87c38574d6488c966"
+          },
+          {
+            "path": "src/core/shell/tables.rs",
+            "digest": "sha256:80e25a8ad0e7361d17c86c85e10fad0f207c8f123b75ca1c06fdb36a77bb2f7b"
+          },
+          {
+            "path": "src/core/shell/vars.rs",
+            "digest": "sha256:3fb0faa03a191935c06d6e83d379399cd66188ddc4c66f8017265de1b5b71cf8"
+          },
+          {
+            "path": "src/core/shell/writers.rs",
+            "digest": "sha256:45c5a36567b031fe4c0c63239cf1428aca6cd90e4b85c5b103c6276e2b05b50a"
+          },
+          {
+            "path": "src/engine/baseline.rs",
+            "digest": "sha256:24084516bb14f36f4ea229a7e9803aba4270e484fa4ee8e6255860b60bc06d1a"
+          },
+          {
+            "path": "src/engine/claims.rs",
+            "digest": "sha256:9db6637693707852bd6f91ff07429b3088b75b692f8a4cd61b575ba850bade7e"
+          },
+          {
+            "path": "src/engine/exec.rs",
+            "digest": "sha256:79f4f876e2e986cdc00d1760dc13715fe79481b28f1a405749eb8868b1b408f2"
+          },
+          {
+            "path": "src/engine/exec/escape.rs",
+            "digest": "sha256:de2f1bdc8aad89c1b0a079a200509a4bb6fb7a10302a9d26881811f81f6c6006"
+          },
+          {
+            "path": "src/engine/exec/escape/linux.rs",
+            "digest": "sha256:beef1413c300ee81e2319a32e13459e5b6336bf0ac02a527dd3e04613d8718e9"
+          },
+          {
+            "path": "src/engine/exec/escape/macos.rs",
+            "digest": "sha256:fe587e65ef9ca5f0534102ffadce7d49ba8107e795d9db37cffa8c0b354e0332"
+          },
+          {
+            "path": "src/engine/exec/job.rs",
+            "digest": "sha256:1556079af4ebf54d78f607ee1ba065340af8561bdd00fa5d16beff3f80c51c23"
+          },
+          {
+            "path": "src/engine/git.rs",
+            "digest": "sha256:be64199bc3e7bc6cda052bf3e2eca2d3e73b54e4fafe5239f561cfadc9034173"
+          },
+          {
+            "path": "src/engine/keying.rs",
+            "digest": "sha256:bf78bacbe99585c986b0fc6a7ab3aa1c54d9c6b6ae19755a2b176926f138fae5"
+          },
+          {
+            "path": "src/engine/keying/digests.rs",
+            "digest": "sha256:cfb0fc36d882ece1e84cbd7aa74528bec3a67a6b6a017cd59f860d0c4eebc40d"
+          },
+          {
+            "path": "src/engine/mod.rs",
+            "digest": "sha256:913b7667b19580a67eec32c098517e852597b4cca12d7b43ff84c8763d4e403e"
+          },
+          {
+            "path": "src/engine/progress.rs",
+            "digest": "sha256:7ec89149f0aa9d9624b2b347829a374e76cb1eeab07482645695d6b601bc5f31"
+          },
+          {
+            "path": "src/engine/runner.rs",
+            "digest": "sha256:9bee82411e94aab90d49d1926259cb63936bb85ee19278c1dd005ae1232ca3d9"
+          },
+          {
+            "path": "src/engine/runner/attempts.rs",
+            "digest": "sha256:d0eabd0421af3800c6fb84580f5cdf0e3488f581164e2f164150f1e99f0366c0"
+          },
+          {
+            "path": "src/engine/runner/candidates.rs",
+            "digest": "sha256:23861c7144622d362f1981b63d69181a21e6fbee06600b860f0cce78efbfa30d"
+          },
+          {
+            "path": "src/engine/runner/execute.rs",
+            "digest": "sha256:c7df2d2b12439b2bac32cdb2742a9fe36c3dd8c8f1178d8b5aa4ec1c87c10a1c"
+          },
+          {
+            "path": "src/engine/runner/manifest.rs",
+            "digest": "sha256:c43655194f4bc98f7a6fc0d4834aeb91af99e01267ef3017cad079cc931e81f0"
+          },
+          {
+            "path": "src/engine/runner/reuse.rs",
+            "digest": "sha256:2aa028ac10b961c5b0685915fb628d68670353d1f4b50a01a14c832adde70b52"
+          },
+          {
+            "path": "src/engine/sandbox.rs",
+            "digest": "sha256:cfa19456c472d2d3528aaa7d93f072e6b59f19f1379f6a10a119c87cad7099c8"
+          },
+          {
+            "path": "src/engine/scheduler.rs",
+            "digest": "sha256:61793c339544dd259738b4dd0aa1292557c2bd109eb810a5b38dafec16d86d22"
+          },
+          {
+            "path": "src/lib.rs",
+            "digest": "sha256:c477511aad556e416ef2e1fedee887a663dcb66372a50c6a4ac39aa92f0e9cb9"
+          },
+          {
+            "path": "src/main.rs",
+            "digest": "sha256:426249f89a22bf66be9d41e21f558c4efa193000a5e3cbdaa2ff98b52578eb82"
+          },
+          {
+            "path": "src/service/audit.rs",
+            "digest": "sha256:d00c3f6a3101bdea7a3569bff0e4216bc8dc257c7523767051ecb1c199b2b2d0"
+          },
+          {
+            "path": "src/service/bundle.rs",
+            "digest": "sha256:7e0d2e649d02b7affc20f4c0196afbd742855ea57921f788f8a3e4a4a60f9225"
+          },
+          {
+            "path": "src/service/doctor.rs",
+            "digest": "sha256:f88c5cc5b243ede844ee99d5ec06af9017bb13d5799810e074db76c520aa17a7"
+          },
+          {
+            "path": "src/service/flaky.rs",
+            "digest": "sha256:ea7521eb4a1ffc4ab148724ad5c5d185fb7cb9734b9f7aeb108610dde3ca2a11"
+          },
+          {
+            "path": "src/service/guard.rs",
+            "digest": "sha256:180b8dbb0ce001718b78d34aba046b4c418f3b350d70b3b8469eef947e51f03e"
+          },
+          {
+            "path": "src/service/guard/expand.rs",
+            "digest": "sha256:eaa7f195797eb4c2c211ed72d1b71405128282a57cd85876cf0710192594739f"
+          },
+          {
+            "path": "src/service/guard/git.rs",
+            "digest": "sha256:10bfe7d3a4a06d306abc948557f1eff196c22a03c1b0ace00e2c99c91f7f2a8b"
+          },
+          {
+            "path": "src/service/guard/judge.rs",
+            "digest": "sha256:20332393527ab6e06fe8d288d6921f8d0e46ac9dc97f758e9efec69290e360e6"
+          },
+          {
+            "path": "src/service/guard/paths.rs",
+            "digest": "sha256:b2f9932b3aa042f5775a6e81c06ec9861209754f844a73334e901441af7e5ebc"
+          },
+          {
+            "path": "src/service/guard/rules.rs",
+            "digest": "sha256:eca014080aaaf46eadeabdeb9ca582f59e9b71c42bad29f9af29c04a35700d78"
+          },
+          {
+            "path": "src/service/guard/verbs.rs",
+            "digest": "sha256:3925a6747de1e7e4e035795ffaaa461ed0d41db6458045347c9a7daab728c7c7"
+          },
+          {
+            "path": "src/service/keys.rs",
+            "digest": "sha256:d61271815e9b311dcae85a18722709ebabcd5654a7907cff532ca835212b6d0b"
+          },
+          {
+            "path": "src/service/mod.rs",
+            "digest": "sha256:605a47937ab4053eb94160b779e254a4b3f632bd1ccd1e6b7c110c507e30532c"
+          },
+          {
+            "path": "src/service/search.rs",
+            "digest": "sha256:c5ca5d3fad372393309c2591e2f63f809319ad3e752e1b50d586db8d66e8d436"
+          },
+          {
+            "path": "src/service/share.rs",
+            "digest": "sha256:63f27be8ee57e035886c1aafccccc50a1e3da59c1882bfde0385654ff426c573"
+          },
+          {
+            "path": "src/store.rs",
+            "digest": "sha256:498054262848d79244df99def325d03163b0277b5c1a9d7fcd3a53c001a112a7"
+          }
+        ],
+        "verify_inputs": [],
+        "outputs": [],
+        "deps": [
+          {
+            "step_id": "build",
+            "receipt_id": "sha256:c5ac67ae656cdeeeb41c4b569e748e75cd64b0c4d8c1c3b82647739d95d371af"
+          },
+          {
+            "step_id": "toolchain",
+            "receipt_id": "sha256:ac8c426f2dc21778f2e8a2dc2fbc37e97e37358adfc638cc39541d7c2935a694"
+          }
+        ],
+        "claims": [
+          {
+            "text": "the unit suite passes",
+            "status": "verified",
+            "verify_command": "cargo test --quiet --lib --bins && cargo test --quiet --doc",
+            "verify_exit": 0,
+            "verify_output_digest": "sha256:abdfa3f50aed195d990928351344108553e0576a46aca261bac1e50446a107d8",
+            "reason": null
+          }
+        ],
+        "limitations": [],
+        "tool": {
+          "name": "flot",
+          "version": "0.2.10",
+          "schema": 5
+        }
+      },
+      "observed": {
+        "started_at_ms": 1795777612541,
+        "duration_ms": 1522,
+        "host_os": "linux",
+        "stdout_inline": "",
+        "stdout_truncated": false,
+        "stderr_inline": "    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.48s\n  Executable unittests src/lib.rs (target/debug/build/flot-cli/e668d9356226b818/out/flot-e668d9356226b818)\n  Executable unittests src/main.rs (target/debug/build/flot-cli/1fc39af73e6f5beb/out/flot-1fc39af73e6f5beb)\n",
+        "stderr_truncated": false,
+        "stdout_bytes": 0,
+        "stderr_bytes": 288,
+        "metrics": null,
+        "metrics_notes": []
+      }
+    }
+  ],
+  "objects": {
+    "sha256:1bb0bb55c9ce0742e66ba0ed1e0d9eeb980f6b019e02be13ba44b3624216006e": "cnVzdGMgMS4xMDAuMCAoMGVmMWJjMzg2IDIwMjYtMTEtMDkpCmJpbmFyeTogcnVzdGMKY29tbWl0LWhhc2g6IDBlZjFiYzM4NjA1OTU5NmRhZGE4ZmI2NWI1MDQyNWFhYjJlYTYzN2EKY29tbWl0LWRhdGU6IDIwMjYtMTEtMDkKaG9zdDogeDg2XzY0LXVua25vd24tbGludXgtZ251CnJlbGVhc2U6IDEuMTAwLjAKTExWTSB2ZXJzaW9uOiAyMy4xLjUKY2FyZ28gMS4xMDAuMCAoM2FjYzc5YzBjIDIwMjYtMTEtMDUpCg==",
+    "sha256:2017405a5442d1ef248600680631998811ecb11f709eaa97a94d433f522e3bc0": "eyJkdXJhdGlvbl9tcyI6MTQ4MCwiaG9zdF9vcyI6ImxpbnV4IiwibWV0cmljcyI6bnVsbCwibWV0cmljc19ub3RlcyI6W10sInN0YXJ0ZWRfYXRfbXMiOjE3OTU3Nzc2MDU2NDgsInN0ZGVycl9ieXRlcyI6NzIsInN0ZGVycl9pbmxpbmUiOiIgICAgRmluaXNoZWQgYGRldmAgcHJvZmlsZSBbdW5vcHRpbWl6ZWQgKyBkZWJ1Z2luZm9dIHRhcmdldChzKSBpbiAxLjQyc1xuIiwic3RkZXJyX3RydW5jYXRlZCI6ZmFsc2UsInN0ZG91dF9ieXRlcyI6MCwic3Rkb3V0X2lubGluZSI6IiIsInN0ZG91dF90cnVuY2F0ZWQiOmZhbHNlfQ==",
+    "sha256:3081f11931a81fb3136f2a795d2c3f4201d346c5e663cda4d9c91f0f8636fba2": "CnJ1bm5pbmcgMTc4IHRlc3RzCi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi5oaQouLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLiA4Ny8xNzgKLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uIDE3NC8xNzgKLi4uLgp0ZXN0IHJlc3VsdDogb2suIDE3OCBwYXNzZWQ7IDAgZmFpbGVkOyAwIGlnbm9yZWQ7IDAgbWVhc3VyZWQ7IDAgZmlsdGVyZWQgb3V0OyBmaW5pc2hlZCBpbiAzLjk1cwoKCnJ1bm5pbmcgMSB0ZXN0Ci4KdGVzdCByZXN1bHQ6IG9rLiAxIHBhc3NlZDsgMCBmYWlsZWQ7IDAgaWdub3JlZDsgMCBtZWFzdXJlZDsgMCBmaWx0ZXJlZCBvdXQ7IGZpbmlzaGVkIGluIDAuMjhzCgo=",
+    "sha256:32c4a4ba181afd251220e764b96a14cce9abcb40c512fac4e42965b6a0f8988a": "eyJkdXJhdGlvbl9tcyI6NTA1LCJob3N0X29zIjoibGludXgiLCJtZXRyaWNzIjpudWxsLCJtZXRyaWNzX25vdGVzIjpbXSwic3RhcnRlZF9hdF9tcyI6MTc5NTc3NzU5MzEyMywic3RkZXJyX2J5dGVzIjowLCJzdGRlcnJfaW5saW5lIjoiIiwic3RkZXJyX3RydW5jYXRlZCI6ZmFsc2UsInN0ZG91dF9ieXRlcyI6MCwic3Rkb3V0X2lubGluZSI6IiIsInN0ZG91dF90cnVuY2F0ZWQiOmZhbHNlfQ==",
+    "sha256:413df07886da998439574d56bd47e2c85b0c30a61a559033b97cafd5ed42200a": "eyJkdXJhdGlvbl9tcyI6NTIsImhvc3Rfb3MiOiJsaW51eCIsIm1ldHJpY3MiOm51bGwsIm1ldHJpY3Nfbm90ZXMiOltdLCJzdGFydGVkX2F0X21zIjoxNzk1Nzc3NTkyODI0LCJzdGRlcnJfYnl0ZXMiOjAsInN0ZGVycl9pbmxpbmUiOiIiLCJzdGRlcnJfdHJ1bmNhdGVkIjpmYWxzZSwic3Rkb3V0X2J5dGVzIjoyMzUsInN0ZG91dF9pbmxpbmUiOiJydXN0YyAxLjEwMC4wICgwZWYxYmMzODYgMjAyNi0xMS0wOSlcbmJpbmFyeTogcnVzdGNcbmNvbW1pdC1oYXNoOiAwZWYxYmMzODYwNTk1OTZkYWRhOGZiNjViNTA0MjVhYWIyZWE2MzdhXG5jb21taXQtZGF0ZTogMjAyNi0xMS0wOVxuaG9zdDogeDg2XzY0LXVua25vd24tbGludXgtZ251XG5yZWxlYXNlOiAxLjEwMC4wXG5MTFZNIHZlcnNpb246IDIzLjEuNVxuY2FyZ28gMS4xMDAuMCAoM2FjYzc5YzBjIDIwMjYtMTEtMDUpXG4iLCJzdGRvdXRfdHJ1bmNhdGVkIjpmYWxzZX0=",
+    "sha256:4de1b5a0f3911cd87c90f0c088c7b8d2844451a235d23adc9a560d3d6c1e7512": "eyJkdXJhdGlvbl9tcyI6MTU0MCwiaG9zdF9vcyI6ImxpbnV4IiwibWV0cmljcyI6bnVsbCwibWV0cmljc19ub3RlcyI6W10sInN0YXJ0ZWRfYXRfbXMiOjE3OTU3Nzc2MDg5NjcsInN0ZGVycl9ieXRlcyI6MjkzLCJzdGRlcnJfaW5saW5lIjoiICAgIEZpbmlzaGVkIGB0ZXN0YCBwcm9maWxlIFt1bm9wdGltaXplZCArIGRlYnVnaW5mb10gdGFyZ2V0KHMpIGluIDEuNDlzXG4gIEV4ZWN1dGFibGUgdGVzdHMvYXJjaGl0ZWN0dXJlLnJzICh0YXJnZXQvZGVidWcvYnVpbGQvZmxvdC1jbGkvOTBlNzk1MjZkZWYzODJlNi9vdXQvYXJjaGl0ZWN0dXJlLTkwZTc5NTI2ZGVmMzgyZTYpXG4gIEV4ZWN1dGFibGUgdGVzdHMvcmVhZG1lLnJzICh0YXJnZXQvZGVidWcvYnVpbGQvZmxvdC1jbGkvOGFjYTlhYjE2MjRjOGU0OC9vdXQvcmVhZG1lLThhY2E5YWIxNjI0YzhlNDgpXG4iLCJzdGRlcnJfdHJ1bmNhdGVkIjpmYWxzZSwic3Rkb3V0X2J5dGVzIjowLCJzdGRvdXRfaW5saW5lIjoiIiwic3Rkb3V0X3RydW5jYXRlZCI6ZmFsc2V9",
+    "sha256:7549a79728a05c17a6e7cf1f3490c9dc900867428a22094df7e043be4a47e13c": "ICAgIEZpbmlzaGVkIGB0ZXN0YCBwcm9maWxlIFt1bm9wdGltaXplZCArIGRlYnVnaW5mb10gdGFyZ2V0KHMpIGluIDEuNDdzCiAgRXhlY3V0YWJsZSB0ZXN0cy9jbGkucnMgKHRhcmdldC9kZWJ1Zy9idWlsZC9mbG90LWNsaS83ZWMxOTdkMDU5MmQ1ZTk1L291dC9jbGktN2VjMTk3ZDA1OTJkNWU5NSkKICBFeGVjdXRhYmxlIHRlc3RzL2d1YXJkX2NvcnB1cy5ycyAodGFyZ2V0L2RlYnVnL2J1aWxkL2Zsb3QtY2xpLzAyNzYwMzA2YWJmMmRkM2Mvb3V0L2d1YXJkX2NvcnB1cy0wMjc2MDMwNmFiZjJkZDNjKQo=",
+    "sha256:8c3faffce6e542ef23fdd9f5f2ff2d9bcc32fff138f52767988964b3f134e03b": "eyJkdXJhdGlvbl9tcyI6MTUxMCwiaG9zdF9vcyI6ImxpbnV4IiwibWV0cmljcyI6bnVsbCwibWV0cmljc19ub3RlcyI6W10sInN0YXJ0ZWRfYXRfbXMiOjE3OTU3Nzc1OTgwMTEsInN0ZGVycl9ieXRlcyI6Mjg3LCJzdGRlcnJfaW5saW5lIjoiICAgIEZpbmlzaGVkIGB0ZXN0YCBwcm9maWxlIFt1bm9wdGltaXplZCArIGRlYnVnaW5mb10gdGFyZ2V0KHMpIGluIDEuNDdzXG4gIEV4ZWN1dGFibGUgdGVzdHMvY2xpLnJzICh0YXJnZXQvZGVidWcvYnVpbGQvZmxvdC1jbGkvN2VjMTk3ZDA1OTJkNWU5NS9vdXQvY2xpLTdlYzE5N2QwNTkyZDVlOTUpXG4gIEV4ZWN1dGFibGUgdGVzdHMvZ3VhcmRfY29ycHVzLnJzICh0YXJnZXQvZGVidWcvYnVpbGQvZmxvdC1jbGkvMDI3NjAzMDZhYmYyZGQzYy9vdXQvZ3VhcmRfY29ycHVzLTAyNzYwMzA2YWJmMmRkM2MpXG4iLCJzdGRlcnJfdHJ1bmNhdGVkIjpmYWxzZSwic3Rkb3V0X2J5dGVzIjowLCJzdGRvdXRfaW5saW5lIjoiIiwic3Rkb3V0X3RydW5jYXRlZCI6ZmFsc2V9",
+    "sha256:8e3cf6a5cb929dd8c865974e817d5c1fcb67490de53582a0f1caeda51ae14c90": "ICAgIEZpbmlzaGVkIGB0ZXN0YCBwcm9maWxlIFt1bm9wdGltaXplZCArIGRlYnVnaW5mb10gdGFyZ2V0KHMpIGluIDEuNDhzCiAgRXhlY3V0YWJsZSB1bml0dGVzdHMgc3JjL2xpYi5ycyAodGFyZ2V0L2RlYnVnL2J1aWxkL2Zsb3QtY2xpL2U2NjhkOTM1NjIyNmI4MTgvb3V0L2Zsb3QtZTY2OGQ5MzU2MjI2YjgxOCkKICBFeGVjdXRhYmxlIHVuaXR0ZXN0cyBzcmMvbWFpbi5ycyAodGFyZ2V0L2RlYnVnL2J1aWxkL2Zsb3QtY2xpLzFmYzM5YWY3M2U2ZjViZWIvb3V0L2Zsb3QtMWZjMzlhZjczZTZmNWJlYikK",
+    "sha256:9b91bee0be90e925eb29dad91902a4cffa2dc2d25ccc96a1d12ccf1288b2f3ca": "ICAgIEZpbmlzaGVkIGB0ZXN0YCBwcm9maWxlIFt1bm9wdGltaXplZCArIGRlYnVnaW5mb10gdGFyZ2V0KHMpIGluIDEuNDlzCiAgRXhlY3V0YWJsZSB0ZXN0cy9hcmNoaXRlY3R1cmUucnMgKHRhcmdldC9kZWJ1Zy9idWlsZC9mbG90LWNsaS85MGU3OTUyNmRlZjM4MmU2L291dC9hcmNoaXRlY3R1cmUtOTBlNzk1MjZkZWYzODJlNikKICBFeGVjdXRhYmxlIHRlc3RzL3JlYWRtZS5ycyAodGFyZ2V0L2RlYnVnL2J1aWxkL2Zsb3QtY2xpLzhhY2E5YWIxNjI0YzhlNDgvb3V0L3JlYWRtZS04YWNhOWFiMTYyNGM4ZTQ4KQo=",
+    "sha256:abdfa3f50aed195d990928351344108553e0576a46aca261bac1e50446a107d8": "CnJ1bm5pbmcgMjc5IHRlc3RzCi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLiA4Ny8yNzkKLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uIDE3NC8yNzkKLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uLi4uIDI2MS8yNzkKLi4uLi4uLi4uLi4uLi4uLi4uCnRlc3QgcmVzdWx0OiBvay4gMjc5IHBhc3NlZDsgMCBmYWlsZWQ7IDAgaWdub3JlZDsgMCBtZWFzdXJlZDsgMCBmaWx0ZXJlZCBvdXQ7IGZpbmlzaGVkIGluIDEuNjNzCgoKcnVubmluZyAwIHRlc3RzCgp0ZXN0IHJlc3VsdDogb2suIDAgcGFzc2VkOyAwIGZhaWxlZDsgMCBpZ25vcmVkOyAwIG1lYXN1cmVkOyAwIGZpbHRlcmVkIG91dDsgZmluaXNoZWQgaW4gMC4wMHMKCgpydW5uaW5nIDAgdGVzdHMKCnRlc3QgcmVzdWx0OiBvay4gMCBwYXNzZWQ7IDAgZmFpbGVkOyAwIGlnbm9yZWQ7IDAgbWVhc3VyZWQ7IDAgZmlsdGVyZWQgb3V0OyBmaW5pc2hlZCBpbiAwLjAwcwoK",
+    "sha256:c7048746a3f77a944968f5ad8605470257a2b4d5452e5c859559905b0b972b44": "ICAgIEZpbmlzaGVkIGBkZXZgIHByb2ZpbGUgW3Vub3B0aW1pemVkICsgZGVidWdpbmZvXSB0YXJnZXQocykgaW4gMS40MnMK",
+    "sha256:c945e7dc4ca260791c741843a563a2b97995c9c57c5ccf033eb69f12070870ef": "ICAgIEZpbmlzaGVkIGBkZXZgIHByb2ZpbGUgW3Vub3B0aW1pemVkICsgZGVidWdpbmZvXSB0YXJnZXQocykgaW4gMS41NHMK",
+    "sha256:d23c146a3b1623ba9134191b718610dcdc7357abed92ade727f0d1c4635b1afb": "eyJkdXJhdGlvbl9tcyI6MTYwMSwiaG9zdF9vcyI6ImxpbnV4IiwibWV0cmljcyI6bnVsbCwibWV0cmljc19ub3RlcyI6W10sInN0YXJ0ZWRfYXRfbXMiOjE3OTU3Nzc1OTQ0OTAsInN0ZGVycl9ieXRlcyI6NzIsInN0ZGVycl9pbmxpbmUiOiIgICAgRmluaXNoZWQgYGRldmAgcHJvZmlsZSBbdW5vcHRpbWl6ZWQgKyBkZWJ1Z2luZm9dIHRhcmdldChzKSBpbiAxLjU0c1xuIiwic3RkZXJyX3RydW5jYXRlZCI6ZmFsc2UsInN0ZG91dF9ieXRlcyI6MCwic3Rkb3V0X2lubGluZSI6IiIsInN0ZG91dF90cnVuY2F0ZWQiOmZhbHNlfQ==",
+    "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855": "",
+    "sha256:ec86da87da6e979a6510dbc9b8b3032f25c86b2684514eef4bf10d1a8e0efcc4": "CnJ1bm5pbmcgOCB0ZXN0cwouLi4uLi4uLgp0ZXN0IHJlc3VsdDogb2suIDggcGFzc2VkOyAwIGZhaWxlZDsgMCBpZ25vcmVkOyAwIG1lYXN1cmVkOyAwIGZpbHRlcmVkIG91dDsgZmluaXNoZWQgaW4gMC4wOXMKCgpydW5uaW5nIDYgdGVzdHMKLi4uLi4uCnRlc3QgcmVzdWx0OiBvay4gNiBwYXNzZWQ7IDAgZmFpbGVkOyAwIGlnbm9yZWQ7IDAgbWVhc3VyZWQ7IDAgZmlsdGVyZWQgb3V0OyBmaW5pc2hlZCBpbiAwLjAxcwoK",
+    "sha256:fc7d44f4666a56536388c844f4b2612f7315760effb50b085845bdc1b0fc2fea": "eyJkdXJhdGlvbl9tcyI6MTUyMiwiaG9zdF9vcyI6ImxpbnV4IiwibWV0cmljcyI6bnVsbCwibWV0cmljc19ub3RlcyI6W10sInN0YXJ0ZWRfYXRfbXMiOjE3OTU3Nzc2MTI1NDEsInN0ZGVycl9ieXRlcyI6Mjg4LCJzdGRlcnJfaW5saW5lIjoiICAgIEZpbmlzaGVkIGB0ZXN0YCBwcm9maWxlIFt1bm9wdGltaXplZCArIGRlYnVnaW5mb10gdGFyZ2V0KHMpIGluIDEuNDhzXG4gIEV4ZWN1dGFibGUgdW5pdHRlc3RzIHNyYy9saWIucnMgKHRhcmdldC9kZWJ1Zy9idWlsZC9mbG90LWNsaS9lNjY4ZDkzNTYyMjZiODE4L291dC9mbG90LWU2NjhkOTM1NjIyNmI4MTgpXG4gIEV4ZWN1dGFibGUgdW5pdHRlc3RzIHNyYy9tYWluLnJzICh0YXJnZXQvZGVidWcvYnVpbGQvZmxvdC1jbGkvMWZjMzlhZjczZTZmNWJlYi9vdXQvZmxvdC0xZmMzOWFmNzNlNmY1YmViKVxuIiwic3RkZXJyX3RydW5jYXRlZCI6ZmFsc2UsInN0ZG91dF9ieXRlcyI6MCwic3Rkb3V0X2lubGluZSI6IiIsInN0ZG91dF90cnVuY2F0ZWQiOmZhbHNlfQ=="
+  },
+  "attestations": [
+    {
+      "key": "ed25519:3a9f3136fc4fc8b7d3d96d45cf987653063fbf0ca394dcc75cac2424da9097c9",
+      "manifest_digest": "sha256:0b6b2df8d70333473ae372f6ab27effad99ea39b9cf2a0d20ea559874b9a8eea",
+      "signature": "59c2c052b94d44b5be1b7e3f273975bf756f87b8d0e638fbf36e45c1bbfedb39f4b9613a43c1de3d20ed0f7c5a0e5ed3e58b02287306de9842e5c6d1b565db04"
+    }
+  ]
+}

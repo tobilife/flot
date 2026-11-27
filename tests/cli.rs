@@ -1873,6 +1873,19 @@ fn a_restored_output_keeps_its_executable_bit() {
         .status()
         .unwrap()
         .success());
+    // Left as the step left it, the output answers the receipt; with its
+    // bit taken away, it does not.
+    project
+        .flot(&["run"])
+        .ok()
+        .has("cached   s")
+        .lacks("changed since its receipt");
+    use std::os::unix::fs::PermissionsExt;
+    let tool = project.path().join("tool.sh");
+    std::fs::set_permissions(&tool, std::fs::Permissions::from_mode(0o644)).unwrap();
+    project
+        .flot(&["run"])
+        .has("output tool.sh changed since its receipt");
 }
 
 #[test]
@@ -2688,7 +2701,10 @@ run = "true"
     let run = project.flot(&["run"]);
     assert_eq!(run.code, 1, "stderr:\n{}", run.stderr);
     let id = run_id(&project);
-    run.has(&format!("    proof output: flot log check --proof {id}"));
+    // Only a step with a refuted claim is pointed at its proof's output.
+    run.has(&format!("    proof output: flot log check --proof {id}"))
+        .lacks("flot log later --proof")
+        .lacks("flot log bare --proof");
     let proof = project.flot(&["log", "check", "--proof"]);
     proof.ok().has("expected 3\n").has("got 2\n").lacks("built");
     project
@@ -2698,7 +2714,9 @@ run = "true"
         .lacks("got 2");
     project
         .flot(&["show"])
-        .has(&format!("      proof output: flot log check --proof {id}"));
+        .has(&format!("      proof output: flot log check --proof {id}"))
+        .lacks("flot log later --proof")
+        .lacks("flot log bare --proof");
     let unrun = project.flot(&["log", "later", "--proof"]);
     assert_eq!(unrun.code, 3, "stderr:\n{}", unrun.stderr);
     assert!(unrun.stdout.is_empty(), "{}", unrun.stdout);

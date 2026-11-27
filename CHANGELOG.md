@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Building flot needs Rust 1.89 (it was 1.88): the store and the copies'
+  build are locked with the standard library's file locks instead of calls
+  to the system through `unsafe` code.
+
 - Proofs on copies of the work, for `fails_before` or `held`, build Rust in
   one directory, `.flot/builds/copies`, held by one proof at a time, instead
   of one per step, and without debug info or incremental compilation unless

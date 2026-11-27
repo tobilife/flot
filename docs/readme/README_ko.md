@@ -12,7 +12,7 @@
 
 [![CI](https://img.shields.io/github/actions/workflow/status/tobilife/flot/ci.yml?branch=main&style=flat-square&logo=github&label=ci)](https://github.com/tobilife/flot/actions/workflows/ci.yml)
 [![MIT license](https://img.shields.io/badge/license-MIT-f4c430?style=flat-square)](../../LICENSE)
-[![Rust 1.88+](https://img.shields.io/badge/rust-1.88%2B-dea584?style=flat-square&logo=rust)](../../Cargo.toml)
+[![Rust 1.89+](https://img.shields.io/badge/rust-1.89%2B-dea584?style=flat-square&logo=rust)](../../Cargo.toml)
 [![Linux | macOS | Windows](https://img.shields.io/badge/Linux%20%7C%20macOS%20%7C%20Windows-4493F8?style=flat-square)](../architecture.md#current-scope)
 [![MCP](https://img.shields.io/badge/MCP-stdio-8A2BE2?style=flat-square)](../mcp.md)
 
@@ -89,7 +89,7 @@
 
 ### 설치
 
-[Rust](https://rustup.rs) 1.88 이상이 필요합니다.
+[Rust](https://rustup.rs) 1.89 이상이 필요합니다.
 
 ```bash
 cargo install flot-cli

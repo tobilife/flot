@@ -192,7 +192,12 @@ impl Store {
     pub fn lock(&self, exclusive: bool) -> Result<StoreLock> {
         self.ensure()?;
         let file = open_lock(&self.root.join("lock"))?;
-        match lock_file(&file, exclusive, !exclusive) {
+        let locked = if exclusive {
+            try_lock(&file)
+        } else {
+            file.lock_shared().map(|()| true)
+        };
+        match locked {
             Ok(true) => Ok(StoreLock { _file: file }),
             Ok(false) => Err(fault::environment(
                 "the store is in use by a running flot; try again when it finishes",
@@ -208,7 +213,7 @@ impl Store {
         let root = self.root.join(BUILDS);
         fs::create_dir_all(&root).with_context(|| format!("cannot create {}", root.display()))?;
         let file = open_lock(&root.join("lock"))?;
-        while !lock_file(&file, true, false).context("cannot lock the copies' build")? {
+        while !try_lock(&file).context("cannot lock the copies' build")? {
             if stopped() {
                 bail!("the run stopped while another proof built in a copy of the work");
             }
@@ -232,7 +237,7 @@ impl Store {
         let Ok(file) = open_lock(&root.join("lock")) else {
             return;
         };
-        if !matches!(lock_file(&file, true, false), Ok(true)) {
+        if !matches!(try_lock(&file), Ok(true)) {
             return;
         }
         let stale = file
@@ -907,67 +912,15 @@ fn open_lock(path: &Path) -> Result<fs::File> {
         .with_context(|| format!("cannot open {}", path.display()))
 }
 
-/// Lock all of `file`, exclusively or shared, until it is closed. Without
-/// `wait`, a lock another holder keeps is `Ok(false)` at once. Each open file
-/// is a holder of its own, also within one process.
-fn lock_file(file: &fs::File, exclusive: bool, wait: bool) -> std::io::Result<bool> {
-    #[cfg(unix)]
-    {
-        use std::os::unix::io::AsRawFd;
-        let mut operation = if exclusive {
-            libc::LOCK_EX
-        } else {
-            libc::LOCK_SH
-        };
-        if !wait {
-            operation |= libc::LOCK_NB;
-        }
-        if unsafe { libc::flock(file.as_raw_fd(), operation) } != 0 {
-            let error = std::io::Error::last_os_error();
-            if error.kind() == std::io::ErrorKind::WouldBlock {
-                return Ok(false);
-            }
-            return Err(error);
-        }
+/// Lock all of `file` exclusively until it is closed, or `Ok(false)` at once
+/// when another holder keeps a lock on it. Each open file is a holder of its
+/// own, also within one process.
+fn try_lock(file: &fs::File) -> std::io::Result<bool> {
+    match file.try_lock() {
+        Ok(()) => Ok(true),
+        Err(fs::TryLockError::WouldBlock) => Ok(false),
+        Err(fs::TryLockError::Error(error)) => Err(error),
     }
-    #[cfg(windows)]
-    {
-        use std::os::windows::io::AsRawHandle;
-        use windows_sys::Win32::Foundation::{ERROR_LOCK_VIOLATION, HANDLE};
-        use windows_sys::Win32::Storage::FileSystem::{
-            LockFileEx, LOCKFILE_EXCLUSIVE_LOCK, LOCKFILE_FAIL_IMMEDIATELY,
-        };
-        let mut flags = if exclusive {
-            LOCKFILE_EXCLUSIVE_LOCK
-        } else {
-            0
-        };
-        if !wait {
-            flags |= LOCKFILE_FAIL_IMMEDIATELY;
-        }
-        let mut overlapped = unsafe { std::mem::zeroed() };
-        // The whole file; the lock goes when the handle closes.
-        let locked = unsafe {
-            LockFileEx(
-                file.as_raw_handle() as HANDLE,
-                flags,
-                0,
-                u32::MAX,
-                u32::MAX,
-                &mut overlapped,
-            )
-        };
-        if locked == 0 {
-            let error = std::io::Error::last_os_error();
-            if error.raw_os_error() == Some(ERROR_LOCK_VIOLATION as i32) {
-                return Ok(false);
-            }
-            return Err(error);
-        }
-    }
-    #[cfg(not(any(unix, windows)))]
-    let _ = (file, exclusive, wait);
-    Ok(true)
 }
 
 fn write_atomic(path: &Path, data: &[u8]) -> Result<()> {
@@ -1161,6 +1114,23 @@ mod tests {
         tampered.identity.status = StepStatus::Failed;
         let err = store.put_receipt(&tampered).unwrap_err();
         assert!(err.to_string().contains("does not match its body"), "{err}");
+    }
+
+    #[test]
+    fn runs_write_to_the_store_side_by_side() {
+        let (_dir, store) = store();
+        let first = store.lock(false).unwrap();
+        let (sender, receiver) = std::sync::mpsc::channel();
+        std::thread::scope(|scope| {
+            scope.spawn(|| sender.send(store.lock(false).map(drop)).unwrap());
+            let second = receiver.recv_timeout(std::time::Duration::from_secs(10));
+            // Let a second run that waited go, so the scope can end.
+            drop(first);
+            assert!(
+                matches!(second, Ok(Ok(()))),
+                "a second run waited for the first"
+            );
+        });
     }
 
     #[test]

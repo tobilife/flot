@@ -78,9 +78,9 @@ jobs:
     runs-on: ubuntu-latest
     env:
       # Over rust-toolchain.toml, which pins the toolchain the gate uses.
-      RUSTUP_TOOLCHAIN: "1.88"
+      RUSTUP_TOOLCHAIN: "1.89"
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.88
+      - uses: dtolnay/rust-toolchain@1.89
       - uses: Swatinem/rust-cache@v2
       - run: cargo check --locked --all-targets

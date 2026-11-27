@@ -2,7 +2,7 @@
 name = "flot-cli"
 version = "0.2.11"
 edition = "2021"
-rust-version = "1.88"
+rust-version = "1.89"
 description = "Verifiable agent flow runtime: every step emits a content-addressed receipt, every claim is bound to evidence."
 license = "MIT"
 repository = "https://github.com/tobilife/flot"
@@ -38,7 +38,7 @@ toml = "0.8"
 libc = "0.2"
 
 [target."cfg(windows)".dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_IO", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_System_Diagnostics_ToolHelp", "Win32_System_Console"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_System_Diagnostics_ToolHelp", "Win32_System_Console"] }
 
 [dev-dependencies]
 tempfile = "3"

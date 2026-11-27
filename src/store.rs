@@ -258,18 +258,20 @@ impl Store {
 
     /// Remove builds no proof will use: those of another layout, and the
     /// copy and its build once no proof has used them for [`BUILDS_KEPT`].
-    /// Nothing is removed while a proof holds them. What cannot be removed now
-    /// is tried again next time.
-    pub fn prune_builds(&self) {
+    /// Nothing is removed while a proof holds them, or anything else holds
+    /// their lock, such as a process another thread is starting, which has
+    /// the lock's file open until it runs its program; `false` then. What
+    /// cannot be removed now is tried again next time.
+    pub fn prune_builds(&self) -> bool {
         let root = self.root.join(BUILDS);
         let Ok(entries) = fs::read_dir(&root) else {
-            return;
+            return true;
         };
         let Ok(file) = open_lock(&root.join("lock")) else {
-            return;
+            return true;
         };
         if !matches!(try_lock(&file), Ok(true)) {
-            return;
+            return false;
         }
         let stale = file
             .metadata()
@@ -288,6 +290,7 @@ impl Store {
                 fs::remove_file(&path)
             };
         }
+        true
     }
 
     pub fn root(&self) -> &Path {
@@ -1216,10 +1219,21 @@ mod tests {
             }
         }
         fs::create_dir_all(builds.join("cli/debug")).unwrap();
+        // A process another test starts holds the lock until it runs its
+        // program.
+        let prune = || {
+            for _ in 0..100 {
+                if store.prune_builds() {
+                    return;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+            panic!("the lock stayed held");
+        };
 
         // Another layout's build goes at once; one used last week stays.
         used(6);
-        store.prune_builds();
+        prune();
         assert!(!builds.join("cli").exists());
         all_there(true);
 
@@ -1227,15 +1241,15 @@ mod tests {
         used(8);
         let held = store.builds(&|| false).unwrap();
         used(8);
-        store.prune_builds();
+        assert!(!store.prune_builds());
         all_there(true);
         drop(held);
 
         // Released, it was used just now.
-        store.prune_builds();
+        prune();
         all_there(true);
         used(8);
-        store.prune_builds();
+        prune();
         all_there(false);
         assert!(builds.join("lock").exists());
     }

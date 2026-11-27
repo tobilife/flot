@@ -3968,7 +3968,7 @@ fn a_proof_that_passes_only_with_tests_the_work_changed_proves_nothing() {
     weakened.write("flot.toml", &shared);
     weakened.write(
         "tests/a-target.sh",
-        "echo \"builds in $CARGO_TARGET_DIR and $CARGO_BUILD_BUILD_DIR\"\n",
+        "echo \"builds in $CARGO_TARGET_DIR and $CARGO_BUILD_BUILD_DIR\" | tr '\\\\' /\n",
     );
     commit(weakened.path(), "show where cargo builds");
     weakened.write("tests/check.sh", "true\n");
@@ -3978,12 +3978,18 @@ fn a_proof_that_passes_only_with_tests_the_work_changed_proves_nothing() {
         .has(") has it: the work passes only the versions it changed")
         .has("the work passes only the versions it changed; read `flot log s --held`");
     let held = weakened.flot(&["log", "s", "--held"]);
-    let builds = weakened.path().join(".flot/builds/s");
-    held.ok().has("app.txt is not fixed").has(&format!(
-        "builds in {} and {}",
-        builds.display(),
-        builds.display()
-    ));
+    // The store's path as the platform spells it: /private/var on macOS, a
+    // short name on Windows.
+    held.ok()
+        .has("app.txt is not fixed")
+        .has("/.flot/builds/s and ");
+    assert!(
+        held.stdout
+            .lines()
+            .any(|line| line.starts_with("builds in ") && line.ends_with("/.flot/builds/s")),
+        "{}",
+        held.stdout
+    );
     weakened
         .flot(&["log", "s", "--proof"])
         .has("builds in /shared and /shared");

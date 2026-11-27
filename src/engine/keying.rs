@@ -392,13 +392,6 @@ fn scan_in<E>(
     keep: Keep<'_, E>,
 ) -> Result<Scan, E> {
     let mut scan = Scan::default();
-    // What a step reads is keyed as git records it where git does not trust
-    // the file system; what it produces keeps the bit it was written with,
-    // which reuse restores.
-    let recorded = match reach {
-        Reach::Tracked if modes => recorded_modes(origin.unwrap_or(root)),
-        _ => None,
-    };
     let copy = origin
         .filter(|_| reach == Reach::Tracked)
         .map(|origin| Arc::new(CopyIgnore::new(root, origin)));
@@ -437,6 +430,14 @@ fn scan_in<E>(
         }
         matches.push((pattern, matched));
     }
+    // What a step reads is keyed as git records it where git does not trust
+    // the file system; what it produces keeps the bit it was written with,
+    // which reuse restores. Asking git costs two processes, so only a scan
+    // that found files asks.
+    let recorded = match reach {
+        Reach::Tracked if modes && !unique.is_empty() => recorded_modes(origin.unwrap_or(root)),
+        _ => None,
+    };
     let read: Vec<std::io::Result<(String, bool)>> = match keep {
         Keep::Digest => digest_all(&unique),
         Keep::With(keep) => {

@@ -148,3 +148,33 @@ fn a_misspelled_key_is_refused_not_ignored() {
     let top = format!("{base}\n[steps]\nid = \"b\"\n");
     assert!(format!("{:#}", flow(&top).unwrap_err()).contains("steps"));
 }
+
+#[test]
+fn proofs_are_held_to_a_revision_git_could_name() {
+    let held = |rev: &str| {
+        flow(&format!("[flow]\nname = \"demo\"\nproofs_from = \"{rev}\"\n\n[[step]]\nid = \"a\"\nrun = \"true\"\n"))
+    };
+    assert!(held("origin/main").is_ok());
+    for rev in [" ", "-", "--output=x"] {
+        let error = held(rev).unwrap_err().to_string();
+        assert_eq!(
+            error, "flow.proofs_from must name a git revision",
+            "{rev:?}"
+        );
+    }
+}
+
+#[test]
+fn a_sandbox_writes_only_plain_paths_inside_the_root() {
+    let writing = |path: &str| {
+        flow(&format!("[flow]\nname = \"demo\"\n\n[[step]]\nid = \"a\"\nrun = \"true\"\nsandbox = {{ write = [\"{path}\"] }}\n"))
+    };
+    assert!(writing("out/report.txt").is_ok());
+    for path in ["../out", "out/*.txt", "/tmp/out"] {
+        let error = writing(path).unwrap_err().to_string();
+        assert!(
+            error.contains("must be a path inside the flow root, without wildcards"),
+            "{path}: {error}"
+        );
+    }
+}

@@ -201,6 +201,8 @@ budget = { timeout_secs = 9, max_inline_bytes = 16 }
     let a = flow.resolved_budget(flow.step("a").unwrap());
     assert_eq!(a.timeout_secs, 5);
     assert_eq!(a.max_inline_bytes, DEFAULT_MAX_INLINE_BYTES);
+    // 256 MiB a stream, as docs/flows.md states.
+    assert_eq!(a.max_output_bytes, 268_435_456);
     let b = flow.resolved_budget(flow.step("b").unwrap());
     assert_eq!(b.timeout_secs, 9);
     assert_eq!(b.max_inline_bytes, 16);

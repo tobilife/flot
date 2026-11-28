@@ -20,7 +20,7 @@
 
 <code>cargo install flot-cli</code>
 
-Latest release **0.2.12**: `mutants` runs a mutation tester (StrykerJS, cargo-mutants) once a proof passes and verifies only if every mutant is caught or allowed by a person, so tests that pass whatever the code does prove nothing; proofs on a copy of the work keep their copy and rewrite only what changed; building flot needs Rust 1.89 · [changelog](CHANGELOG.md)
+Latest release **0.2.13**: `flot verify` and the GitHub action say when only the change to the proofs keeps a run from passing, so a pull request that changes a proof reads apart from work that fails; the job stays red for a person to review · [changelog](CHANGELOG.md)
 
 </div>
 

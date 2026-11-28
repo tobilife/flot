@@ -20,7 +20,7 @@
 
 <code>cargo install flot-cli</code>
 
-최신 릴리스 **0.2.12**: `mutants`는 증명이 통과하면 mutation 테스트 도구(StrykerJS, cargo-mutants)를 돌려, 모든 mutant가 잡히거나 사람이 허용했을 때만 verified로 하므로 코드가 어떻게 바뀌어도 통과하는 테스트는 아무것도 증명하지 못합니다. 작업 복사본에서 도는 증명은 복사본을 유지하고 바뀐 파일만 다시 씁니다. flot을 빌드하려면 Rust 1.89가 필요합니다 · [변경 기록](../../CHANGELOG.md)
+최신 릴리스 **0.2.13**: 증명의 변경만이 실행의 통과를 막고 있을 때 `flot verify`와 GitHub 액션이 그렇다고 알려, 증명을 바꾼 pull request가 실패한 작업과 구분됩니다. job은 사람이 검토하도록 빨간색으로 남습니다 · [변경 기록](../../CHANGELOG.md)
 
 </div>
 

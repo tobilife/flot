@@ -1,6 +1,11 @@
 # Changelog
 
-## Unreleased
+## 0.2.13
+
+A pull request that changes a proof says so: `flot verify` and the GitHub
+action name the case where only the change to the proofs keeps a run from
+passing, and the job stays red for a person to review. Found by using flot
+on itself.
 
 - `flot verify` says `only the proofs differ` (`only_proofs_differ` in
   `--json`) when the change to the proofs is all that keeps a run from

@@ -20,7 +20,7 @@
 
 <code>cargo install flot-cli</code>
 
-最新版本 **0.2.12**：`mutants` 在证明通过后运行变异测试工具（StrykerJS、cargo-mutants），只有每个变异体都被捕获或由人允许时才算 verified，因此无论代码怎么改都能通过的测试什么也证明不了；在工作副本上运行的证明保留副本，只重写改动的文件；构建 flot 需要 Rust 1.89 · [更新日志](../../CHANGELOG.md)
+最新版本 **0.2.13**：当只有证明的改动挡住运行通过时，`flot verify` 和 GitHub action 会说明这一点，因此修改证明的 pull request 能与失败的工作区分开；job 仍保持红色，留给人审查 · [更新日志](../../CHANGELOG.md)
 
 </div>
 

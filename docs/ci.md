@@ -50,12 +50,13 @@ A pull request that changes a proof, such as a step's `verify` command, its
 `held` files or a new step with claims, fails the job by design: the proofs
 are not as on the base branch, and no run can prove the change is sound. The
 failed job's annotation, which the pull request's checks show, says which
-failure it is. When nothing else keeps the run from passing, it reads (from
-a run on this repository whose `cli` step was given `held` files):
+failure it is. When nothing else keeps the run from passing, it reads, as on
+[#54](https://github.com/tobilife/flot/pull/54), which gave this repository's
+`cli` step `held` files and changed its `mutants` step:
 
 ```text
-flot: only the proofs differ from base (4db62ec069a1)
-No step failed, and every claim left unverified is one of a step whose proof changed. A person reviews that change, which no run proves: cli: its held files differ
+flot: only the proofs differ from origin/main (917f50deeb8a)
+No step failed, and every claim left unverified is one of a step whose proof changed. A person reviews that change, which no run proves: cli: its held files differ; mutants: its mutants differ
 ```
 
 and the report's headline is `flot: unverified, only the proofs differ from

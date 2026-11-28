@@ -48,6 +48,40 @@ fn a_failed_receipt_is_never_a_cache_hit() {
 }
 
 #[test]
+fn cache_misses_when_the_receipt_was_tampered_with() {
+    let (_dir, store) = store();
+    let key = digest::bytes(b"step-key");
+    let mut receipt = receipt(&key, b"out");
+    store.put_bytes(b"out").unwrap();
+    store.put_bytes(b"").unwrap();
+    store.put_receipt(&receipt).unwrap();
+    store.remember(&key, &receipt.receipt_id, &[]).unwrap();
+    assert!(store.recall(&key).unwrap().is_some());
+
+    // Another body under the same id: it still loads, but is not that receipt.
+    receipt.identity.command = "echo forged".into();
+    fs::write(
+        store.receipt_path(&receipt.receipt_id).unwrap(),
+        serde_json::to_string_pretty(&receipt).unwrap(),
+    )
+    .unwrap();
+    assert!(store.load_receipt(&receipt.receipt_id).is_ok());
+    assert!(store.recall(&key).unwrap().is_none());
+}
+
+#[test]
+fn cache_misses_when_the_entry_names_another_steps_receipt() {
+    let (_dir, store) = store();
+    let key = digest::bytes(b"step-key");
+    let other = receipt(&digest::bytes(b"other-step-key"), b"out");
+    store.put_bytes(b"out").unwrap();
+    store.put_bytes(b"").unwrap();
+    store.put_receipt(&other).unwrap();
+    store.remember(&key, &other.receipt_id, &[]).unwrap();
+    assert!(store.recall(&key).unwrap().is_none());
+}
+
+#[test]
 fn cache_misses_on_an_unknown_key() {
     let (_dir, store) = store();
     assert!(store

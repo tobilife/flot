@@ -107,7 +107,7 @@ impl Store {
         let stale = file
             .metadata()
             .and_then(|meta| meta.modified())
-            .is_ok_and(|used| used.elapsed().is_ok_and(|age| age > BUILDS_KEPT));
+            .is_ok_and(|used| used.elapsed().is_ok_and(outlived));
         for entry in entries.flatten() {
             let name = entry.file_name();
             let kept = ["target", "work", "work.json", "fence"];
@@ -123,6 +123,11 @@ impl Store {
         }
         true
     }
+}
+
+/// Whether builds unused for `age` are no longer kept.
+fn outlived(age: std::time::Duration) -> bool {
+    age > BUILDS_KEPT
 }
 
 #[cfg(test)]

@@ -114,3 +114,12 @@ fn a_file_written_in_the_copy_is_newer_than_the_last_build() {
     let stamp = store.builds(&|| false).unwrap().stamp();
     assert!(stamp >= before && stamp < before + std::time::Duration::from_secs(2));
 }
+
+#[test]
+fn builds_are_kept_for_seven_days_and_no_longer() {
+    let day = std::time::Duration::from_secs(24 * 60 * 60);
+    assert!(!super::outlived(7 * day));
+    assert!(super::outlived(
+        7 * day + std::time::Duration::from_nanos(1)
+    ));
+}

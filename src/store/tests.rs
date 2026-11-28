@@ -5,9 +5,13 @@ use std::collections::BTreeMap;
 
 use super::{HostSecret, Store, STORE_DIR};
 use crate::core::digest;
-use crate::core::receipt::{Observed, Receipt, ReceiptIdentity, StepStatus, ToolIdentity};
+use crate::core::metrics::Spend;
+use crate::core::receipt::{
+    ClaimCounts, Observed, Receipt, ReceiptIdentity, RunManifest, RunStep, StepStatus,
+    ToolIdentity, Verdict,
+};
 
-fn test_host() -> HostSecret {
+pub(super) fn test_host() -> HostSecret {
     HostSecret::from_bytes([7; 32])
 }
 
@@ -65,6 +69,40 @@ pub(super) fn receipt(step_key: &str, stdout: &[u8]) -> Receipt {
         },
         Observed::default(),
     )
+}
+
+/// A run, started at `started_at_ms`, of one step that `receipt` answers
+/// for, with this run's observation of it stored as `observed_digest`.
+pub(super) fn run(started_at_ms: u64, receipt: &Receipt, observed_digest: &str) -> RunManifest {
+    let root_digest = RunManifest::root_of(&[("a".into(), receipt.receipt_id.clone())]);
+    RunManifest {
+        run_id: RunManifest::id_for(started_at_ms, &root_digest),
+        flow: "demo".into(),
+        flow_digest: digest::bytes(b"flow"),
+        root_digest,
+        verdict: Verdict::Passed,
+        partial: None,
+        steps: vec![RunStep {
+            step_id: "a".into(),
+            receipt_id: receipt.receipt_id.clone(),
+            status: StepStatus::Ok,
+            cached: false,
+            claims: ClaimCounts::default(),
+            observed_digest: observed_digest.into(),
+            attempts: vec![],
+            candidates: vec![],
+            vouched_by: vec![],
+        }],
+        claims: ClaimCounts::default(),
+        limitations: vec![],
+        max_parallel: 1,
+        spend: Spend::default(),
+        max_cost_micro_usd: None,
+        started_at_ms,
+        duration_ms: 0,
+        flot_version: "test".into(),
+        refusals: vec![],
+    }
 }
 
 #[test]

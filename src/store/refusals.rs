@@ -54,3 +54,6 @@ impl Store {
         Ok(found)
     }
 }
+
+#[cfg(test)]
+mod tests;

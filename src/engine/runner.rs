@@ -19,6 +19,11 @@ mod run;
 
 pub use self::plan::PlanEntry;
 
+/// Why the claims of a step whose sandbox cannot be enforced here stay
+/// unverified: the step did not run, as one that asked to be confined runs
+/// confined or not at all.
+pub const UNCONFINED: &str = "step could not run in its sandbox";
+
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicU64;

@@ -3,6 +3,7 @@
 
 mod audit;
 mod detail;
+mod explain;
 mod markdown;
 mod records;
 mod run;
@@ -14,6 +15,7 @@ use serde::Serialize;
 
 pub(super) use audit::{render_audit, render_signed};
 pub(super) use detail::render_detail;
+pub(super) use explain::render_explanation;
 pub(super) use markdown::markdown_report;
 pub(super) use records::{render_diff, render_flaky, render_runs, render_search};
 pub(super) use run::{render_limitations, render_plan, render_run};

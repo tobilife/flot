@@ -5,6 +5,7 @@
 pub mod audit;
 pub mod bundle;
 pub mod doctor;
+pub mod explain;
 pub mod flaky;
 mod guard;
 mod init;

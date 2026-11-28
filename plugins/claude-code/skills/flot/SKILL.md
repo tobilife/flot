@@ -87,7 +87,8 @@ revision, the sandbox). In `flot verify`, `authorship: this host's key`
 
 ## Looking back
 
-`flot_runs` lists recorded runs, `flot_show` summarises one, `flot_diff`
+`flot_runs` lists recorded runs, `flot_show` summarises one,
+`flot_explain` says why one did not pass and what to read next, `flot_diff`
 names the steps that changed between two (by default the last two),
 `flot_search` finds what earlier runs printed, claimed or noted, and
 `flot_verify` re-authenticates a run from the store alone: read its `result`.

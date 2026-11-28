@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- `flot explain [RUN] [STEP]` and the MCP tool `flot_explain` say why a run
+  did not pass, at a glance: what keeps the run as a whole from passing
+  (evidence that does not authenticate, only some steps run, only the
+  proofs differ), and for each step that did not hold, each cause read from
+  its receipt (its command failed or timed out, it did not run, its sandbox
+  cannot be enforced here, its proof changed since `proofs_from`, no proof,
+  refuted, failing with its `held` files, passing before the change, or
+  mutants that survived), with the command that shows more: `flot log STEP
+  --mutants`, `flot verify`, `flot doctor`.
+
 ## 0.2.13
 
 A pull request that changes a proof says so: `flot verify` and the GitHub

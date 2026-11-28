@@ -274,6 +274,7 @@ impl<'a> Runner<'a> {
         };
         Some(ProofOutcome::Unanchored {
             baseline: baseline.label(),
+            commit: baseline.commit.clone(),
             reasons,
             claims,
         })

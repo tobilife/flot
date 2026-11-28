@@ -8,7 +8,7 @@
 
 use crate::core::flow::Step;
 use crate::core::mutants::Survivor;
-use crate::core::receipt::{Before, ClaimRecord, ClaimStatus, Held, Mutated, StepStatus};
+use crate::core::receipt::{Before, ClaimRecord, ClaimStatus, Differed, Held, Mutated, StepStatus};
 
 /// What running a proof command produced.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -37,6 +37,7 @@ pub enum ProofOutcome {
     /// that revision.
     Unanchored {
         baseline: String,
+        commit: String,
         reasons: Vec<String>,
         claims: Vec<String>,
     },
@@ -71,6 +72,7 @@ pub fn settle(
     // shows, as unproven.
     if let ProofOutcome::Unanchored {
         baseline,
+        commit,
         reasons,
         claims,
     } = &proof
@@ -92,6 +94,10 @@ pub fn settle(
                 before: None,
                 held: None,
                 mutants: None,
+                differed: Some(Differed {
+                    commit: commit.clone(),
+                    reasons: reasons.clone(),
+                }),
             })
             .collect();
     }
@@ -180,6 +186,7 @@ pub fn settle(
             before: None,
             held: None,
             mutants: None,
+            differed: None,
         })
         .collect()
 }
@@ -563,6 +570,7 @@ fn unverified(step: &Step, reason: &str) -> Vec<ClaimRecord> {
             before: None,
             held: None,
             mutants: None,
+            differed: None,
         })
         .collect()
 }

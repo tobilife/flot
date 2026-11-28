@@ -445,6 +445,7 @@ mod tests {
             before: None,
             held: None,
             mutants: None,
+            differed: None,
         }
     }
 

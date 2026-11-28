@@ -32,6 +32,9 @@ outputs:
   exit-code:
     description: The exit code of `flot verify`; 0 only when the run passed, its evidence is intact and its proofs are as at the revision.
     value: ${{ steps.check.outputs.exit-code }}
+  only-proofs-differ:
+    description: "`true` when no step failed and every claim left unverified is one of a step whose proof changed since the revision: the run waits only on a person's review of that change."
+    value: ${{ steps.check.outputs.only-proofs-differ }}
 
 runs:
   using: composite
@@ -117,9 +120,26 @@ runs:
         fi
         cat "$report" >> "$GITHUB_STEP_SUMMARY"
         verdict=$(flot --json show 2>/dev/null | jq -r '.verdict // empty' || true)
+        audit="$RUNNER_TEMP/flot-audit.json"
+        flot --json verify ${args[@]+"${args[@]}"} > "$audit" 2>/dev/null || true
+        only=$(jq -r '.only_proofs_differ // false' "$audit" 2>/dev/null || echo false)
         echo "verdict=${verdict}" >> "$GITHUB_OUTPUT"
         echo "exit-code=${code}" >> "$GITHUB_OUTPUT"
+        echo "only-proofs-differ=${only}" >> "$GITHUB_OUTPUT"
         echo "report=${report}" >> "$GITHUB_OUTPUT"
+        # The failed job's annotation, which the pull request shows, says
+        # which failure it is: the change to the proofs, which a person
+        # reviews, or one the work has to fix.
+        data() { local s=${1//%/%25}; s=${s//$'\r'/%0D}; printf '%s' "${s//$'\n'/%0A}"; }
+        property() { local s; s=$(data "$1"); s=${s//:/%3A}; printf '%s' "${s//,/%2C}"; }
+        if [ "$only" = true ]; then
+          baseline=$(jq -r '.anchor.baseline' "$audit")
+          changed=$(jq -r '[.anchor.drifted[] | "\(.step_id): \(.reasons | join(", "))"] + (if .anchor.missing == [] then [] else ["claims there that this run does not make: \(.anchor.missing | join(", "))"] end) | join("; ")' "$audit")
+          echo "::error title=$(property "flot: only the proofs differ from $baseline")::$(data "No step failed, and every claim left unverified is one of a step whose proof changed. A person reviews that change, which no run proves: $changed")"
+        elif [ "$code" != 0 ]; then
+          result=$(jq -r '.result // empty' "$audit" 2>/dev/null || true)
+          echo "::error title=$(property "flot: ${result:-no report}")::$(data "flot verify exited $code; the job summary has the report")"
+        fi
 
     - name: Comment on the pull request
       if: inputs.comment == 'true' && github.event.pull_request.number != ''

@@ -7,7 +7,7 @@ use crate::core::attest::{self, Authorship, Endorsements, SignerCheck, VouchedSt
 use crate::core::digest;
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::core::receipt::{Observed, Partial, Receipt, RunManifest, Verdict};
+use crate::core::receipt::{ClaimStatus, Observed, Partial, Receipt, RunManifest, Verdict};
 use crate::engine::baseline::Baseline;
 use crate::service::keys;
 use crate::store::Store;
@@ -77,6 +77,22 @@ fn result_of(
     }
 }
 
+/// Whether the change to the proofs is all that keeps a run from passing:
+/// no step failed, no claim was refuted, and every unverified claim is one
+/// of a step whose proof differs from the revision.
+fn only_proofs_differ(
+    intact: bool,
+    verdict: Verdict,
+    partial: Option<Partial>,
+    anchor: &Anchor,
+) -> bool {
+    intact
+        && verdict != Verdict::Failed
+        && partial.is_none()
+        && !anchor.holds()
+        && anchor.unverified.is_empty()
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct Audit {
     pub run_id: String,
@@ -104,6 +120,10 @@ pub struct Audit {
     /// How the run's proofs compare with a revision, when checked against one.
     #[serde(skip_serializing_if = "Option::is_none")]
     anchor: Option<Anchor>,
+    /// Set with the anchor: the run is intact, every step of the flow ran,
+    /// and only the change to the proofs since the revision keeps it from
+    /// passing. That change is for a person to judge; no run proves it.
+    only_proofs_differ: bool,
 }
 
 impl Audit {
@@ -115,9 +135,15 @@ impl Audit {
         self.anchor.as_ref()
     }
 
+    pub fn only_proofs_differ(&self) -> bool {
+        self.only_proofs_differ
+    }
+
     /// Hold the run's proofs to a revision; the result follows.
     pub fn hold_to(&mut self, anchor: Anchor) {
         self.result = result_of(self.intact, self.verdict, self.partial, Some(&anchor));
+        self.only_proofs_differ =
+            only_proofs_differ(self.intact, self.verdict, self.partial, &anchor);
         self.anchor = Some(anchor);
     }
 }
@@ -134,6 +160,9 @@ pub struct Anchor {
     /// Files that differ here from the revision and that no step of the run
     /// read, checked or produced: changes no claim speaks for.
     pub unread: Vec<String>,
+    /// Steps with an unverified claim whose proof is as at the revision: what
+    /// keeps the run from passing besides the change to the proofs.
+    pub unverified: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -153,6 +182,7 @@ impl Anchor {
 /// cannot be read is left to the integrity findings.
 pub fn anchor(store: &Store, manifest: &RunManifest, baseline: &Baseline) -> Result<Anchor> {
     let mut drifted = Vec::new();
+    let mut unverified = Vec::new();
     let mut read: BTreeSet<String> = BTreeSet::new();
     for step in &manifest.steps {
         let Ok(receipt) = store.load_receipt(&step.receipt_id) else {
@@ -167,11 +197,30 @@ pub fn anchor(store: &Store, manifest: &RunManifest, baseline: &Baseline) -> Res
         {
             read.insert(file.path.clone());
         }
+        // The run held the proof to this revision too, found it different,
+        // and so did not run it: a receipt records less than the flow did,
+        // such as the files it holds.
+        let differed = identity
+            .claims
+            .iter()
+            .find_map(|claim| claim.differed.as_ref())
+            .filter(|differed| differed.commit == baseline.commit);
         if let Some(drift) = baseline.drift_of(&receipt.identity)? {
             drifted.push(StepDrift {
                 step_id: step.step_id.clone(),
                 reasons: drift.reasons,
             });
+        } else if let Some(differed) = differed {
+            drifted.push(StepDrift {
+                step_id: step.step_id.clone(),
+                reasons: differed.reasons.clone(),
+            });
+        } else if identity
+            .claims
+            .iter()
+            .any(|claim| claim.status != ClaimStatus::Verified)
+        {
+            unverified.push(step.step_id.clone());
         }
     }
     let missing = baseline.missing_steps(|id| manifest.steps.iter().any(|step| step.step_id == id));
@@ -181,6 +230,7 @@ pub fn anchor(store: &Store, manifest: &RunManifest, baseline: &Baseline) -> Res
         drifted,
         missing,
         unread,
+        unverified,
     })
 }
 
@@ -280,6 +330,7 @@ pub fn audit(store: &Store, manifest: &RunManifest) -> Result<Audit> {
         signers,
         vouched: vouched(store, manifest)?,
         anchor: None,
+        only_proofs_differ: false,
     })
 }
 
@@ -323,6 +374,7 @@ mod tests {
             drifted: Vec::new(),
             missing: if holds { Vec::new() } else { vec!["b".into()] },
             unread: Vec::new(),
+            unverified: Vec::new(),
         }
     }
 
@@ -358,5 +410,33 @@ mod tests {
         }
         assert_eq!(Outcome::Partial.exit_code(), 2);
         assert_eq!(Outcome::Broken.exit_code(), 1);
+    }
+
+    #[test]
+    fn only_the_proofs_differ_when_nothing_else_keeps_the_run_from_passing() {
+        let some = Some(Partial { selected: 1, of: 2 });
+        let (holds, differs) = (anchor(true), anchor(false));
+        // A step whose proof is as at the revision left a claim unverified.
+        let elsewhere = Anchor {
+            unverified: vec!["a".into()],
+            ..anchor(false)
+        };
+        for (intact, verdict, partial, anchor, only) in [
+            (true, Verdict::Passed, None, &differs, true),
+            (true, Verdict::Unverified, None, &differs, true),
+            (true, Verdict::Passed, None, &holds, false),
+            (true, Verdict::Unverified, None, &holds, false),
+            (true, Verdict::Unverified, None, &elsewhere, false),
+            (true, Verdict::Passed, some, &differs, false),
+            (true, Verdict::Failed, None, &differs, false),
+            (false, Verdict::Passed, None, &differs, false),
+        ] {
+            assert_eq!(
+                only_proofs_differ(intact, verdict, partial, anchor),
+                only,
+                "{intact} {verdict:?} {partial:?} {:?}",
+                anchor.unverified
+            );
+        }
     }
 }

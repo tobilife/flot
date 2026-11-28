@@ -99,6 +99,20 @@ pub struct ClaimRecord {
     /// `mutants`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mutants: Option<Mutated>,
+    /// Why the proof was not run: it differed from the revision the run held
+    /// proofs to.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub differed: Option<Differed>,
+}
+
+/// A proof that differed from the revision a run held proofs to, which the
+/// run therefore did not run: the change to it is for a person to judge.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Differed {
+    /// The commit the revision named.
+    pub commit: String,
+    /// How the proof differed from it.
+    pub reasons: Vec<String>,
 }
 
 /// What a mutation tester run against a step's proof found.
@@ -691,6 +705,7 @@ mod tests {
             }),
             held: None,
             mutants: None,
+            differed: None,
             ..claim(ClaimStatus::Verified, Some("true"))
         });
         let receipt = Receipt::seal(body, Observed::default());
@@ -753,6 +768,7 @@ mod tests {
             before: None,
             held: None,
             mutants: None,
+            differed: None,
         }
     }
 
@@ -855,6 +871,7 @@ mod tests {
                     }),
                     held: None,
                     mutants: None,
+                    differed: None,
                 },
                 ClaimRecord {
                     text: "the docs say so".into(),
@@ -866,6 +883,7 @@ mod tests {
                     before: None,
                     held: None,
                     mutants: None,
+                    differed: None,
                 },
             ],
             limitations: vec!["step declares no inputs".into()],

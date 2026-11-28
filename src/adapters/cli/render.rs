@@ -447,6 +447,9 @@ pub(super) fn render_audit(audit: &Audit) {
                     anchor.missing.join(", ")
                 );
             }
+            if audit.only_proofs_differ() {
+                say!("only the proofs differ: {ONLY_PROOFS_DIFFER}");
+            }
         }
         if !anchor.unread.is_empty() {
             say!("changes no step read: {}", listed(&anchor.unread));
@@ -523,6 +526,11 @@ fn md(text: &str) -> String {
     out
 }
 
+/// What a run kept from passing only by the change to its proofs asks of the
+/// reader.
+const ONLY_PROOFS_DIFFER: &str = "no step failed, and every claim left unverified is one of a \
+    step whose proof changed; a person reviews that change, which no run proves";
+
 /// A run and the check `flot verify` made of it, for a pull request comment
 /// or a CI job summary.
 pub(super) fn markdown_report(audit: &Audit, detail: &RunDetail) -> String {
@@ -531,6 +539,12 @@ pub(super) fn markdown_report(audit: &Audit, detail: &RunDetail) -> String {
     // The same judgment as the exit code of `flot verify`.
     let headline = match (audit.result(), audit.anchor(), audit.partial) {
         (Outcome::Broken, _, _) => "evidence broken".to_string(),
+        (Outcome::Unverified, Some(anchor), _) if audit.only_proofs_differ() => {
+            format!(
+                "unverified, only the proofs differ from {}",
+                md(&anchor.baseline)
+            )
+        }
         (Outcome::Unverified, Some(anchor), _)
             if !anchor.holds() && manifest.verdict == Verdict::Passed =>
         {
@@ -553,6 +567,9 @@ pub(super) fn markdown_report(audit: &Audit, detail: &RunDetail) -> String {
         if detail.imported { ", imported" } else { "" },
         manifest.verdict.label()
     );
+    if audit.only_proofs_differ() {
+        let _ = writeln!(out, "Only the proofs differ: {}\n", md(ONLY_PROOFS_DIFFER));
+    }
     let _ = writeln!(
         out,
         "- Integrity: {}",

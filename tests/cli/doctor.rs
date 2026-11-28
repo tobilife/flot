@@ -76,6 +76,8 @@ fn doctor_names_what_weakens_the_evidence_and_changes_nothing() {
         .has("ok    flow            ")
         .has(": 1 step, 1 claim")
         .has("warn  proofs          proofs_from is not set")
+        // What this host can confine a step to is said before one asks.
+        .has("  sandbox         no step asks for one; ")
         .has("warn  store           git does not ignore .flot/")
         .has("note  signing key     none")
         .has("note  trust           no store yet")
@@ -128,14 +130,13 @@ fn doctor_names_what_weakens_the_evidence_and_changes_nothing() {
     assert!(
         report
             .stdout
-            .contains("ok    sandbox         inside, outside, offline: enforced by landlock")
+            .contains("ok    sandbox         inside, outside, offline: enforced; a step can go without network (network namespace); a step can write only where it may (landlock abi ")
             || report
                 .stdout
-                .contains("ok    sandbox         inside, outside, offline: enforced by seatbelt")
+                .contains("ok    sandbox         inside, outside, offline: enforced; a step can go without network (seatbelt network); a step can write only where it may (seatbelt file writes)")
             || (report.code == 1
-                && report.stdout.contains(
-                    "FAIL  sandbox         inside, outside, offline: cannot be enforced here"
-                )),
+                && report.stdout.contains("FAIL  sandbox         ")
+                && report.stdout.contains("a step that asked to be confined will not run")),
         "{}",
         report.stdout
     );

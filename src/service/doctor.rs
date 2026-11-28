@@ -10,11 +10,12 @@ use std::path::{Path, PathBuf};
 use serde::Serialize;
 
 use crate::engine::git::Git;
-use crate::engine::sandbox;
 use crate::service::{keys, Workspace};
 
+mod sandbox;
 mod settings;
 
+use sandbox::{sandbox_check, Support};
 use settings::agent_settings;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -195,38 +196,7 @@ impl Workspace {
             });
         }
 
-        if let Some(flow) = &flow {
-            let confined: Vec<&str> = flow
-                .steps
-                .iter()
-                .filter(|step| step.sandbox.is_some())
-                .map(|step| step.id.as_str())
-                .collect();
-            if !confined.is_empty() {
-                let steps = confined.join(", ");
-                // Write confinement needs more of the kernel than a step
-                // that only goes without network.
-                let write = flow.steps.iter().any(|step| {
-                    step.sandbox
-                        .as_ref()
-                        .is_some_and(|policy| policy.write.is_some())
-                });
-                checks.push(match sandbox::probe(&self.root, write) {
-                    Ok(mechanism) => check(
-                        "sandbox",
-                        Status::Ok,
-                        format!("{steps}: enforced by {mechanism}"),
-                    ),
-                    Err(error) => check(
-                        "sandbox",
-                        Status::Fail,
-                        format!(
-                            "{steps}: cannot be enforced here, so they will not run: {error:#}"
-                        ),
-                    ),
-                });
-            }
-        }
+        checks.push(sandbox_check(flow.as_ref(), &Support::here(&self.root)));
 
         let top = self
             .root

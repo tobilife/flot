@@ -186,20 +186,22 @@ impl Prepared {
     fn apply(&self, _command: &mut Command) {}
 }
 
-/// Whether a step without network, and when `write` is set confined to
-/// write only beneath `root`, can start here: the policy is prepared and a
-/// trivial child is confined with it. Returns the mechanism that would
-/// enforce it.
-pub fn probe(root: &Path, write: bool) -> Result<String> {
+/// Whether a step can be confined here as asked: without network unless
+/// `network`, and when `write` is set to writing only beneath `root`. The
+/// policy is prepared and a trivial child is confined with it. Returns the
+/// mechanism that would enforce it, or what this host lacks.
+pub fn probe(root: &Path, network: bool, write: bool) -> Result<String> {
+    use anyhow::Context;
     let root = [root.to_path_buf()];
-    let prepared = prepare(false, write.then_some(&root[..]), &[])?;
+    let prepared = prepare(network, write.then_some(&root[..]), &[])?;
     let status = prepared
         .command(Path::new("sh"))
         .args(["-c", "exit 0"])
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
-        .status()?;
+        .status()
+        .context("cannot start a confined child")?;
     anyhow::ensure!(status.success(), "a confined child exited with {status}");
     Ok(prepared.mechanism)
 }

@@ -81,10 +81,7 @@ impl Server {
                     only: text("only"),
                     force: flag("force"),
                     jobs: count("jobs"),
-                    max_cost_usd: match (asked, workspace.flow()?.meta.max_cost_usd) {
-                        (Some(asked), Some(ceiling)) => Some(asked.min(ceiling)),
-                        (asked, _) => asked,
-                    },
+                    max_cost_usd: capped(asked, workspace.flow()?.meta.max_cost_usd),
                     stop: stop.clone(),
                     // Not an argument: the agent calling the tool must not choose
                     // the revision its own proofs are checked against.
@@ -141,6 +138,16 @@ impl Server {
             other => unreachable!("`call` admits only catalog tools, not `{other}`"),
         };
         Ok((value, is_error))
+    }
+}
+
+/// The cost ceiling a run called through MCP gets: what the agent asked
+/// for, but never more than the flow's own ceiling. Asking for nothing
+/// leaves the flow's ceiling, which the run reads from the flow itself.
+pub(super) fn capped(asked: Option<f64>, ceiling: Option<f64>) -> Option<f64> {
+    match (asked, ceiling) {
+        (Some(asked), Some(ceiling)) => Some(asked.min(ceiling)),
+        (asked, _) => asked,
     }
 }
 

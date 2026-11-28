@@ -6,6 +6,7 @@ use crate::service::Workspace;
 
 use super::Server;
 
+mod anchoring;
 mod calls;
 mod catalog;
 mod protocol;

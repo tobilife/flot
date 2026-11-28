@@ -423,14 +423,10 @@ const LONG: &[(&str, usize)] = &[
     ("src/engine/sandbox.rs", 388),
     ("src/service/audit.rs", 442),
     ("src/service/bundle.rs", 1393),
-    ("src/service/doctor.rs", 302),
     ("src/service/guard/git.rs", 623),
     ("src/service/guard/judge.rs", 701),
     ("src/service/guard/rules.rs", 751),
-    ("src/service/keys.rs", 448),
-    ("src/service/mod.rs", 1039),
-    ("src/service/search.rs", 331),
-    ("tests/architecture.rs", 511),
+    ("tests/architecture.rs", 507),
     ("tests/guard_corpus.rs", 364),
 ];
 

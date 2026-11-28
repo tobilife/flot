@@ -8,33 +8,26 @@
 //! claims stay unverified and the proof is not run. `flot verify` holds a
 //! recorded run to the same revision.
 
-use std::collections::{BTreeMap, BTreeSet};
+mod changes;
+mod drift;
+#[cfg(test)]
+mod tests;
+
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use anyhow::{Context, Result};
 
 use crate::core::digest;
-use crate::core::flow::{Flow, Mutants, Step};
-use crate::core::receipt::{ClaimStatus, FileDigest, ReceiptIdentity};
+use crate::core::flow::Flow;
 use crate::engine::git::Git;
 use crate::engine::keying;
 
+pub use drift::Drift;
+
 /// Largest proof input read from the baseline revision.
 const MAX_FILE_BYTES: u64 = 64 << 20;
-
-/// Lists the files under the working directory git sees and does not track.
-const UNTRACKED: [&str; 4] = ["ls-files", "-z", "--others", "--exclude-standard"];
-
-/// The paths a git command lists, NUL-separated.
-fn listed(git: &Git, args: &[&str]) -> Result<Vec<String>> {
-    let bytes = git.output(args, None, false)?;
-    Ok(bytes
-        .split(|&byte| byte == 0)
-        .filter(|path| !path.is_empty())
-        .map(|path| String::from_utf8_lossy(path).into_owned())
-        .collect())
-}
 
 #[derive(Debug)]
 pub struct Baseline {
@@ -60,40 +53,6 @@ struct Blob {
     mode: String,
     /// Its git object id.
     id: String,
-}
-
-/// Why a step's proof does not match the baseline.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Drift {
-    pub reasons: Vec<String>,
-    /// Every claim the step makes here or made at the revision, so a claim
-    /// dropped from the flow still shows as unproven.
-    pub claims: Vec<String>,
-}
-
-/// What a proof is, wherever it is read from: a step of the flow being run,
-/// or a receipt a run recorded.
-struct Proof<'a> {
-    step_id: &'a str,
-    claims: Vec<&'a str>,
-    verify: Option<&'a str>,
-    /// `None` when the source does not record them, as a receipt does not.
-    patterns: Option<&'a [String]>,
-    files: &'a [FileDigest],
-    /// For a step, whether it declares `fails_before`.
-    fails_before: Option<bool>,
-    /// For a receipt, the commit its proof was run before the change at, if any.
-    checked_at: Option<&'a str>,
-    /// For a step, the files it holds to the revision.
-    held: Option<&'a [String]>,
-    /// For a receipt, the digest of the files its proof was held to, if any.
-    held_base: Option<&'a str>,
-    /// For a step, the mutants it tests its proof against, if any.
-    mutants: Option<Option<&'a Mutants>>,
-    /// For a receipt, the command that tested its proof against mutants.
-    mutated_by: Option<&'a str>,
-    /// Whether a claim was verified: only then does how it was matter.
-    verified: bool,
 }
 
 impl Baseline {
@@ -153,81 +112,6 @@ impl Baseline {
         })
     }
 
-    /// Files under the flow root that differ here from the revision (edited,
-    /// added or deleted, tracked or not ignored) and that `read` does not
-    /// hold, relative to the root. The flow file is left out; its proofs are
-    /// compared step by step. An untracked directory none of whose files was
-    /// read is named once, as `dir/`.
-    pub fn unread(&self, read: &BTreeSet<String>) -> Result<Vec<String>> {
-        let git = Git::open(&self.root)?;
-        let mut changed = self.edited(&git)?;
-        for path in listed(&git, &[&UNTRACKED[..], &["--directory"]].concat())? {
-            if path.ends_with('/') && read.iter().any(|file| file.starts_with(&path)) {
-                changed.extend(listed(&git, &[&UNTRACKED[..], &["--", &path]].concat())?);
-            } else {
-                changed.insert(path);
-            }
-        }
-        changed.remove(&self.flow_file);
-        Ok(changed
-            .into_iter()
-            .filter(|path| !read.contains(path))
-            .collect())
-    }
-
-    /// Undo, in `copy`, a copy of the flow root, every change under the flow
-    /// root here since the revision: an edited or deleted file gets its
-    /// content and mode at the revision back, a file the revision does not
-    /// have is removed. What git ignores is left as it is.
-    pub fn undo(&self, copy: &Path) -> Result<()> {
-        let git = Git::open(&self.root)?;
-        let mut changed = self.edited(&git)?;
-        changed.extend(listed(&git, &UNTRACKED)?);
-        for path in &changed {
-            self.put_back(&git, copy, path)?;
-        }
-        Ok(())
-    }
-
-    /// Put `path` in `copy` as the revision has it: its content and mode, or
-    /// removed when the revision has no such file.
-    fn put_back(&self, git: &Git, copy: &Path, path: &str) -> Result<()> {
-        let target = copy.join(path);
-        let present = std::fs::symlink_metadata(&target).ok();
-        let Some(blob) = self.tree.get(path) else {
-            // A directory here is a nested repository, not a file.
-            if present.is_some_and(|meta| !meta.is_dir()) {
-                std::fs::remove_file(&target).with_context(|| format!("cannot remove {path}"))?;
-            }
-            return Ok(());
-        };
-        // A link would let a later write land outside the copy.
-        if blob.mode == "120000" {
-            anyhow::bail!("{path} is a symbolic link at {}", self.label());
-        }
-        let bytes = git
-            .blob(&blob.id, MAX_FILE_BYTES)
-            .with_context(|| format!("cannot read {path} at {}", self.label()))?;
-        match present {
-            Some(meta) if meta.is_dir() => std::fs::remove_dir_all(&target),
-            _ => Ok(()),
-        }
-        .with_context(|| format!("cannot replace {path}"))?;
-        if let Some(parent) = target.parent() {
-            std::fs::create_dir_all(parent)
-                .with_context(|| format!("cannot create {}", parent.display()))?;
-        }
-        std::fs::write(&target, bytes).with_context(|| format!("cannot write {path}"))?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let mode = if blob.mode == "100755" { 0o755 } else { 0o644 };
-            std::fs::set_permissions(&target, std::fs::Permissions::from_mode(mode))
-                .with_context(|| format!("cannot set the mode of {path}"))?;
-        }
-        Ok(())
-    }
-
     /// The files at the revision that `patterns` match.
     fn held_at<'s>(&'s self, patterns: &[String]) -> impl Iterator<Item = (&'s String, &'s Blob)> {
         let patterns: Vec<glob::Pattern> = patterns
@@ -251,58 +135,6 @@ impl Baseline {
         digest::bytes(listed.as_bytes())
     }
 
-    /// The files `patterns` match that differ here from the revision, given
-    /// what they hold here: edited, gone, or not at the revision.
-    pub fn held_changes(&self, patterns: &[String], here: &[FileDigest]) -> Result<Vec<String>> {
-        let mut changed = BTreeSet::new();
-        let at: Vec<(&String, &Blob)> = self.held_at(patterns).collect();
-        for (path, blob) in &at {
-            let same = match here.iter().find(|file| &file.path == *path) {
-                None => false,
-                Some(file) => {
-                    self.digest(path)?.as_deref() == Some(file.digest.as_str())
-                        && (blob.mode == "100755") == file.executable
-                }
-            };
-            if !same {
-                changed.insert(path.to_string());
-            }
-        }
-        for file in here {
-            if !at.iter().any(|(path, _)| **path == file.path) {
-                changed.insert(file.path.clone());
-            }
-        }
-        Ok(changed.into_iter().collect())
-    }
-
-    /// Put each of `paths` in `copy` as the revision has it.
-    pub fn hold(&self, copy: &Path, paths: &[String]) -> Result<()> {
-        let git = Git::open(&self.root)?;
-        for path in paths {
-            self.put_back(&git, copy, path)?;
-        }
-        Ok(())
-    }
-
-    /// Tracked files under the flow root that differ here from the revision,
-    /// relative to it, edited, added or deleted.
-    fn edited(&self, git: &Git) -> Result<BTreeSet<String>> {
-        Ok(listed(
-            git,
-            &[
-                "diff",
-                "--name-only",
-                "-z",
-                "--no-renames",
-                "--relative",
-                &self.commit,
-            ],
-        )?
-        .into_iter()
-        .collect())
-    }
-
     /// How the run names the baseline in its limitations.
     pub fn label(&self) -> String {
         format!(
@@ -322,192 +154,6 @@ impl Baseline {
             .filter(|step| !step.claims.is_empty() && !present(&step.id))
             .map(|step| step.id.clone())
             .collect()
-    }
-
-    /// Why `step`'s proof differs from the revision, given the proof inputs
-    /// it reads now; `None` when it matches, or when there is nothing to
-    /// prove here or there.
-    pub fn drift(&self, step: &Step, verify_inputs: &[FileDigest]) -> Result<Option<Drift>> {
-        let patterns = step.proof_inputs();
-        self.compare(&Proof {
-            step_id: &step.id,
-            claims: step.claims.iter().map(String::as_str).collect(),
-            verify: step.verify.as_deref(),
-            patterns: Some(&patterns),
-            files: verify_inputs,
-            fails_before: Some(step.fails_before),
-            checked_at: None,
-            held: Some(&step.held),
-            held_base: None,
-            mutants: Some(step.mutants.as_ref()),
-            mutated_by: None,
-            verified: false,
-        })
-    }
-
-    /// Why the proof a receipt recorded differs from the revision. A receipt
-    /// does not record its `verify_inputs` patterns, so only the files they
-    /// matched are compared.
-    pub fn drift_of(&self, identity: &ReceiptIdentity) -> Result<Option<Drift>> {
-        self.compare(&Proof {
-            step_id: &identity.step_id,
-            claims: identity
-                .claims
-                .iter()
-                .map(|claim| claim.text.as_str())
-                .collect(),
-            verify: identity
-                .claims
-                .iter()
-                .find_map(|claim| claim.verify_command.as_deref()),
-            patterns: None,
-            files: &identity.verify_inputs,
-            fails_before: None,
-            checked_at: identity
-                .claims
-                .iter()
-                .find_map(|claim| claim.before.as_ref())
-                .map(|before| before.commit.as_str()),
-            held: None,
-            held_base: identity
-                .claims
-                .iter()
-                .find_map(|claim| claim.held.as_ref())
-                .map(|held| held.base.as_str()),
-            mutants: None,
-            mutated_by: identity
-                .claims
-                .iter()
-                .find_map(|claim| claim.mutants.as_ref())
-                .map(|mutated| mutated.command.as_str()),
-            verified: identity
-                .claims
-                .iter()
-                .any(|claim| claim.status == ClaimStatus::Verified),
-        })
-    }
-
-    fn compare(&self, proof: &Proof) -> Result<Option<Drift>> {
-        let old = self.flow.as_ref().and_then(|old| old.step(proof.step_id));
-        let old_claims: Vec<&str> = old
-            .map(|old| old.claims.iter().map(String::as_str).collect())
-            .unwrap_or_default();
-        if proof.claims.is_empty() && old_claims.is_empty() {
-            return Ok(None);
-        }
-        let mut reasons = Vec::new();
-        match old {
-            None if self.flow.is_none() => {
-                reasons.push("the flow file is not there".to_string());
-            }
-            None => reasons.push(format!("step `{}` is not there", proof.step_id)),
-            Some(old) => {
-                if old_claims != proof.claims {
-                    reasons.push("the step's claims differ".into());
-                }
-                if old.verify.as_deref() != proof.verify {
-                    reasons.push("its verify command differs".into());
-                }
-                if proof
-                    .patterns
-                    .is_some_and(|patterns| patterns != old.proof_inputs().as_slice())
-                {
-                    reasons.push("its verify_inputs differ".into());
-                }
-                match proof.fails_before {
-                    Some(declared) if declared != old.fails_before => {
-                        reasons.push("its fails_before differs".into());
-                    }
-                    Some(_) => {}
-                    // A receipt held to the revision's fails_before: what
-                    // it verified, it must have seen fail at the revision.
-                    None if old.fails_before
-                        && proof.verified
-                        && proof.checked_at != Some(self.commit.as_str()) =>
-                    {
-                        reasons.push(match proof.checked_at {
-                            None => "its proof was not run before the change".to_string(),
-                            Some(commit) => format!(
-                                "its proof was run before the change at {}, not at this revision",
-                                &commit[..commit.len().min(12)]
-                            ),
-                        });
-                    }
-                    None => {}
-                }
-                match proof.held {
-                    Some(declared) if declared != old.held.as_slice() => {
-                        reasons.push("its held files differ".into());
-                    }
-                    Some(_) => {}
-                    // A receipt held to the revision's files: what it
-                    // verified, it must have proven with them as they are.
-                    None if !old.held.is_empty()
-                        && proof.verified
-                        && proof.held_base != Some(self.held_base(&old.held).as_str()) =>
-                    {
-                        reasons.push(match proof.held_base {
-                            None => {
-                                "its proof was not held to the files at this revision".to_string()
-                            }
-                            Some(_) => "its proof was held to other files than this revision has"
-                                .to_string(),
-                        });
-                    }
-                    None => {}
-                }
-                match (proof.mutants, &old.mutants) {
-                    (Some(declared), _) if declared != old.mutants.as_ref() => {
-                        reasons.push("its mutants differ".into());
-                    }
-                    (Some(_), _) => {}
-                    // A receipt tested against the revision's mutants: what
-                    // it verified, the revision's command must have tested.
-                    (None, Some(mutants)) if proof.verified => match proof.mutated_by {
-                        None => reasons.push("its proof was not tested against mutants".into()),
-                        Some(command) if command != mutants.run => reasons
-                            .push("its proof was tested against mutants by another command".into()),
-                        Some(_) => {}
-                    },
-                    (None, _) => {}
-                }
-            }
-        }
-        for file in proof.files {
-            match self.digest(&file.path)? {
-                None => reasons.push(format!("{} is not there", file.path)),
-                Some(digest) if digest != file.digest => {
-                    reasons.push(format!("{} differs", file.path))
-                }
-                Some(_) => {}
-            }
-        }
-        // What the revision says the proof reads, and is not read here.
-        let read: BTreeSet<&str> = proof.files.iter().map(|file| file.path.as_str()).collect();
-        let patterns: Vec<glob::Pattern> = old
-            .iter()
-            .flat_map(|old| old.proof_inputs())
-            .filter_map(|pattern| glob::Pattern::new(&pattern).ok())
-            .collect();
-        for path in self.tree.keys() {
-            if !read.contains(path.as_str())
-                && patterns
-                    .iter()
-                    .any(|pattern| pattern.matches_with(path, keying::match_options()))
-            {
-                reasons.push(format!("{path} is there but missing here"));
-            }
-        }
-        if reasons.is_empty() {
-            return Ok(None);
-        }
-        let mut claims: Vec<String> = proof.claims.iter().map(|claim| claim.to_string()).collect();
-        for claim in old_claims {
-            if !proof.claims.contains(&claim) {
-                claims.push(claim.to_string());
-            }
-        }
-        Ok(Some(Drift { reasons, claims }))
     }
 
     /// The digest of `path` at the revision; `None` when it is not there.

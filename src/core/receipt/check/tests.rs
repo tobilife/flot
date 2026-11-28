@@ -9,6 +9,7 @@ use crate::core::metrics::Spend;
 
 mod attempts;
 mod candidates;
+mod dependencies;
 
 /// A one-step run whose manifest follows exactly from its receipt.
 fn coherent(receipt: &Receipt) -> RunManifest {

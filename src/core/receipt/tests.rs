@@ -95,6 +95,28 @@ fn tampering_with_the_hashed_body_is_detectable() {
     assert!(!receipt.is_authentic());
 }
 
+/// A stdout preview of `inline`, marked cut or not, of an 11-byte stream.
+fn previewing(inline: &str, truncated: bool) -> Observed {
+    Observed {
+        stdout_inline: inline.into(),
+        stdout_truncated: truncated,
+        stdout_bytes: 11,
+        ..Observed::default()
+    }
+}
+
+#[test]
+fn a_preview_marked_cut_must_leave_out_at_least_one_byte() {
+    let data = b"hello world";
+    assert!(previewing("hello world", false).describes(data, b""));
+    // One byte short of the stream, from its beginning or around the marker.
+    assert!(previewing("hello worl", true).describes(data, b""));
+    assert!(previewing(&format!("hello{OMITTED}world"), true).describes(data, b""));
+    // The whole stream, said to be cut, claims output that was never left out.
+    assert!(!previewing("hello world", true).describes(data, b""));
+    assert!(!previewing(&format!("hello{OMITTED} world"), true).describes(data, b""));
+}
+
 #[test]
 fn editing_only_observation_keeps_the_receipt_authentic() {
     let mut receipt = Receipt::seal(identity("a", "hello"), Observed::default());

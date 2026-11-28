@@ -1,6 +1,8 @@
 //! Tests of key handovers: both keys sign it, and over these two keys.
 
-use super::super::{check_handover, hand_over, public_key_of, sign, AttestError};
+use ed25519_dalek::Signature;
+
+use super::super::{check_handover, hand_over, parse_key, public_key_of, sign, AttestError};
 use super::{manifest, OTHER, SECRET};
 
 #[test]
@@ -10,6 +12,31 @@ fn a_handover_names_both_keys_and_checks_out() {
         check_handover(&handover),
         Ok((public_key_of(&SECRET), public_key_of(&OTHER)))
     );
+}
+
+/// The exact bytes both keys sign: the handover kind, the old key and the
+/// new key, one per line, so a signature names the pair it hands over.
+#[test]
+fn both_keys_sign_the_kind_and_the_two_keys_one_per_line() {
+    let handover = hand_over(&SECRET, &OTHER);
+    let statement = format!(
+        "flot-key-handover-v1\n{}\n{}",
+        public_key_of(&SECRET),
+        public_key_of(&OTHER)
+    );
+    for (key, signature) in [
+        (&handover.from, &handover.from_signature),
+        (&handover.to, &handover.to_signature),
+    ] {
+        let bytes: [u8; 64] = hex::decode(signature).unwrap().try_into().unwrap();
+        assert!(
+            parse_key(key)
+                .unwrap()
+                .verify_strict(statement.as_bytes(), &Signature::from_bytes(&bytes))
+                .is_ok(),
+            "{key} did not sign {statement:?}"
+        );
+    }
 }
 
 #[test]
@@ -28,6 +55,11 @@ fn a_handover_needs_both_signatures_over_these_two_keys() {
     let mut unvouched = hand_over(&SECRET, &OTHER);
     unvouched.from_signature = hand_over(&third, &OTHER).from_signature;
     assert_eq!(check_handover(&unvouched), Err(AttestError::BadSignature));
+    // Both keys signed, each over another handover: the old key's word for
+    // one successor is not its word for another.
+    let mut transferred = hand_over(&SECRET, &third);
+    transferred.from_signature = hand_over(&SECRET, &OTHER).from_signature;
+    assert_eq!(check_handover(&transferred), Err(AttestError::BadSignature));
     // A run attestation's signature is not a handover signature.
     let mut confused = hand_over(&SECRET, &OTHER);
     confused.from_signature = sign(&SECRET, &manifest("sha256:root")).signature;

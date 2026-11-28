@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+- `flot verify` says `only the proofs differ` (`only_proofs_differ` in
+  `--json`) when the change to the proofs is all that keeps a run from
+  passing: no step failed, and every claim left unverified is one of a step
+  whose proof differs from the revision. A pull request that changes a
+  proof still fails the action's job, which now names this case in its
+  annotation and its report's headline, `flot: only the proofs differ from
+  …`, so it reads apart from work that fails; the action also outputs
+  `only-proofs-differ`. A claim left unverified because its proof differed
+  records the commit and how, so `flot verify` names that step's change
+  even where the receipt does not keep it, such as `held` files added to a
+  step.
+
 ## 0.2.12
 
 A proof can be held to the mutants a mutation tester makes of the work,

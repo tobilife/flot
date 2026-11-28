@@ -267,7 +267,10 @@ budgets, concurrency, outputs, guarded proofs, scope and sandbox.
   a Bash or PowerShell command or through another tool, and to what decides
   whether they are checked: CI workflows, git hooks, Claude Code's settings.
   `flot verify` also names the files that changed since that revision but
-  that no step read, the changes no claim speaks for. A step with
+  that no step read, the changes no claim speaks for, and says when the
+  change to the proofs is all that keeps a run from passing, the change a
+  person reviews, which the GitHub action's failed job names on the pull
+  request. A step with
   `fails_before = true` verifies only if its proof also fails with every
   change since the revision undone, so a proof that passed anyway does not
   count for the change. A step with `held = ["tests/**"]` verifies only if

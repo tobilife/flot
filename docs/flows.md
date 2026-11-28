@@ -525,12 +525,12 @@ After `tests/acceptance.py` is weakened to `assert True` in the working copy
 
 ```text
 $ flot run
-ran      implement            ok        11ms  claims 0v/1u/0r  receipt 64a4434370f2
+ran      implement            ok        12ms  claims 0v/1u/0r  receipt cad6ea1ccd45
 
-UNVERIFIED 1795655458543-1255e8d1c922  root 1255e8d1c922  39ms
+UNVERIFIED 1795825773891-80a450e242fd  root 80a450e242fd  41ms
 limitations:
-  - implement: the proof differs from origin/main (d5f8f8532d6b) (tests/acceptance.py differs); claims stay unverified and the proof was not run
-  - proofs checked against origin/main (d5f8f8532d6b)
+  - implement: the proof differs from origin/main (4030c390bc58) (tests/acceptance.py differs); claims stay unverified and the proof was not run
+  - proofs checked against origin/main (4030c390bc58)
 ```
 
 The revision is the one `--proofs-from REV` names, else `proofs_from` in the
@@ -542,13 +542,24 @@ too, and exits 2 when a proof differs:
 
 ```text
 $ flot verify --proofs-from origin/main
-run 1795655463775-08e44043ae35  receipts checked 1  root 08e44043ae35
+run 1795825767682-bf60ee347e64  receipts checked 1  root bf60ee347e64
 integrity: intact
 verdict passed
-proofs: NOT as at origin/main (d5f8f8532d6b)
+proofs: NOT as at origin/main (4030c390bc58)
   - implement: tests/acceptance.py differs
+only the proofs differ: no step failed, and every claim left unverified is one of a step whose proof changed; a person reviews that change, which no run proves
 authorship: unsigned
+limitations:
+  - proofs checked against agent (507670419748)
 ```
+
+`only the proofs differ` (`only_proofs_differ` in `--json`) says the change
+to the proofs is all that keeps the run from passing: the run is intact,
+every step of the flow ran and none failed, and each claim left unverified
+belongs to a step whose proof differs, here or in the run's own check
+against the same commit. That is the change a person reviews, which no run
+can prove. It is not said when any other claim is unverified, so a pull
+request that changes a proof reads apart from one whose work fails.
 
 Without a revision nothing holds a proof, and a run with one says so once.
 It can still compare: when a step's proof (the files it read, its `verify`

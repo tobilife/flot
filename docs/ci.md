@@ -42,7 +42,26 @@ and a pull request cannot merge on a claim that a weakened check proved.
 | `comment` | `true` | comment on the pull request |
 | `token` | `github.token` | token for the comment |
 
-Outputs: `verdict` (the recorded verdict) and `exit-code` (of `flot verify`).
+Outputs: `verdict` (the recorded verdict), `exit-code` (of `flot verify`)
+and `only-proofs-differ` (`true` when the change to the proofs is all that
+keeps the run from passing).
+
+A pull request that changes a proof, such as a step's `verify` command, its
+`held` files or a new step with claims, fails the job by design: the proofs
+are not as on the base branch, and no run can prove the change is sound. The
+failed job's annotation, which the pull request's checks show, says which
+failure it is. When nothing else keeps the run from passing, it reads (from
+a run on this repository whose `cli` step was given `held` files):
+
+```text
+flot: only the proofs differ from base (4db62ec069a1)
+No step failed, and every claim left unverified is one of a step whose proof changed. A person reviews that change, which no run proves: cli: its held files differ
+```
+
+and the report's headline is `flot: unverified, only the proofs differ from
+…`. Any other failure is annotated with the result, such as `flot: failed`,
+and the job summary has the report. The job stays red either way: merging
+the change is a person's decision, which a required check leaves to them.
 
 This repository's own CI runs its gate through the action (the `action` job in
 [ci.yml](../.github/workflows/ci.yml)), with `version: path` and a flot built

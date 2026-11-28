@@ -22,7 +22,10 @@ exited 0. Report what the receipts prove, not what you expect.
    - `passed`: every step of the flow succeeded and every claim was proven.
    - `partial`: the selected steps passed; the others did not run.
    - `unverified`: a claim has no proof, or a proof differs from
-     `proofs_from`. Say which.
+     `proofs_from`. Say which. When `flot_verify` sets `only_proofs_differ`,
+     the changed proofs are all that remain: name each step it lists under
+     `anchor.drifted` with its reasons, and leave accepting the change to
+     the user.
    - `failed`: a step failed or a claim was refuted. Say which, and why.
 4. For each step say whether it ran now or reused an earlier identical
    receipt (`cached`). One with `vouched_by` was proven on another host: name

@@ -209,3 +209,6 @@ impl Workspace {
         Ok(entries)
     }
 }
+
+#[cfg(test)]
+mod tests;

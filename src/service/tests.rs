@@ -64,3 +64,37 @@ fn init_refuses_to_overwrite_without_force() {
     workspace.init(true).unwrap();
     assert!(workspace.flow().is_ok(), "the starter flow must parse");
 }
+
+/// A remote whose default branch git would read as an option is not one a
+/// starter flow holds its proofs to: it says what to set instead.
+#[test]
+fn init_holds_proofs_only_to_a_revision_git_reads_as_one() {
+    let dir = tempfile::tempdir().unwrap();
+    let git = |args: &[&str]| {
+        let status = std::process::Command::new("git")
+            .args(["-c", "user.name=t", "-c", "user.email=t@t"])
+            .args(args)
+            .current_dir(dir.path())
+            .env("GIT_CONFIG_GLOBAL", dir.path().join("no-global-gitconfig"))
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .status()
+            .unwrap();
+        assert!(status.success(), "git {args:?}");
+    };
+    git(&["init", "-q"]);
+    git(&["commit", "-q", "--allow-empty", "-m", "base"]);
+    let workspace = Workspace::at(dir.path(), &dir.path().join("flot.toml"));
+    for (head, held) in [
+        (
+            "refs/remotes/origin/main",
+            "\nproofs_from = \"origin/main\"\n",
+        ),
+        ("refs/heads/-x", "\n# proofs_from = \"origin/main\"\n"),
+    ] {
+        git(&["symbolic-ref", "refs/remotes/origin/HEAD", head]);
+        workspace.init(true).unwrap();
+        let flow = fs::read_to_string(workspace.flow_path()).unwrap();
+        assert!(flow.contains(held), "{head}: {flow}");
+        assert!(workspace.flow().is_ok(), "{head}: {flow}");
+    }
+}

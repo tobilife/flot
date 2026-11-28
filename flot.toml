@@ -65,6 +65,7 @@ inputs = [
 ]
 claims = ["the end-to-end CLI suite passes"]
 verify = "cargo test --quiet --test cli --test guard_corpus"
+held = ["tests/**"]
 
 [[step]]
 id = "rules"

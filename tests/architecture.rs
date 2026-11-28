@@ -412,8 +412,6 @@ const LONG: &[(&str, usize)] = &[
     ("src/adapters/cli/progress.rs", 692),
     ("src/adapters/cli/render.rs", 1040),
     ("src/adapters/mcp.rs", 1308),
-    ("src/core/flow.rs", 994),
-    ("src/core/mutants.rs", 676),
     ("src/core/powershell.rs", 515),
     ("src/core/powershell/read.rs", 308),
     ("src/core/powershell/run.rs", 629),
@@ -438,7 +436,7 @@ const LONG: &[(&str, usize)] = &[
     ("src/service/keys.rs", 448),
     ("src/service/mod.rs", 1039),
     ("src/service/search.rs", 331),
-    ("tests/architecture.rs", 519),
+    ("tests/architecture.rs", 517),
     ("tests/guard_corpus.rs", 364),
 ];
 

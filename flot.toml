@@ -105,7 +105,9 @@ if [ -s "$FLOT_MUTANTS_DIR/changes.diff" ]; then
   mutants=$(cargo mutants --in-diff "$FLOT_MUTANTS_DIR/changes.diff" --exclude-re "tests::" --list) || exit 1
 fi
 if [ -n "$mutants" ]; then
-  cargo mutants --in-diff "$FLOT_MUTANTS_DIR/changes.diff" --exclude-re "tests::" -j 4 --timeout 300 -o "$FLOT_MUTANTS_DIR"
+  # Mutants build without debug info: about a seventh faster, the same
+  # outcomes (118 mutants of a split of keying: 213 s, 184 s).
+  CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0 cargo mutants --in-diff "$FLOT_MUTANTS_DIR/changes.diff" --exclude-re "tests::" -j 4 --timeout 300 -o "$FLOT_MUTANTS_DIR"
 else
   # No change cargo-mutants can mutate, such as one only to text, for
   # which it writes no report: a report of no mutants.

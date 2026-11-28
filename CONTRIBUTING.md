@@ -36,6 +36,10 @@ proves each of those checks and records receipts in `.flot/`.
 - **Layers point down.** `core` → `store` → `engine` → `service` → `adapters`.
   `core` performs no IO, adapters never import each other, and both adapters
   call the one `Workspace` contract. `tests/architecture.rs` enforces this.
+- **No source file is longer than 300 lines,** tests included. Split a module
+  by what its parts do before it grows past that. Files that were longer when
+  the rule came are listed in `tests/architecture.rs` with the length they may
+  not pass, and leave the list once they are split.
 - **Every fix comes with a test that fails without it.** Reproduce the problem
   first, then check that removing the guard makes the new test fail.
 - **Never weaken the claim gate.** A change must not let a claim become

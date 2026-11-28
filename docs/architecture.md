@@ -15,8 +15,10 @@ main.rs   composition root: hands the MCP server to the CLI
 
 Dependencies only point down, adapters never import each other or name the
 command-line readers (`core::shell`, `core::powershell`), and `core` performs
-no IO, so identity derivation cannot depend on the machine it runs on.
-`tests/architecture.rs` enforces all four on every test run; each rule was
+no IO, so identity derivation cannot depend on the machine it runs on. No
+source file, tests included, is longer than 300 lines, except those listed
+with the length they may not pass until they are split.
+`tests/architecture.rs` enforces all five on every test run; each rule was
 checked by injecting a violation and watching it fail. An adapter is the
 file or directory right below `adapters/`, so `adapters/cli/args.rs` is part
 of `cli`; the test runs its rules on a scratch tree to show it tells them

@@ -71,10 +71,10 @@ held = ["tests/**"]
 id = "rules"
 run = "cargo test --no-run --test architecture --test readme"
 needs = ["toolchain", "build"]
-# The module rules read src/; the release checks read the files that name the
+# The module rules read src/ and tests/; the release checks read the files that name the
 # release or the toolchain, and this flow.
 inputs = [
-  "src/**/*.rs", "Cargo.toml", "tests/architecture.rs", "tests/readme.rs",
+  "src/**/*.rs", "Cargo.toml", "tests/**/*.rs",
   "flot.toml", "README.md", "docs/readme/*.md", "docs/ci.md", "action.yml",
   "plugins/claude-code/.claude-plugin/plugin.json",
   ".claude-plugin/marketplace.json", "rust-toolchain.toml",

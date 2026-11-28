@@ -8,6 +8,8 @@
 //! adapters  cli, mcp                                      -> core, service
 //! ```
 //!
+//! No source file, test files included, is longer than 300 lines.
+//!
 //! Dependencies only point down. Adapters never import each other; the binary
 //! (`src/main.rs`) is the composition root that chooses between them.
 //! Adapters never read a command line: they hand the guard a call, and the
@@ -394,6 +396,145 @@ fn the_guard_itself_tells_adapters_apart_by_their_directory() {
                 "{} (adapters) depends on adapters",
                 shown("adapters/cli/render.rs")
             ),
+        ]
+    );
+}
+
+/// The most lines a source file may have.
+const MOST_LINES: usize = 300;
+
+/// Files longer than [`MOST_LINES`] from before the limit, each with the
+/// length it may not pass while it is split. A file leaves the list once it
+/// is short enough.
+const LONG: &[(&str, usize)] = &[
+    ("src/adapters/cli.rs", 502),
+    ("src/adapters/cli/hook.rs", 323),
+    ("src/adapters/cli/progress.rs", 692),
+    ("src/adapters/cli/render.rs", 1040),
+    ("src/adapters/mcp.rs", 1308),
+    ("src/core/attest.rs", 881),
+    ("src/core/compare.rs", 521),
+    ("src/core/flow.rs", 994),
+    ("src/core/mutants.rs", 676),
+    ("src/core/powershell.rs", 515),
+    ("src/core/powershell/read.rs", 308),
+    ("src/core/powershell/run.rs", 629),
+    ("src/core/receipt.rs", 1165),
+    ("src/core/receipt/check.rs", 701),
+    ("src/core/secrets.rs", 452),
+    ("src/core/shell.rs", 1036),
+    ("src/core/shell/lex.rs", 723),
+    ("src/core/shell/read.rs", 355),
+    ("src/core/shell/run.rs", 629),
+    ("src/core/shell/tables.rs", 323),
+    ("src/core/shell/writers.rs", 631),
+    ("src/engine/baseline.rs", 531),
+    ("src/engine/claims.rs", 987),
+    ("src/engine/exec.rs", 910),
+    ("src/engine/exec/escape/macos.rs", 490),
+    ("src/engine/keying.rs", 1467),
+    ("src/engine/progress.rs", 346),
+    ("src/engine/runner.rs", 1076),
+    ("src/engine/runner/execute.rs", 1273),
+    ("src/engine/runner/manifest.rs", 527),
+    ("src/engine/runner/reuse.rs", 382),
+    ("src/engine/sandbox.rs", 388),
+    ("src/service/audit.rs", 442),
+    ("src/service/bundle.rs", 1393),
+    ("src/service/doctor.rs", 302),
+    ("src/service/guard/git.rs", 623),
+    ("src/service/guard/judge.rs", 701),
+    ("src/service/guard/rules.rs", 751),
+    ("src/service/keys.rs", 448),
+    ("src/service/mod.rs", 1039),
+    ("src/service/search.rs", 331),
+    ("src/store.rs", 1402),
+    ("tests/architecture.rs", 540),
+    ("tests/cli.rs", 7443),
+    ("tests/guard_corpus.rs", 364),
+];
+
+/// The Rust files under `dir`, relative to the crate root with `/` between
+/// their parts, and their lengths in lines.
+fn lengths(dir: &str, found: &mut Vec<(String, usize)>) {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let mut pending = vec![root.join(dir)];
+    while let Some(dir) = pending.pop() {
+        for entry in std::fs::read_dir(&dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                pending.push(path);
+            } else if path.extension().and_then(|ext| ext.to_str()) == Some("rs") {
+                let relative = path.strip_prefix(root).unwrap();
+                let name = relative
+                    .iter()
+                    .map(|part| part.to_string_lossy())
+                    .collect::<Vec<_>>()
+                    .join("/");
+                let text = std::fs::read_to_string(&path).unwrap();
+                found.push((name, text.lines().count()));
+            }
+        }
+    }
+}
+
+/// Every file longer than it may be, and every entry of [`LONG`] that no
+/// longer needs to be there.
+fn length_violations(found: &[(String, usize)], long: &[(&str, usize)]) -> Vec<String> {
+    let mut violations = Vec::new();
+    for (name, lines) in found {
+        match long.iter().find(|(path, _)| path == name) {
+            None if *lines > MOST_LINES => violations.push(format!(
+                "{name} has {lines} lines, more than {MOST_LINES}; split it"
+            )),
+            Some((_, most)) if lines > most => violations.push(format!(
+                "{name} has {lines} lines, more than the {most} it had; split it instead"
+            )),
+            Some((_, most)) if *lines < *most => violations.push(format!(
+                "{name} has {lines} lines; lower its entry in LONG from {most}, or remove it at {MOST_LINES} or fewer"
+            )),
+            _ => {}
+        }
+    }
+    for (path, _) in long {
+        if !found.iter().any(|(name, _)| name == path) {
+            violations.push(format!("{path} is in LONG but not there"));
+        }
+    }
+    violations
+}
+
+#[test]
+fn no_source_file_grows_past_300_lines() {
+    let mut found = Vec::new();
+    lengths("src", &mut found);
+    lengths("tests", &mut found);
+    let violations = length_violations(&found, LONG);
+    assert!(violations.is_empty(), "{violations:#?}");
+}
+
+#[test]
+fn the_length_rule_itself_names_each_way_to_break_it() {
+    let found = [
+        ("src/short.rs".to_string(), 300),
+        ("src/new.rs".to_string(), 301),
+        ("src/old.rs".to_string(), 401),
+        ("src/smaller.rs".to_string(), 350),
+        ("src/same.rs".to_string(), 500),
+    ];
+    let long = [
+        ("src/old.rs", 400),
+        ("src/smaller.rs", 360),
+        ("src/same.rs", 500),
+        ("src/gone.rs", 900),
+    ];
+    assert_eq!(
+        length_violations(&found, &long),
+        [
+            "src/new.rs has 301 lines, more than 300; split it",
+            "src/old.rs has 401 lines, more than the 400 it had; split it instead",
+            "src/smaller.rs has 350 lines; lower its entry in LONG from 360, or remove it at 300 or fewer",
+            "src/gone.rs is in LONG but not there",
         ]
     );
 }

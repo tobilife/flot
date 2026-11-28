@@ -99,11 +99,16 @@ verify = "cargo mutants --version"
 
 [step.mutants]
 run = '''
-git diff "$FLOT_PROOFS_FROM" -- src > "$FLOT_MUTANTS_DIR/changes.diff"
+git diff "$FLOT_PROOFS_FROM" -- src > "$FLOT_MUTANTS_DIR/changes.diff" || exit 1
+mutants=""
 if [ -s "$FLOT_MUTANTS_DIR/changes.diff" ]; then
+  mutants=$(cargo mutants --in-diff "$FLOT_MUTANTS_DIR/changes.diff" --exclude-re "tests::" --list) || exit 1
+fi
+if [ -n "$mutants" ]; then
   cargo mutants --in-diff "$FLOT_MUTANTS_DIR/changes.diff" --exclude-re "tests::" -j 4 --timeout 300 -o "$FLOT_MUTANTS_DIR"
 else
-  # No code changed: a report of no mutants.
+  # No change cargo-mutants can mutate, such as one only to text, for
+  # which it writes no report: a report of no mutants.
   mkdir "$FLOT_MUTANTS_DIR/mutants.out"
   echo '{"schemaVersion": "1", "thresholds": {"high": 80, "low": 60}, "files": {}}' > "$FLOT_MUTANTS_DIR/mutants.out/outcomes.json"
 fi

@@ -407,11 +407,6 @@ const MOST_LINES: usize = 300;
 /// length it may not pass while it is split. Lower an entry as its file
 /// shrinks, and remove it once the file is short enough.
 const LONG: &[(&str, usize)] = &[
-    ("src/adapters/cli.rs", 502),
-    ("src/adapters/cli/hook.rs", 323),
-    ("src/adapters/cli/progress.rs", 692),
-    ("src/adapters/cli/render.rs", 1040),
-    ("src/adapters/mcp.rs", 1308),
     ("src/core/powershell.rs", 515),
     ("src/core/powershell/read.rs", 308),
     ("src/core/powershell/run.rs", 629),
@@ -435,7 +430,7 @@ const LONG: &[(&str, usize)] = &[
     ("src/service/keys.rs", 448),
     ("src/service/mod.rs", 1039),
     ("src/service/search.rs", 331),
-    ("tests/architecture.rs", 516),
+    ("tests/architecture.rs", 511),
     ("tests/guard_corpus.rs", 364),
 ];
 

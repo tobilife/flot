@@ -3,7 +3,11 @@
 
 use std::path::PathBuf;
 
-use clap::{Parser, Subcommand, ValueEnum};
+use clap::{Parser, Subcommand};
+
+mod actions;
+
+pub(super) use actions::{KeyAction, Progress, TrustAction};
 
 #[derive(Parser, Debug)]
 #[command(
@@ -107,6 +111,15 @@ pub(super) enum Command {
     Show {
         #[arg(default_value = "latest")]
         run: String,
+    },
+    /// Say why a recorded run did not pass: for each step that did not
+    /// hold, what kept it from holding and the command to read next.
+    /// Proofs are held to the flow's `proofs_from`, as `verify` holds them.
+    Explain {
+        #[arg(default_value = "latest")]
+        run: String,
+        /// Only this step, whether it held or not.
+        step: Option<String>,
     },
     /// Re-authenticate a recorded run against the store.
     Verify {
@@ -254,46 +267,4 @@ pub(super) enum Command {
         #[arg(long, default_value_t = 50)]
         runs: usize,
     },
-}
-
-/// How `flot run` shows its steps as they run.
-#[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum Progress {
-    Auto,
-    Live,
-    Plain,
-    Off,
-}
-
-#[derive(Subcommand, Debug)]
-pub(super) enum KeyAction {
-    /// Create the signing key if there is none, and print its public key.
-    Init,
-    /// Print the public key to share with people who import your bundles.
-    Show,
-    /// Replace the signing key, keeping the old secret beside it, and write a
-    /// handover both keys sign for everyone who trusts the old one.
-    Rotate {
-        /// Where to write the handover [default: flot-handover-<key>.json].
-        #[arg(short, long)]
-        out: Option<PathBuf>,
-    },
-}
-
-#[derive(Subcommand, Debug)]
-pub(super) enum TrustAction {
-    /// Believe a signer: `flot trust add alice ed25519:...`.
-    Add { name: String, key: String },
-    /// Stop believing a signer, by name or key.
-    Remove { name_or_key: String },
-    /// Follow a trusted signer to their new key, given the handover their
-    /// `flot key rotate` wrote.
-    Rotate {
-        handover: PathBuf,
-        /// Stop trusting the old key as well, for a key that was exposed.
-        #[arg(long)]
-        revoke: bool,
-    },
-    /// List trusted signers.
-    List,
 }

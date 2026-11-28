@@ -134,3 +134,25 @@ run = "yes flot | head -c 4000"
     assert_eq!(object["bytes"], 4000);
     assert!(object["recovery"].as_str().unwrap().contains("4000"));
 }
+
+/// `flot_explain` gives an agent each cause with the command to read next,
+/// the same explanation `flot explain` prints, and only reads.
+#[test]
+fn a_run_that_did_not_pass_is_explained_cause_by_cause() {
+    let (_dir, server) = project(&PROVEN.replace(
+        "verify = \"grep -q flot artifact.txt\"",
+        "verify = \"exit 4\"",
+    ));
+    call(&server, "flot_run", json!({}));
+    let explained = call(&server, "flot_explain", json!({}));
+    assert_eq!(explained["isError"], false, "{explained}");
+    let report = &explained["structuredContent"];
+    assert_eq!(report["result"], "failed", "{explained}");
+    assert_eq!(report["steps"][0]["step_id"], "write");
+    assert_eq!(
+        report["steps"][0]["causes"],
+        json!([{ "kind": "refuted", "detail": "its proof exited 4", "next": "flot log write --proof" }])
+    );
+    let unknown = call(&server, "flot_explain", json!({ "step": "nope" }));
+    assert_eq!(unknown["isError"], true, "{unknown}");
+}

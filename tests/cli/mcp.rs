@@ -41,7 +41,7 @@ fn the_mcp_server_handshakes_and_runs_the_flow_over_stdio() {
         .collect();
     assert_eq!(replies.len(), 3, "the notification must not be answered");
     assert_eq!(replies[0]["result"]["serverInfo"]["name"], "flot");
-    assert_eq!(replies[1]["result"]["tools"].as_array().unwrap().len(), 10);
+    assert_eq!(replies[1]["result"]["tools"].as_array().unwrap().len(), 11);
     assert_eq!(
         replies[2]["result"]["structuredContent"]["manifest"]["verdict"],
         "passed"

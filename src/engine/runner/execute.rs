@@ -44,7 +44,7 @@ impl Runner<'_> {
         let (status, reason) = match unrun {
             Unrun::Cancelled => (StepStatus::Cancelled, "step was not run"),
             Unrun::Failed => (StepStatus::Failed, "step could not run"),
-            Unrun::Unconfined => (StepStatus::Failed, "step could not run in its sandbox"),
+            Unrun::Unconfined => (StepStatus::Failed, super::UNCONFINED),
         };
         let Keyed {
             step,

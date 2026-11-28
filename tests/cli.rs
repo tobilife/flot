@@ -24,6 +24,8 @@ mod cost;
 mod declared;
 #[path = "cli/doctor.rs"]
 mod doctor;
+#[path = "cli/explain.rs"]
+mod explain;
 #[path = "cli/fails_before.rs"]
 mod fails_before;
 #[path = "cli/flaky.rs"]

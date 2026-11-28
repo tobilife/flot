@@ -10,7 +10,7 @@ fn every_catalog_tool_declares_an_object_schema() {
     let (_dir, server) = project(PROVEN);
     let response = server.handle(&request("tools/list", json!({}))).unwrap();
     let tools = response["result"]["tools"].as_array().unwrap();
-    assert_eq!(tools.len(), 10);
+    assert_eq!(tools.len(), 11);
     for entry in tools {
         assert!(entry["name"].as_str().unwrap().starts_with("flot_"));
         assert!(!entry["description"].as_str().unwrap().is_empty());

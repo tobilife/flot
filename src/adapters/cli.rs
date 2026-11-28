@@ -126,6 +126,7 @@ fn dispatch(
             run::dispatch(cli, workspace)
         }
         Command::Show { .. }
+        | Command::Explain { .. }
         | Command::Verify { .. }
         | Command::Diff { .. }
         | Command::Receipt { .. }

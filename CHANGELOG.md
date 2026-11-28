@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased
+
+- `flot explain [RUN] [STEP]` and the MCP tool `flot_explain` say why a run
+  did not pass, at a glance: what keeps the run as a whole from passing
+  (evidence that does not authenticate, only some steps run, only the
+  proofs differ), and for each step that did not hold, each cause read from
+  its receipt (its command failed or timed out, it did not run, its sandbox
+  cannot be enforced here, its proof changed since `proofs_from`, no proof,
+  refuted, failing with its `held` files, passing before the change, or
+  mutants that survived), with the command that shows more: `flot log STEP
+  --mutants`, `flot verify`, `flot doctor`.
+- `flot doctor` says what this host can confine a step to before any step
+  asks: going without network (a user and network namespace on Linux,
+  `sandbox-exec` on macOS) and writing only where it may (Landlock ABI 3 on
+  Linux), each tried on a trivial child, with what it lacks; Windows
+  confines nothing. It still fails when a step asks for what the host
+  cannot enforce, now naming which part.
+
 ## 0.2.13
 
 A pull request that changes a proof says so: `flot verify` and the GitHub

@@ -126,6 +126,16 @@ pub(super) fn tool_catalog() -> Vec<Value> {
             &[],
         ),
         tool(
+            "flot_explain",
+            Effect::Reads,
+            "Say why a recorded run did not pass, so you know what to fix before running it again. `result` is what `flot_verify` gives; `causes` are what keeps the run as a whole from passing (`broken`, `partial`, `only_proofs_differ`); `steps` lists each step that did not hold, or only `step` when named, with its `causes`. Each cause has a `kind` (`failed`, `timed_out`, `not_run`, `sandbox`, `proof_changed`, `no_proof`, `refuted`, `held`, `fails_before`, `mutants`, `unproven`, `altered`), a `detail`, and `next`: the flot command that shows more, or what to change. `only_proofs_differ` and `proof_changed` are for a person to review: no run proves a changed proof.",
+            json!({
+                "run": { "type": "string", "description": "Run selector; defaults to latest." },
+                "step": { "type": "string", "description": "Only this step, whether it held or not." }
+            }),
+            &[],
+        ),
+        tool(
             "flot_verify",
             Effect::Reads,
             "Re-authenticate a recorded run from the store alone: receipt bodies against their ids, dependency references, every evidence object re-read against its digest, and the run root. Act on `result`, the worst that holds, which is also what `flot verify` exits with: `broken` (exit 1, and `isError`) when the evidence does not authenticate, as `findings` says, and `verdict` is then only what the altered record claims; `failed` (exit 1) when a step failed or a claim was refuted; `unverified` (exit 2) when a claim has no proof or the proofs differ from the revision in `anchor`; `partial` (exit 2) when every selected step passed but the run left steps of the flow out, as `partial` gives `selected` of `of`; `passed` (exit 0) only otherwise. `authorship` says who vouched for the run, judged against this host's trust list now: `unsigned`; `untrusted` (validly signed by no key this host trusts); `this_host` (signed by this host's own key, which is not on its trust list: a label, not trust: anything running here as this user, an agent included, can sign with it); `trusted` (validly signed by a key on the trust list, named in `signers`). `vouched` lists the steps the run reused from imported runs, each with its signers marked `confirmed` (this store holds a run the key signed that kept the same receipt) and `trusted_as`; a signer not confirmed is a name the run gives, not a signature.",

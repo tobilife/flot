@@ -1,5 +1,5 @@
-//! The commands that read recorded runs: show, verify, diff, receipt, cat,
-//! log, flaky, search and runs.
+//! The commands that read recorded runs: show, explain, verify, diff,
+//! receipt, cat, log, flaky, search and runs.
 
 use std::process::ExitCode;
 
@@ -10,8 +10,8 @@ use crate::service::{FaultKind, Workspace};
 
 use super::args::{Cli, Command};
 use super::render::{
-    emit, markdown_report, print_json, render_audit, render_detail, render_diff, render_flaky,
-    render_limitations, render_runs, render_search,
+    emit, markdown_report, print_json, render_audit, render_detail, render_diff,
+    render_explanation, render_flaky, render_limitations, render_runs, render_search,
 };
 use super::{exit_for, exit_for_fault};
 
@@ -21,6 +21,11 @@ pub(super) fn dispatch(cli: &Cli, workspace: &Workspace) -> Result<ExitCode> {
             let detail = workspace.show(run)?;
             emit(cli.json, &detail, render_detail)?;
             Ok(exit_for(Outcome::of_run(&detail.manifest)))
+        }
+        Command::Explain { run, step } => {
+            let explanation = workspace.explain(run, step.as_deref())?;
+            emit(cli.json, &explanation, render_explanation)?;
+            Ok(exit_for(explanation.result))
         }
         Command::Verify {
             run,

@@ -94,6 +94,9 @@ impl Server {
                 value
             }
             "flot_show" => serde_json::to_value(workspace.show(&run_selector())?)?,
+            "flot_explain" => serde_json::to_value(
+                workspace.explain(&run_selector(), text("step").as_deref())?,
+            )?,
             "flot_verify" => {
                 let audit = workspace.verify(&run_selector(), None)?;
                 is_error = audit.result() == Outcome::Broken;

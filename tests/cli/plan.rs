@@ -50,6 +50,64 @@ run = "touch unrelated-ran.txt"
 }
 
 #[test]
+fn plan_lists_each_step_with_its_proof_and_what_it_produces() {
+    let project = Project::new(
+        r#"
+[flow]
+name = "listed"
+
+[[step]]
+id = "gen"
+run = "echo data > gen.txt"
+inputs = ["seed.txt"]
+outputs = ["gen.txt"]
+claims = ["gen.txt holds data"]
+verify = "grep -q data gen.txt"
+
+[[step]]
+id = "unclaimed"
+run = "true"
+inputs = ["seed.txt"]
+
+[[step]]
+id = "unproven"
+run = "true"
+inputs = ["seed.txt"]
+claims = ["it worked"]
+"#,
+    );
+    project.write("seed.txt", "seed");
+    let plan = project.flot(&["plan"]);
+    let steps: Vec<&str> = plan.ok().stdout.lines().skip(1).collect();
+    assert_eq!(
+        steps,
+        [
+            "  run   gen                  inputs 1   claims 1   verify `grep -q data gen.txt`",
+            "        > produces gen.txt",
+            "  run   unclaimed            inputs 1   claims 0   no claims",
+            "        ! step declares no claims; its success proves nothing",
+            "  run   unproven             inputs 1   claims 1   NO PROOF",
+            "        ! step declares claims without a verify command",
+        ]
+    );
+}
+
+#[test]
+fn plan_only_plans_the_requested_step_and_its_dependencies() {
+    let project = Project::new(
+        "[flow]\nname = \"subset\"\n\n[[step]]\nid = \"first\"\nrun = \"true\"\n\n[[step]]\nid = \"second\"\nrun = \"true\"\nneeds = [\"first\"]\n\n[[step]]\nid = \"unrelated\"\nrun = \"true\"\n",
+    );
+    let plan = project.flot(&["plan", "--json", "--only", "second"]);
+    let planned: Vec<String> = plan.ok().json()["steps"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|step| step["step_id"].as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(planned, ["first", "second"]);
+}
+
+#[test]
 fn plan_sees_the_files_reuse_will_restore() {
     let project = Project::new(
         "[flow]\nname = \"p\"\n\n[[step]]\nid = \"gen\"\nrun = \"echo data > gen.txt\"\noutputs = [\"gen.txt\"]\n\n[[step]]\nid = \"use\"\nneeds = [\"gen\"]\nrun = \"cat gen.txt\"\ninputs = [\"gen.txt\"]\n",

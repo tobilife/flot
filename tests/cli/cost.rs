@@ -1,6 +1,6 @@
 //! Spend reported by steps and the ceiling it is held to.
 
-use crate::support::{Project, PROVEN};
+use crate::support::{step_flow, Project, PROVEN};
 
 fn billed(id: &str, dollars: &str) -> String {
     format!(
@@ -32,6 +32,32 @@ fn steps_report_spend_through_flot_metrics() {
         .flot(&["run", "--force"])
         .ok()
         .has("spent $0.750000");
+}
+
+#[test]
+fn the_spend_line_names_only_the_spend_a_run_has() {
+    let project = Project::new(&billed_flow("billed", &[("a", "0.25"), ("b", "0.5")]));
+    let ran = project.flot(&["run"]);
+    assert!(
+        ran.ok()
+            .stdout
+            .contains("\nspent $0.750000 (in 200 / out 20 tokens, 2 reporting step(s))\n"),
+        "{}",
+        ran.stdout
+    );
+    let reused = project.flot(&["run"]);
+    assert!(
+        reused.ok().stdout.contains(
+            "\nspent $0.000000 (in 0 / out 0 tokens, 0 reporting step(s))  reused $0.750000 of earlier spend\n"
+        ),
+        "{}",
+        reused.stdout
+    );
+    // Nothing reported and no ceiling: there is no spend to speak of.
+    Project::new(&step_flow("run = \"true\""))
+        .flot(&["run"])
+        .ok()
+        .lacks("spent");
 }
 
 #[test]

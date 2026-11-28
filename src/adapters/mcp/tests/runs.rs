@@ -1,5 +1,6 @@
-//! Running and checking a flow over MCP: the verdict and result the CLI
-//! would give, the flow's cost ceiling, and tool errors.
+//! Planning, running and checking a flow over MCP: the steps a plan names,
+//! the verdict and result the CLI would give, the flow's cost ceiling, and
+//! tool errors.
 
 use serde_json::json;
 
@@ -198,4 +199,33 @@ fn diff_over_mcp_matches_the_cli_contract() {
     )["structuredContent"]
         .clone();
     assert_eq!(diff["identical"], true);
+}
+
+#[test]
+fn plan_names_only_the_steps_asked_for_and_reuses_nothing_when_forced() {
+    let (_dir, server) = project(&format!(
+        "{PROVEN}\n[[step]]\nid = \"other\"\nrun = \"true\"\n"
+    ));
+    call(&server, "flot_run", json!({}));
+    let planned = |arguments| {
+        let plan = call(&server, "flot_plan", arguments);
+        assert_eq!(plan["isError"], false, "{plan}");
+        let steps = plan["structuredContent"]["steps"].as_array().unwrap();
+        steps
+            .iter()
+            .map(|step| json!([step["step_id"], step["cached"]]))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        planned(json!({})),
+        [json!(["other", true]), json!(["write", true])]
+    );
+    assert_eq!(
+        planned(json!({ "only": "other" })),
+        [json!(["other", true])]
+    );
+    assert_eq!(
+        planned(json!({ "force": true })),
+        [json!(["other", false]), json!(["write", false])]
+    );
 }

@@ -1,6 +1,14 @@
 //! What `verify` checks of a recorded run and how it says so.
 
-use crate::support::{anchored_project, commit, receipt_file, Project, PROVEN, TWO_STEPS};
+use crate::support::{
+    anchored_project, commit, git_in, receipt_file, Project, ANCHORED, PROVEN, TWO_STEPS,
+};
+
+/// How a run names `main` of `project`: the branch and its commit.
+fn main_label(project: &Project) -> String {
+    let commit = git_in(project.path(), &["rev-parse", "main"]);
+    format!("main ({})", &commit[..12])
+}
 
 #[test]
 fn verify_authenticates_a_recorded_run() {
@@ -190,4 +198,62 @@ fn verify_says_what_the_run_could_not_prove() {
         .has("verdict passed")
         .has("limitations:")
         .has("proofs are held to no revision");
+}
+
+/// A run of some of the flow's steps passed, and its proof then changed at
+/// the revision. Leaving steps out keeps it from passing too, so the report
+/// says the proofs differ, not that only they do, and no claim is missing.
+#[test]
+fn a_partial_run_whose_proof_changed_since_is_headed_as_differing() {
+    let project = anchored_project();
+    let dir = project.path();
+    let flow = format!("{ANCHORED}\n[[step]]\nid = \"other\"\nrun = \"true\"\n");
+    project.write("flot.toml", &flow);
+    commit(dir, "other");
+    project.flot(&["run", "--only", "work"]).partial();
+    project.write("check.sh", "grep -q 1 out.txt # stricter\n");
+    commit(dir, "stricter proof");
+    let main = main_label(&project);
+    let shown = project.flot(&["verify"]);
+    assert_eq!(shown.code, 2, "{}", shown.stdout);
+    shown
+        .has(&format!(
+            "proofs: NOT as at {main}\n  - work: check.sh differs\nauthorship"
+        ))
+        .lacks("claims there that this run does not make");
+    let main = main.replace('(', "\\(").replace(')', "\\)");
+    let report = project.flot(&["verify", "--markdown"]);
+    assert_eq!(report.code, 2, "{}", report.stdout);
+    report
+        .has(&format!(
+            "### flot: unverified, proofs differ from {main}\n"
+        ))
+        .has(&format!(
+            "- Proofs: **not as at {main}**\n  - `work`: check\\.sh differs\n- Authorship"
+        ))
+        .lacks("claims there that this run does not make");
+}
+
+/// The steps with claims at the revision that the run does not have are
+/// named, on the terminal and in the report.
+#[test]
+fn verify_names_the_claims_at_the_revision_a_run_does_not_make() {
+    let project = anchored_project();
+    project.write(
+        "flot.toml",
+        "[flow]\nname = \"anchored\"\n\n[[step]]\nid = \"other\"\nrun = \"true\"\n",
+    );
+    project.flot(&["run", "--proofs-from", "main"]);
+    let main = main_label(&project);
+    let shown = project.flot(&["verify", "--proofs-from", "main"]);
+    assert_eq!(shown.code, 2, "{}", shown.stdout);
+    shown.has(&format!(
+        "proofs: NOT as at {main}\n  - claims there that this run does not make: work\n"
+    ));
+    let main = main.replace('(', "\\(").replace(')', "\\)");
+    let report = project.flot(&["verify", "--markdown", "--proofs-from", "main"]);
+    assert_eq!(report.code, 2, "{}", report.stdout);
+    report.has(&format!(
+        "- Proofs: **not as at {main}**\n  - claims there that this run does not make: work\n"
+    ));
 }

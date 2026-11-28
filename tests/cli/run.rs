@@ -152,6 +152,17 @@ fn step_output_cannot_drive_the_terminal() {
 }
 
 #[test]
+fn a_steps_error_output_is_shown_under_its_output_marked_apart() {
+    let project = Project::new(&step_flow("run = \"echo out; echo oops >&2\""));
+    let output = project.flot(&["run"]);
+    assert!(
+        output.ok().stdout.contains("\n    | out\n    ! oops\n"),
+        "{}",
+        output.stdout
+    );
+}
+
+#[test]
 fn a_step_that_cannot_run_is_recorded_and_the_run_still_closes() {
     let project = Project::new(
         r#"

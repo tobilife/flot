@@ -46,6 +46,30 @@ fn diff_reports_identical_runs_and_real_changes() {
 }
 
 #[test]
+fn diff_says_the_flow_definition_differs_only_when_it_does() {
+    let project = Project::new(TWO_STEPS);
+    project.flot(&["run"]).ok();
+    let first = run_id(&project);
+    project.flot(&["run", "--force"]).ok();
+    let second = run_id(&project);
+    let same = project.flot(&["diff"]);
+    assert_eq!(
+        same.ok().stdout,
+        format!(
+            "left  {first}  passed\nright {second}  passed\nidentical: same root digest, step for step\n"
+        )
+    );
+    project.write(
+        "flot.toml",
+        &TWO_STEPS.replace("echo second", "echo changed"),
+    );
+    project.flot(&["run"]).ok();
+    let changed = project.flot(&["diff"]);
+    assert_eq!(changed.code, 2, "{}", changed.stdout);
+    changed.has("  passed\nflow definition differs between the two runs\n");
+}
+
+#[test]
 fn diff_names_a_partial_run_and_the_steps_it_left_out() {
     let project = Project::new(TWO_STEPS);
     assert_eq!(project.flot(&["run", "--only", "a"]).code, 2);
@@ -149,6 +173,77 @@ fn a_limitation_shared_by_several_steps_is_one_line() {
         .filter(|entry| entry.as_str().unwrap().contains("declares no inputs"))
         .count();
     assert_eq!(per_step, 2);
+}
+
+/// Two steps that both produce two files whose names end alike after a
+/// colon, so that the run's two conflicts read `<one thing>: <same text>`.
+#[cfg(unix)]
+const CLASHING: &str = r#"
+[flow]
+name = "clash"
+
+[[step]]
+id = "a"
+run = "echo a > 'x: out'; echo a > 'y: out'"
+inputs = ["flot.toml"]
+outputs = ["x: out", "y: out"]
+
+[[step]]
+id = "b"
+run = "echo b > 'x: out'; echo b > 'y: out'"
+inputs = ["flot.toml"]
+outputs = ["x: out", "y: out"]
+"#;
+
+#[cfg(unix)]
+#[test]
+fn limitations_of_the_whole_run_that_end_alike_are_not_grouped_as_a_steps() {
+    let project = Project::new(CLASHING);
+    let run = project.flot(&["run"]);
+    assert!(
+        run.ok().stdout.ends_with(
+            "\nlimitations:\n  - steps a and b both produce x: out and neither needs the other; which content survives depends on scheduling\n  - steps a and b both produce y: out and neither needs the other; which content survives depends on scheduling\n"
+        ),
+        "{}",
+        run.stdout
+    );
+}
+
+/// Note `count` refusals for the next run to record, each made just after
+/// the latest run ended.
+fn note_refusals(project: &Project, count: usize) {
+    let latest = project.flot(&["show", "--json"]).json();
+    let after =
+        latest["started_at_ms"].as_u64().unwrap() + latest["duration_ms"].as_u64().unwrap() + 1;
+    let notes: String = (1..=count)
+        .map(|n| format!("{{\"at_ms\":{after},\"tool\":\"Edit\",\"reasons\":[\"edit {n}\"]}}\n"))
+        .collect();
+    std::fs::write(project.path().join(".flot/refusals.jsonl"), notes).unwrap();
+}
+
+#[test]
+fn a_run_lists_twenty_refusals_one_by_one_and_counts_the_rest() {
+    let project = Project::new(TWO_STEPS);
+    project.flot(&["run"]).ok();
+    let listed: String = (1..=20).map(|n| format!("  - Edit: edit {n}\n")).collect();
+    note_refusals(&project, 20);
+    let twenty = project.flot(&["run"]);
+    assert!(
+        twenty.ok().stdout.ends_with(&format!(
+            "\nrefused by the guard since the previous run:\n{listed}"
+        )),
+        "{}",
+        twenty.stdout
+    );
+    note_refusals(&project, 21);
+    let more = project.flot(&["run"]);
+    assert!(
+        more.ok().stdout.ends_with(&format!(
+            "\nrefused by the guard since the previous run:\n{listed}  - and 1 more\n"
+        )),
+        "{}",
+        more.stdout
+    );
 }
 
 #[test]

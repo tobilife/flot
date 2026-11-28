@@ -214,3 +214,20 @@ fn a_batch_or_non_object_gets_an_invalid_request_instead_of_silence() {
     assert_eq!(lines[1]["error"]["code"], -32600);
     assert_eq!(lines[2]["id"], 7);
 }
+
+#[test]
+fn an_id_that_is_neither_a_string_nor_a_number_is_not_echoed() {
+    let (_dir, server) = project(PROVEN);
+    for id in [json!(true), json!({ "n": 1 }), json!([1])] {
+        let reply = server.handle(&json!({ "jsonrpc": "2.0", "id": id }));
+        assert_eq!(
+            reply,
+            Some(json!({
+                "jsonrpc": "2.0",
+                "id": null,
+                "error": { "code": -32600, "message": "a request needs a string `method`" },
+            })),
+            "{id}"
+        );
+    }
+}

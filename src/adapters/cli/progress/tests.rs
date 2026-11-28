@@ -1,13 +1,15 @@
 //! Tests of the live and plain views.
 
+use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use crate::core::receipt::{ClaimCounts, StepStatus};
 use crate::service::progress::{Event, Source};
 
 use super::super::terminal_safe;
-use super::live::{Live, ERASE_ROW};
+use super::live::{show_live, Live, ERASE_ROW};
 use super::plain::Plain;
+use super::Message;
 
 fn started(step: &str, attempt: u32, attempts: u32, candidate: Option<&str>) -> Event {
     Event::StepStarted {
@@ -193,4 +195,71 @@ fn the_plain_view_says_which_attempt_and_candidate_each_line_is() {
             "run finished 12.3s",
         ]
     );
+}
+
+/// A step that never executed took no time, and attempt 0 is no attempt:
+/// neither is told, even of a step whose other candidate may take three.
+#[test]
+fn the_plain_view_tells_no_time_or_attempt_of_a_step_that_never_executed() {
+    let mut plain = Plain::default();
+    let unrun = |candidate: &str, why: Option<&str>| Event::StepFinished {
+        step: "solve".into(),
+        attempt: 0,
+        candidate: Some(candidate.into()),
+        status: StepStatus::Cancelled,
+        duration_ms: 0,
+        claims: claims(0, 1, 0),
+        why: why.map(str::to_string),
+    };
+    let lines: Vec<String> = [
+        started("solve", 1, 3, Some("wrong")),
+        unrun(
+            "cheap",
+            Some("could not run: its workspace could not be prepared"),
+        ),
+        unrun("pricey", None),
+    ]
+    .iter()
+    .map(|event| plain.line(event))
+    .collect();
+    assert_eq!(
+        lines,
+        [
+            "start solve attempt 1/3 candidate wrong",
+            "done solve could not run: its workspace could not be prepared candidate cheap",
+            "done solve cancelled claims 0/1 candidate pricey",
+        ]
+    );
+}
+
+/// A terminal that keeps each write apart.
+struct Writes<'w>(&'w mut Vec<String>);
+
+impl std::io::Write for Writes<'_> {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.0.push(String::from_utf8(bytes.to_vec()).unwrap());
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+/// Lines that arrive faster than the view redraws are written 256 events at
+/// a time: neither one write per line, nor one for all of them.
+#[test]
+fn the_live_view_writes_what_it_takes_in_batches_of_256_events() {
+    let (sender, receiver) = mpsc::channel();
+    for number in 0..300 {
+        let line = output("build", Source::Stdout, &number.to_string());
+        sender.send(Message::Event(line)).unwrap();
+    }
+    sender.send(Message::Done).unwrap();
+    let mut writes = Vec::new();
+    show_live(&receiver, Live::new(Writes(&mut writes), false));
+    let lines = |numbers: std::ops::Range<usize>| -> String {
+        numbers.map(|n| format!("[build] {n}\n")).collect()
+    };
+    assert_eq!(writes, [lines(0..256), lines(256..300)]);
 }

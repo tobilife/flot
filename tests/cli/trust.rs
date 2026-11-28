@@ -27,6 +27,19 @@ fn key_init_is_idempotent_and_never_prints_the_secret() {
 }
 
 #[test]
+fn trusting_a_signer_and_no_longer_trusting_it_name_it_and_its_key() {
+    let project = Project::new(PROVEN);
+    let key = public_key(&project);
+    let added = project.flot(&["trust", "add", "alice", &key]);
+    assert_eq!(added.ok().stdout, format!("trusting {key} as alice\n"));
+    let removed = project.flot(&["trust", "remove", "alice"]);
+    assert_eq!(
+        removed.ok().stdout,
+        format!("no longer trusting alice ({key})\n")
+    );
+}
+
+#[test]
 fn signing_without_a_key_explains_how_to_make_one() {
     let project = Project::new(PROVEN);
     project.write("seed.txt", "one");

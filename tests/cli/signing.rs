@@ -1,6 +1,6 @@
 //! Runs signed where they run, and keys handed over to the next.
 
-use crate::support::{receipt_file, Project, TWO_STEPS};
+use crate::support::{public_key, receipt_file, Project, TWO_STEPS};
 
 #[test]
 fn a_run_signed_here_carries_its_signature_into_verify_and_bundles() {
@@ -158,6 +158,34 @@ fn readers_who_trust_a_key_follow_its_handover_to_the_next() {
         .has("no longer trusting");
     assert_eq!(authorship(&reader, &new_run), "trusted");
     assert_eq!(authorship(&reader, &old_run), "untrusted");
+}
+
+#[test]
+fn key_rotate_names_both_keys_where_the_old_one_is_kept_and_the_handover() {
+    let project = Project::new(TWO_STEPS);
+    let old = public_key(&project);
+    let handover = project.path().join("handover.json");
+    let rotated = project.flot(&["key", "rotate", "-o", handover.to_str().unwrap()]);
+    rotated.ok();
+    let new = project.flot(&["key", "show", "--json"]).json()["public_key"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let key = project.key_path();
+    let retired = format!(
+        "{}.retired-{}",
+        key.display(),
+        &old["ed25519:".len()..][..16]
+    );
+    assert!(std::path::Path::new(&retired).exists(), "{retired}");
+    assert_eq!(
+        rotated.stdout,
+        format!(
+            "rotated signing key {}\nnew  {new}\nold  {old}\n     kept as {retired}\nhandover {}\nnext: send it to everyone who trusts the old key; they run `flot trust rotate <file>`\n",
+            key.display(),
+            handover.display()
+        )
+    );
 }
 
 #[test]

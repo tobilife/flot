@@ -155,3 +155,6 @@ pub(super) fn render_authorship(authorship: Authorship, signers: &[SignerCheck])
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

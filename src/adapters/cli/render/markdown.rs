@@ -203,3 +203,6 @@ pub(in super::super) fn markdown_report(audit: &Audit, detail: &RunDetail) -> St
     }
     out
 }
+
+#[cfg(test)]
+mod tests;

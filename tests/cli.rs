@@ -38,6 +38,8 @@ mod init;
 mod keying;
 #[path = "cli/log.rs"]
 mod log;
+#[path = "cli/markdown.rs"]
+mod markdown;
 #[path = "cli/mcp.rs"]
 mod mcp;
 #[path = "cli/mutants.rs"]

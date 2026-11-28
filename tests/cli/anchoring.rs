@@ -117,6 +117,25 @@ fn verify_names_the_changes_no_step_read() {
 }
 
 #[test]
+fn plan_holds_proofs_to_the_revision_proofs_from_names() {
+    let project = Project::new(&ANCHORED.replace("proofs_from = \"main\"\n", ""));
+    project.write("check.sh", "grep -q 1 out.txt\n");
+    project.write(".gitignore", ".flot\nout.txt\n");
+    git_in(project.path(), &["init", "-q", "-b", "main"]);
+    commit(project.path(), "base");
+    let main = git_in(project.path(), &["rev-parse", "main"]);
+    project.write("check.sh", "true\n");
+    project.flot(&["plan"]).ok().lacks("the proof differs");
+    project
+        .flot(&["plan", "--proofs-from", "main"])
+        .ok()
+        .has(&format!(
+            "        ! the proof differs from main ({}) (check.sh differs); its claims would stay unverified\n",
+            &main[..12]
+        ));
+}
+
+#[test]
 fn a_proof_held_to_no_revision_says_so_and_names_what_changed_in_it() {
     let project = Project::new(&ANCHORED.replace("proofs_from = \"main\"\n", ""));
     project.write("check.sh", "grep -q 1 out.txt\n");

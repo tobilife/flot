@@ -133,3 +133,6 @@ fn exclude_of(dir: &Path) -> Option<Gitignore> {
     let _ = builder.add(git_dir.join("info").join("exclude"));
     builder.build().ok()
 }
+
+#[cfg(test)]
+mod tests;

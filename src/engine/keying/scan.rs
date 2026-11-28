@@ -167,6 +167,13 @@ pub(super) fn scan_in<E>(
     Ok(scan)
 }
 
+/// How many threads read `files` files on `cores` cores: one for every eight
+/// files, as many as there are cores up to eight, and at least one. A thread
+/// costs more than reading a few small files.
+fn threads_for(files: usize, cores: usize) -> usize {
+    cores.min(8).min(files / 8).max(1)
+}
+
 /// The digest and executable bit of each file, in order, read by up to eight
 /// threads at once. Each thread holds one file at a time.
 pub(super) fn digest_all(
@@ -174,33 +181,29 @@ pub(super) fn digest_all(
     digests: &Digests,
 ) -> Vec<std::io::Result<(String, bool)>> {
     let one = |(_, path): &(String, PathBuf)| digests.digest(path);
-    // A thread costs more than reading a few small files.
-    let threads = std::thread::available_parallelism()
-        .map_or(1, usize::from)
-        .min(8)
-        .min(files.len() / 8)
-        .max(1);
-    if threads == 1 {
-        return files.iter().map(one).collect();
-    }
+    let threads = threads_for(
+        files.len(),
+        std::thread::available_parallelism().map_or(1, usize::from),
+    );
     let next = std::sync::atomic::AtomicUsize::new(0);
+    let work = || {
+        let mut done = Vec::new();
+        loop {
+            let index = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let Some(file) = files.get(index) else {
+                return done;
+            };
+            done.push((index, one(file)));
+        }
+    };
     let mut read: Vec<Option<std::io::Result<(String, bool)>>> =
         std::iter::repeat_with(|| None).take(files.len()).collect();
+    // This thread reads too, so reading on one thread starts none.
     std::thread::scope(|scope| {
-        let workers: Vec<_> = (0..threads)
-            .map(|_| {
-                scope.spawn(|| {
-                    let mut done = Vec::new();
-                    loop {
-                        let index = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                        let Some(file) = files.get(index) else {
-                            return done;
-                        };
-                        done.push((index, one(file)));
-                    }
-                })
-            })
-            .collect();
+        let workers: Vec<_> = (1..threads).map(|_| scope.spawn(work)).collect();
+        for (index, result) in work() {
+            read[index] = Some(result);
+        }
         for worker in workers {
             for (index, result) in worker.join().expect("a digest thread does not panic") {
                 read[index] = Some(result);

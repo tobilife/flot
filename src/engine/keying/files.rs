@@ -84,3 +84,6 @@ pub fn content_of(root: &Path, relative: &str) -> Result<Option<String>> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

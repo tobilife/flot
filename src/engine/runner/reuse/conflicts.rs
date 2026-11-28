@@ -27,8 +27,10 @@ impl Runner<'_> {
         }
         let mut conflicts = Vec::new();
         for (path, steps) in producers {
-            for (position, first) in steps.iter().enumerate() {
-                for second in &steps[position + 1..] {
+            let mut rest = steps.as_slice();
+            while let Some((first, later)) = rest.split_first() {
+                rest = later;
+                for second in later {
                     let ordered = self.flow.closure(second)?.iter().any(|id| id == first)
                         || self.flow.closure(first)?.iter().any(|id| id == second);
                     if !ordered {

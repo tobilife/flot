@@ -78,3 +78,6 @@ pub(super) fn read_metrics(path: &Path) -> (Option<Metrics>, Vec<String>) {
         ),
     }
 }
+
+#[cfg(test)]
+mod tests;

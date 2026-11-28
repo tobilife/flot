@@ -124,21 +124,28 @@ impl Runner<'_> {
             .into_iter()
             .map(|note| format!("verify command: {note}"))
             .collect();
+        let exit_code = finished_exit(&verification);
         let mut combined = verification.stdout;
         combined.extend_from_slice(&verification.stderr);
         Ok((
             Proof {
-                exit_code: if verification.interrupted || verification.output_overflow {
-                    None
-                } else {
-                    verification.exit_code
-                },
+                exit_code,
                 timed_out: verification.timed_out,
                 output_digest: self.store.put_bytes(&combined)?,
             },
             metrics,
             notes,
         ))
+    }
+}
+
+/// What a proof exited with, if it ran to its end: one stopped part way,
+/// for its output or by a stop, shows nothing whatever it exited with.
+fn finished_exit(verification: &exec::Outcome) -> Option<i32> {
+    if verification.interrupted || verification.output_overflow {
+        None
+    } else {
+        verification.exit_code
     }
 }
 
@@ -162,3 +169,6 @@ impl WorkCopy<'_> {
         &self.dir
     }
 }
+
+#[cfg(test)]
+mod tests;

@@ -24,10 +24,7 @@ impl Runner<'_> {
                 std::fs::write(&path, self.store.read_bytes(&output.digest)?)?;
                 #[cfg(unix)]
                 if output.executable {
-                    use std::os::unix::fs::PermissionsExt;
-                    let mut permissions = std::fs::metadata(&path)?.permissions();
-                    permissions.set_mode(permissions.mode() | 0o111);
-                    std::fs::set_permissions(&path, permissions)?;
+                    make_executable(&path)?;
                 }
                 Ok(())
             })();
@@ -70,10 +67,7 @@ impl Runner<'_> {
                 .with_context(|| format!("cannot restore output {}", output.path))?;
             #[cfg(unix)]
             if output.executable {
-                use std::os::unix::fs::PermissionsExt;
-                let mut permissions = std::fs::metadata(&path)?.permissions();
-                permissions.set_mode(permissions.mode() | 0o111);
-                std::fs::set_permissions(&path, permissions)
+                make_executable(&path)
                     .with_context(|| format!("cannot make {} executable", output.path))?;
             }
             notes.push(format!(
@@ -83,4 +77,13 @@ impl Runner<'_> {
         }
         Ok(notes)
     }
+}
+
+/// Let whoever may read `path` run it too, as the receipt recorded it.
+#[cfg(unix)]
+fn make_executable(path: &std::path::Path) -> std::io::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    let mut permissions = std::fs::metadata(path)?.permissions();
+    permissions.set_mode(permissions.mode() | 0o111);
+    std::fs::set_permissions(path, permissions)
 }

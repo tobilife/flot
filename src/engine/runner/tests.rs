@@ -25,3 +25,29 @@ fn zero_jobs_is_refused_before_anything_runs() {
 /// shell commands, so it runs where `sh` is the shell.
 #[cfg(unix)]
 mod scenario;
+
+/// A flow in a workspace and a store of its own, for the tests below. They
+/// run shell commands too.
+#[cfg(unix)]
+mod support;
+
+/// Running a step's command: one that cannot start, a stray tolerated, and
+/// outputs the store cannot take.
+#[cfg(unix)]
+mod execution;
+
+/// What a step's candidates leave in the workspace and their receipts.
+#[cfg(unix)]
+mod candidates;
+
+/// What a run counts as spent: its proofs', and against its ceiling.
+#[cfg(unix)]
+mod spend;
+
+/// What a plan predicts: what is reused, and what each step reads.
+#[cfg(unix)]
+mod plan;
+
+/// What a run takes from the runs before it.
+#[cfg(unix)]
+mod earlier;

@@ -134,3 +134,37 @@ fn a_daemon_whose_parent_exited_at_once_is_stopped() {
         "the daemon outlived the step"
     );
 }
+
+#[test]
+fn a_command_flot_stopped_left_no_strays_of_its_own_doing() {
+    let stopped = |command: &str, timeout: u64, cap: usize| {
+        run_command(
+            command,
+            Path::new("."),
+            &env(),
+            Duration::from_secs(timeout),
+            cap,
+            &StopSignal::default(),
+        )
+        .unwrap()
+    };
+    let timed_out = stopped("sleep 30 & sleep 30", 1, CAP);
+    assert!(
+        timed_out.timed_out && !timed_out.strays_stopped,
+        "{timed_out:?}"
+    );
+    let overflowed = stopped("sleep 30 & yes", 30, 4096);
+    assert!(
+        overflowed.output_overflow && !overflowed.strays_stopped,
+        "{overflowed:?}"
+    );
+}
+
+/// A Windows job holds the step's own process while it runs.
+#[test]
+fn a_job_holds_others_when_more_run_in_it_than_the_step() {
+    assert!(!run::others_in_job(1, true));
+    assert!(run::others_in_job(2, true));
+    assert!(run::others_in_job(1, false));
+    assert!(!run::others_in_job(0, false));
+}

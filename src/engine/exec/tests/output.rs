@@ -1,6 +1,8 @@
 //! Tests of a command's output: its byte budget, the lines told as they are
 //! kept, and more than a pipe holds.
 
+use std::io::Read;
+use std::sync::atomic::AtomicBool;
 use std::sync::Mutex;
 use std::time::Instant;
 
@@ -72,4 +74,92 @@ fn large_output_does_not_deadlock() {
     let outcome = run("yes flot | head -c 300000");
     assert_eq!(outcome.stdout.len(), 300_000);
     assert!(outcome.succeeded());
+}
+
+#[test]
+fn a_stream_that_fills_its_budget_exactly_is_kept_whole() {
+    // Still running once it has printed, so a budget wrongly passed would
+    // stop it.
+    let outcome = run_command(
+        "printf abcd; sleep 1",
+        Path::new("."),
+        &env(),
+        Duration::from_secs(10),
+        4,
+        &StopSignal::default(),
+    )
+    .unwrap();
+    assert_eq!(outcome.stdout, b"abcd");
+    assert!(
+        !outcome.output_overflow && outcome.succeeded(),
+        "{outcome:?}"
+    );
+}
+
+/// What a step prints while a process flot neither started nor can stop
+/// holds its stdout open for `hold` seconds after it ends, and how long
+/// the step took. The holder opens the pipe through /proc.
+#[cfg(target_os = "linux")]
+fn held_open_by_another(hold: &str) -> (Outcome, Duration) {
+    let dir = tempfile::tempdir().unwrap();
+    let d = dir.path().display();
+    let mut holder = std::process::Command::new("sh")
+        .arg("-c")
+        .arg(format!(
+            "while [ ! -s {d}/fd ]; do sleep 0.01; done; exec 3>\"$(cat {d}/fd)\"; \
+             echo late >&3; touch {d}/held; sleep {hold}"
+        ))
+        .spawn()
+        .unwrap();
+    let started = Instant::now();
+    let outcome = run(&format!(
+        "echo /proc/$$/fd/1 > {d}/fd; while [ ! -e {d}/held ]; do sleep 0.01; done"
+    ));
+    let took = started.elapsed();
+    holder.wait().unwrap();
+    (outcome, took)
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn output_is_waited_for_a_while_and_no_longer() {
+    // Closed within the grace: the stream is whole.
+    let (outcome, took) = held_open_by_another("0.5");
+    assert_eq!(outcome.stdout, b"late\n");
+    assert!(!outcome.output_detached, "{outcome:?}");
+    assert!(took >= Duration::from_millis(500), "{took:?}");
+    // Held past it: stdout is cut off there, though stderr closed.
+    let (outcome, took) = held_open_by_another("4");
+    assert_eq!(outcome.stdout, b"late\n");
+    assert!(outcome.output_detached, "{outcome:?}");
+    assert!(took < Duration::from_millis(3800), "{took:?}");
+}
+
+/// A stream whose reads go as listed, and then end.
+struct Reads(Vec<std::io::Result<&'static [u8]>>);
+
+impl Read for Reads {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        if self.0.is_empty() {
+            return Ok(0);
+        }
+        let bytes = self.0.remove(0)?;
+        buf[..bytes.len()].copy_from_slice(bytes);
+        Ok(bytes.len())
+    }
+}
+
+#[test]
+fn an_interrupted_read_is_retried_and_a_failed_one_ends_the_stream() {
+    use std::io::{Error, ErrorKind};
+    let reads = Reads(vec![
+        Err(Error::from(ErrorKind::Interrupted)),
+        Ok(b"ab"),
+        Err(Error::from(ErrorKind::BrokenPipe)),
+        Ok(b"cd"),
+    ]);
+    let overflow = Arc::new(AtomicBool::new(false));
+    let (kept, complete) = super::super::output::drain(Some(reads), CAP, overflow, None)
+        .collect(Instant::now() + Duration::from_secs(10));
+    assert_eq!((kept.as_slice(), complete), (&b"ab"[..], true));
 }

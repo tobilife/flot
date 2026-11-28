@@ -158,7 +158,7 @@ pub fn run_confined(
     #[cfg(windows)]
     let stopped_others = {
         let leader_running = matches!(child.try_wait(), Ok(None));
-        let others = step_job.active() > u32::from(leader_running);
+        let others = others_in_job(step_job.active(), leader_running);
         step_job.stop();
         others
     };
@@ -190,6 +190,13 @@ pub fn run_confined(
         started_at_ms,
         duration_ms: millis(started.elapsed()),
     })
+}
+
+/// Whether a job holding `active` processes holds any besides the step's
+/// own, which is one of them while it runs.
+#[cfg(any(windows, test))]
+pub(super) fn others_in_job(active: u32, leader_running: bool) -> bool {
+    active > u32::from(leader_running)
 }
 
 fn signal_of(status: std::process::ExitStatus) -> Option<i32> {

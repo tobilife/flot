@@ -60,7 +60,8 @@ id = "cli"
 run = "cargo test --no-run --test cli --test guard_corpus"
 needs = ["toolchain", "build"]
 inputs = [
-  "src/**/*.rs", "Cargo.toml", "tests/cli.rs", "tests/guard_corpus.rs",
+  "src/**/*.rs", "Cargo.toml", "tests/cli.rs", "tests/cli/**/*.rs",
+  "tests/guard_corpus.rs",
   "tests/guard_corpus.toml", "plugins/claude-code/**/*",
 ]
 claims = ["the end-to-end CLI suite passes"]
